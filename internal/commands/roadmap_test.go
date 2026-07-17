@@ -98,6 +98,16 @@ func TestBuildRoadmap(t *testing.T) {
 			wantMilestones:       0, // milestone has no children
 			wantUnscheduledOther: 1, // orphan appears in unscheduled
 		},
+		{
+			name: "leaf nested under feature under epic under milestone is not lost",
+			beans: []*bean.Bean{
+				{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+				{ID: "e1", Type: "epic", Title: "Auth", Status: "todo", Parent: "m1"},
+				{ID: "f1", Type: "feature", Title: "SSO", Status: "todo", Parent: "e1"},
+				{ID: "t1", Type: "task", Title: "OIDC login", Status: "todo", Parent: "f1"},
+			},
+			wantMilestones: 1,
+		},
 	}
 
 	for _, tt := range tests {
@@ -335,4 +345,42 @@ func TestCollectLeafDescendants(t *testing.T) {
 			t.Errorf("got %v, want exactly [t1]", got)
 		}
 	})
+}
+
+func TestBuildMilestoneGroupResolvesFeatureNesting(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	now := time.Now()
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+		{ID: "e1", Type: "epic", Title: "Auth", Status: "todo", Parent: "m1"},
+		{ID: "f1", Type: "feature", Title: "SSO", Status: "todo", Parent: "e1"},
+		{ID: "t1", Type: "task", Title: "OIDC login", Status: "todo", Parent: "f1"},
+		{ID: "b1", Type: "bug", Title: "Direct epic bug", Status: "todo", Parent: "e1"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Milestones) != 1 {
+		t.Fatalf("got %d milestones, want 1", len(result.Milestones))
+	}
+	epics := result.Milestones[0].Epics
+	if len(epics) != 1 {
+		t.Fatalf("got %d epics, want 1", len(epics))
+	}
+	epic := epics[0]
+	if len(epic.Items) != 1 || epic.Items[0].ID != "b1" {
+		t.Errorf("epic.Items = %v, want [b1]", epic.Items)
+	}
+	if len(epic.Features) != 1 {
+		t.Fatalf("got %d feature groups, want 1", len(epic.Features))
+	}
+	if epic.Features[0].Feature.ID != "f1" {
+		t.Errorf("feature group is for %s, want f1", epic.Features[0].Feature.ID)
+	}
+	if len(epic.Features[0].Items) != 1 || epic.Features[0].Items[0].ID != "t1" {
+		t.Errorf("feature.Items = %v, want [t1]", epic.Features[0].Items)
+	}
 }

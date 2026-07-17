@@ -139,7 +139,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	for _, m := range milestones {
 		group := buildMilestoneGroup(m, children, includeDone)
 		// Only include milestones that have visible content
-		if len(group.Epics) > 0 || len(group.Other) > 0 {
+		if len(group.Epics) > 0 || len(group.Features) > 0 || len(group.Other) > 0 {
 			milestoneGroups = append(milestoneGroups, group)
 		}
 	}
@@ -231,45 +231,83 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 
 	// Separate epics from other items
 	var epics []*bean.Bean
-
+	var rest []*bean.Bean
 	for _, child := range directChildren {
 		if child.Type == "epic" {
 			epics = append(epics, child)
+		} else {
+			rest = append(rest, child)
 		}
 	}
 
 	// Build epic groups
 	for _, epic := range epics {
-		epicItems := filterChildren(children[epic.ID], includeDone)
-		// Only include epics that have visible children
-		if len(epicItems) > 0 {
-			sortByTypeThenStatus(epicItems, cfg)
-			group.Epics = append(group.Epics, epicGroup{Epic: epic, Items: epicItems})
+		eg := buildEpicGroup(epic, children, includeDone)
+		if len(eg.Items) > 0 || len(eg.Features) > 0 {
+			group.Epics = append(group.Epics, eg)
 		}
 	}
 
-	// Build "Other" list: direct children that are not epics
-	// (With single parent enforcement, items can't be both under an epic and directly under the milestone)
-	var other []*bean.Bean
-	for _, child := range directChildren {
-		if child.Type == "epic" {
-			continue
+	// Split the milestone's non-epic direct children into leaf items and
+	// feature-typed children (which need their own recursive resolution).
+	other, featureChildren := splitByContainerType(rest)
+
+	for _, feature := range featureChildren {
+		fg := buildFeatureGroup(feature, children, includeDone)
+		if len(fg.Items) > 0 {
+			group.Features = append(group.Features, fg)
 		}
+	}
+
+	// Filter the remaining flat "Other" items by done status.
+	var filteredOther []*bean.Bean
+	for _, child := range other {
 		if includeDone || !cfg.IsArchiveStatus(child.Status) {
-			other = append(other, child)
+			filteredOther = append(filteredOther, child)
 		}
 	}
 
-	// Sort epics by their epic's title
+	// Sort epics and features by their title
 	sort.Slice(group.Epics, func(i, j int) bool {
 		return group.Epics[i].Epic.Title < group.Epics[j].Epic.Title
 	})
+	sort.Slice(group.Features, func(i, j int) bool {
+		return group.Features[i].Feature.Title < group.Features[j].Feature.Title
+	})
 
 	// Sort other items
-	sortByTypeThenStatus(other, cfg)
-	group.Other = other
+	sortByTypeThenStatus(filteredOther, cfg)
+	group.Other = filteredOther
 
 	return group
+}
+
+// buildEpicGroup builds an epic group: its direct leaf children plus a
+// recursively-resolved featureGroup for each direct feature child.
+func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) epicGroup {
+	leafs, featureChildren := splitByContainerType(children[epic.ID])
+	leafItems := filterChildren(leafs, includeDone)
+	sortByTypeThenStatus(leafItems, cfg)
+
+	eg := epicGroup{Epic: epic, Items: leafItems}
+	for _, feature := range featureChildren {
+		fg := buildFeatureGroup(feature, children, includeDone)
+		if len(fg.Items) > 0 {
+			eg.Features = append(eg.Features, fg)
+		}
+	}
+	sort.Slice(eg.Features, func(i, j int) bool {
+		return eg.Features[i].Feature.Title < eg.Features[j].Feature.Title
+	})
+	return eg
+}
+
+// buildFeatureGroup builds a feature group: all leaf descendants found
+// anywhere beneath the feature, flattened and sorted.
+func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) featureGroup {
+	items := collectLeafDescendants(feature.ID, children, includeDone)
+	sortByTypeThenStatus(items, cfg)
+	return featureGroup{Feature: feature, Items: items}
 }
 
 // filterChildren filters children based on done status.
