@@ -108,6 +108,15 @@ func TestBuildRoadmap(t *testing.T) {
 			},
 			wantMilestones: 1,
 		},
+		{
+			name: "milestone with direct feature child and no epic is not dropped",
+			beans: []*bean.Bean{
+				{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+				{ID: "f1", Type: "feature", Title: "SSO", Status: "todo", Parent: "m1"},
+				{ID: "t1", Type: "task", Title: "OIDC login", Status: "todo", Parent: "f1"},
+			},
+			wantMilestones: 1,
+		},
 	}
 
 	for _, tt := range tests {
