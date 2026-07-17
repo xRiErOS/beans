@@ -31,29 +31,38 @@ var (
 
 // roadmapData holds the structured roadmap for JSON output.
 type roadmapData struct {
-	Milestones  []milestoneGroup `json:"milestones"`
+	Milestones  []milestoneGroup  `json:"milestones"`
 	Unscheduled *unscheduledGroup `json:"unscheduled,omitempty"`
 }
 
 // unscheduledGroup represents items not assigned to any milestone.
 type unscheduledGroup struct {
-	Epics []epicGroup  `json:"epics,omitempty"`
-	Other []*bean.Bean `json:"other,omitempty"`
+	Epics    []epicGroup    `json:"epics,omitempty"`
+	Features []featureGroup `json:"features,omitempty"`
+	Other    []*bean.Bean   `json:"other,omitempty"`
 }
 
 // milestoneGroup represents a milestone and its contents.
 type milestoneGroup struct {
-	Milestone *bean.Bean   `json:"milestone"`
-	Epics     []epicGroup  `json:"epics,omitempty"`
-	Other     []*bean.Bean `json:"other,omitempty"`
+	Milestone *bean.Bean     `json:"milestone"`
+	Epics     []epicGroup    `json:"epics,omitempty"`
+	Features  []featureGroup `json:"features,omitempty"`
+	Other     []*bean.Bean   `json:"other,omitempty"`
 }
 
 // epicGroup represents an epic and its child items.
 type epicGroup struct {
-	Epic  *bean.Bean   `json:"epic"`
-	Items []*bean.Bean `json:"items,omitempty"`
+	Epic     *bean.Bean     `json:"epic"`
+	Items    []*bean.Bean   `json:"items,omitempty"`
+	Features []featureGroup `json:"features,omitempty"`
 }
 
+// featureGroup represents a feature and the leaf items found anywhere
+// beneath it (leafs below nested features are flattened into this list).
+type featureGroup struct {
+	Feature *bean.Bean   `json:"feature"`
+	Items   []*bean.Bean `json:"items,omitempty"`
+}
 
 var roadmapCmd = &cobra.Command{
 	Use:   "roadmap",
