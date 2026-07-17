@@ -254,3 +254,85 @@ func TestStatusFiltering(t *testing.T) {
 		}
 	})
 }
+
+func TestSplitByContainerType(t *testing.T) {
+	beans := []*bean.Bean{
+		{ID: "f1", Type: "feature", Title: "F1"},
+		{ID: "t1", Type: "task", Title: "T1"},
+		{ID: "b1", Type: "bug", Title: "B1"},
+	}
+
+	leafs, features := splitByContainerType(beans)
+
+	if len(leafs) != 2 {
+		t.Errorf("got %d leafs, want 2", len(leafs))
+	}
+	if len(features) != 1 {
+		t.Errorf("got %d features, want 1", len(features))
+	}
+	if features[0].ID != "f1" {
+		t.Errorf("got feature %s, want f1", features[0].ID)
+	}
+}
+
+func TestCollectLeafDescendants(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	children := map[string][]*bean.Bean{
+		"feat1": {
+			{ID: "t1", Type: "task", Title: "Direct leaf", Status: "todo", Parent: "feat1"},
+			{ID: "feat2", Type: "feature", Title: "Nested feature", Status: "todo", Parent: "feat1"},
+		},
+		"feat2": {
+			{ID: "t2", Type: "task", Title: "Nested leaf", Status: "todo", Parent: "feat2"},
+			{ID: "t3", Type: "task", Title: "Done nested leaf", Status: "completed", Parent: "feat2"},
+		},
+	}
+
+	t.Run("flattens through nested features, excludes done by default", func(t *testing.T) {
+		got := collectLeafDescendants("feat1", children, false)
+		if len(got) != 2 {
+			t.Fatalf("got %d leafs, want 2 (t1, t2)", len(got))
+		}
+		ids := map[string]bool{got[0].ID: true, got[1].ID: true}
+		if !ids["t1"] || !ids["t2"] {
+			t.Errorf("got ids %v, want t1 and t2", ids)
+		}
+	})
+
+	t.Run("includes done when requested", func(t *testing.T) {
+		got := collectLeafDescendants("feat1", children, true)
+		if len(got) != 3 {
+			t.Fatalf("got %d leafs, want 3 (t1, t2, t3)", len(got))
+		}
+	})
+
+	t.Run("no children returns empty, not nil panic", func(t *testing.T) {
+		got := collectLeafDescendants("nonexistent", children, false)
+		if len(got) != 0 {
+			t.Errorf("got %d leafs, want 0", len(got))
+		}
+	})
+
+	t.Run("hand-authored parent cycle does not stack-overflow", func(t *testing.T) {
+		// The CLI's ValidateParent/DetectCycle reject this at write time, but
+		// beans are hand-editable markdown -- a manually edited cycle must not
+		// crash roadmap generation. This subtest hangs/panics without the
+		// visited guard in collectLeafDescendantsVisited.
+		cyclic := map[string][]*bean.Bean{
+			"featA": {
+				{ID: "featB", Type: "feature", Title: "B", Status: "todo", Parent: "featA"},
+			},
+			"featB": {
+				{ID: "featA", Type: "feature", Title: "A", Status: "todo", Parent: "featB"},
+				{ID: "t1", Type: "task", Title: "Reachable leaf", Status: "todo", Parent: "featB"},
+			},
+		}
+		got := collectLeafDescendants("featA", cyclic, false)
+		if len(got) != 1 || got[0].ID != "t1" {
+			t.Errorf("got %v, want exactly [t1]", got)
+		}
+	})
+}

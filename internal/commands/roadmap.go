@@ -290,6 +290,51 @@ func filterChildren(children []*bean.Bean, includeDone bool) []*bean.Bean {
 	return filtered
 }
 
+// splitByContainerType separates a bean's direct children into leafs
+// (anything that isn't a feature) and feature-typed children.
+func splitByContainerType(beans []*bean.Bean) (leafs []*bean.Bean, features []*bean.Bean) {
+	for _, b := range beans {
+		if b.Type == "feature" {
+			features = append(features, b)
+		} else {
+			leafs = append(leafs, b)
+		}
+	}
+	return leafs, features
+}
+
+// collectLeafDescendants recursively walks everything below parentID and
+// returns the leaf beans found at any depth, flattened. Feature-typed
+// descendants are transparent containers: their own children are walked
+// too, but the feature bean itself is never included in the result.
+// beans.yml's ValidateParent forbids feature-under-feature via the CLI, so
+// this only recurses more than one level on hand-edited data -- the
+// visited guard exists purely so a hand-authored parent cycle can't crash
+// roadmap with a stack overflow (the old, non-recursive code was immune).
+func collectLeafDescendants(parentID string, children map[string][]*bean.Bean, includeDone bool) []*bean.Bean {
+	return collectLeafDescendantsVisited(parentID, children, includeDone, map[string]bool{})
+}
+
+func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.Bean, includeDone bool, visited map[string]bool) []*bean.Bean {
+	if visited[parentID] {
+		return nil
+	}
+	visited[parentID] = true
+
+	var leafs []*bean.Bean
+	for _, child := range children[parentID] {
+		if child.Type == "feature" {
+			leafs = append(leafs, collectLeafDescendantsVisited(child.ID, children, includeDone, visited)...)
+			continue
+		}
+		if !includeDone && cfg.IsArchiveStatus(child.Status) {
+			continue
+		}
+		leafs = append(leafs, child)
+	}
+	return leafs
+}
+
 // containsStatus checks if a status is in the list.
 func containsStatus(statuses []string, status string) bool {
 	return slices.Contains(statuses, status)
