@@ -393,3 +393,89 @@ func TestBuildMilestoneGroupResolvesFeatureNesting(t *testing.T) {
 		t.Errorf("feature.Items = %v, want [t1]", epic.Features[0].Items)
 	}
 }
+
+func TestUnscheduledFeatureResolvesNesting(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	beans := []*bean.Bean{
+		{ID: "f1", Type: "feature", Title: "Standalone feature", Status: "todo"},
+		{ID: "t1", Type: "task", Title: "Leaf under orphan feature", Status: "todo", Parent: "f1"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if result.Unscheduled == nil {
+		t.Fatal("expected Unscheduled to be non-nil")
+	}
+	if len(result.Unscheduled.Features) != 1 {
+		t.Fatalf("got %d unscheduled features, want 1", len(result.Unscheduled.Features))
+	}
+	fg := result.Unscheduled.Features[0]
+	if fg.Feature.ID != "f1" {
+		t.Errorf("feature group is for %s, want f1", fg.Feature.ID)
+	}
+	if len(fg.Items) != 1 || fg.Items[0].ID != "t1" {
+		t.Errorf("fg.Items = %v, want [t1]", fg.Items)
+	}
+	// The leaf must not also leak into Other (it has a parent, so it's
+	// handled entirely via the feature group).
+	if len(result.Unscheduled.Other) != 0 {
+		t.Errorf("got %d unscheduled other, want 0", len(result.Unscheduled.Other))
+	}
+}
+
+func TestUnscheduledEpicWithFeatureNesting(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	beans := []*bean.Bean{
+		{ID: "e1", Type: "epic", Title: "Unscheduled epic", Status: "todo"},
+		{ID: "f1", Type: "feature", Title: "Feature under unscheduled epic", Status: "todo", Parent: "e1"},
+		{ID: "t1", Type: "task", Title: "Leaf", Status: "todo", Parent: "f1"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Unscheduled.Epics) != 1 {
+		t.Fatalf("got %d unscheduled epics, want 1", len(result.Unscheduled.Epics))
+	}
+	eg := result.Unscheduled.Epics[0]
+	if len(eg.Features) != 1 || eg.Features[0].Feature.ID != "f1" {
+		t.Fatalf("eg.Features = %+v, want feature f1", eg.Features)
+	}
+	if len(eg.Features[0].Items) != 1 || eg.Features[0].Items[0].ID != "t1" {
+		t.Errorf("eg.Features[0].Items = %v, want [t1]", eg.Features[0].Items)
+	}
+}
+
+func TestUnscheduledNestedFeatureNotDoubleRendered(t *testing.T) {
+	// A feature nested under another orphan feature (hand-edited data --
+	// ValidateParent rejects this via the CLI) must be flattened into the
+	// top feature's Items exactly once, never also appear as its own
+	// top-level unscheduled feature entry.
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	beans := []*bean.Bean{
+		{ID: "f1", Type: "feature", Title: "Top feature", Status: "todo"},
+		{ID: "f2", Type: "feature", Title: "Nested feature", Status: "todo", Parent: "f1"},
+		{ID: "t1", Type: "task", Title: "Leaf", Status: "todo", Parent: "f2"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Unscheduled.Features) != 1 {
+		t.Fatalf("got %d unscheduled features, want 1 (f1 only, f2 must not double-render)", len(result.Unscheduled.Features))
+	}
+	fg := result.Unscheduled.Features[0]
+	if fg.Feature.ID != "f1" {
+		t.Errorf("unscheduled feature is %s, want f1", fg.Feature.ID)
+	}
+	if len(fg.Items) != 1 || fg.Items[0].ID != "t1" {
+		t.Errorf("fg.Items = %v, want [t1]", fg.Items)
+	}
+}

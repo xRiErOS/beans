@@ -169,11 +169,9 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		if underMilestone[b.ID] {
 			continue
 		}
-		// Build epic group if it has visible children
-		epicItems := filterChildren(children[b.ID], includeDone)
-		if len(epicItems) > 0 {
-			sortByTypeThenStatus(epicItems, cfg)
-			unscheduledEpics = append(unscheduledEpics, epicGroup{Epic: b, Items: epicItems})
+		eg := buildEpicGroup(b, children, includeDone)
+		if len(eg.Items) > 0 || len(eg.Features) > 0 {
+			unscheduledEpics = append(unscheduledEpics, eg)
 		}
 	}
 
@@ -182,11 +180,42 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		return unscheduledEpics[i].Epic.Title < unscheduledEpics[j].Epic.Title
 	})
 
+	// Find unscheduled features: feature-typed beans that are not under a
+	// milestone or epic (orphan features, e.g. created without --parent).
+	var unscheduledFeatures []featureGroup
+	for _, b := range allBeans {
+		if b.Type != "feature" {
+			continue
+		}
+		if underMilestone[b.ID] {
+			continue
+		}
+		// Skip features that are themselves children of an unscheduled epic
+		// or of another feature above -- those are already rendered as part
+		// of that ancestor's Features list / flattened into its Items via
+		// collectLeafDescendants. (feature-under-feature is rejected by
+		// ValidateParent via the CLI, but beans are hand-editable markdown --
+		// this guard keeps hand-edited data from double-rendering.)
+		if b.Parent != "" {
+			if parent, ok := byID[b.Parent]; ok && (parent.Type == "epic" || parent.Type == "feature") {
+				continue
+			}
+		}
+		fg := buildFeatureGroup(b, children, includeDone)
+		if len(fg.Items) > 0 {
+			unscheduledFeatures = append(unscheduledFeatures, fg)
+		}
+	}
+	sort.Slice(unscheduledFeatures, func(i, j int) bool {
+		return unscheduledFeatures[i].Feature.Title < unscheduledFeatures[j].Feature.Title
+	})
+
 	// Find orphan items (not milestone, not epic, no parent or parent is not milestone/epic)
 	var orphanItems []*bean.Bean
 	for _, b := range allBeans {
-		// Skip milestones and epics
-		if b.Type == "milestone" || b.Type == "epic" {
+		// Skip milestones, epics, and features -- features are rendered via
+		// unscheduledFeatures/eg.Features above, never as flat "Other" lines.
+		if b.Type == "milestone" || b.Type == "epic" || b.Type == "feature" {
 			continue
 		}
 		// Skip if already under a milestone
@@ -209,10 +238,11 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 
 	// Build unscheduled group if there's content
 	var unscheduled *unscheduledGroup
-	if len(unscheduledEpics) > 0 || len(orphanItems) > 0 {
+	if len(unscheduledEpics) > 0 || len(unscheduledFeatures) > 0 || len(orphanItems) > 0 {
 		unscheduled = &unscheduledGroup{
-			Epics: unscheduledEpics,
-			Other: orphanItems,
+			Epics:    unscheduledEpics,
+			Features: unscheduledFeatures,
+			Other:    orphanItems,
 		}
 	}
 
