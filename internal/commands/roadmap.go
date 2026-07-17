@@ -213,10 +213,19 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Find orphan items (not milestone, not epic, no parent or parent is not milestone/epic)
 	var orphanItems []*bean.Bean
 	for _, b := range allBeans {
-		// Skip milestones, epics, and features -- features are rendered via
-		// unscheduledFeatures/eg.Features above, never as flat "Other" lines.
-		if b.Type == "milestone" || b.Type == "epic" || b.Type == "feature" {
+		// Skip milestones and epics -- always containers, never flat leaves.
+		if b.Type == "milestone" || b.Type == "epic" {
 			continue
+		}
+		if b.Type == "feature" {
+			// Features with >=1 leaf descendant are rendered via the
+			// unscheduledFeatures loop above as a featureGroup; skip them
+			// here to avoid double-rendering. Childless features (D01,
+			// beans-n8zw) are not containers -- fall through and treat
+			// them as a flat leaf like any other orphan item below.
+			if len(collectLeafDescendants(b.ID, children, includeDone)) > 0 {
+				continue
+			}
 		}
 		// Skip if already under a milestone
 		if underMilestone[b.ID] {
@@ -283,9 +292,14 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 	other, featureChildren := splitByContainerType(rest)
 
 	for _, feature := range featureChildren {
-		fg := buildFeatureGroup(feature, children, includeDone)
-		if len(fg.Items) > 0 {
-			group.Features = append(group.Features, fg)
+		fg, leaf := classifyFeatureChild(feature, children, includeDone)
+		if fg != nil {
+			group.Features = append(group.Features, *fg)
+		}
+		if leaf != nil {
+			// Childless feature (D01, beans-n8zw): not a container, render
+			// as a flat leaf alongside the milestone's other direct items.
+			other = append(other, leaf)
 		}
 	}
 
@@ -316,20 +330,44 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 // recursively-resolved featureGroup for each direct feature child.
 func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) epicGroup {
 	leafs, featureChildren := splitByContainerType(children[epic.ID])
-	leafItems := filterChildren(leafs, includeDone)
-	sortByTypeThenStatus(leafItems, cfg)
 
-	eg := epicGroup{Epic: epic, Items: leafItems}
+	eg := epicGroup{Epic: epic}
 	for _, feature := range featureChildren {
-		fg := buildFeatureGroup(feature, children, includeDone)
-		if len(fg.Items) > 0 {
-			eg.Features = append(eg.Features, fg)
+		fg, leaf := classifyFeatureChild(feature, children, includeDone)
+		if fg != nil {
+			eg.Features = append(eg.Features, *fg)
+		}
+		if leaf != nil {
+			// Childless feature (D01, beans-n8zw): not a container, render
+			// as a flat leaf alongside the epic's other direct items.
+			leafs = append(leafs, leaf)
 		}
 	}
+
+	leafItems := filterChildren(leafs, includeDone)
+	sortByTypeThenStatus(leafItems, cfg)
+	eg.Items = leafItems
+
 	sort.Slice(eg.Features, func(i, j int) bool {
 		return eg.Features[i].Feature.Title < eg.Features[j].Feature.Title
 	})
 	return eg
+}
+
+// classifyFeatureChild resolves a direct feature-typed child bean per D01
+// (beans-n8zw): a feature is a container IFF it has >=1 leaf descendant
+// (collectLeafDescendants, respecting includeDone). If it has descendants,
+// the resolved featureGroup is returned for container rendering (existing
+// behavior, unchanged). If it has none, the feature bean itself is returned
+// as leaf so the caller can fold it into its own flat-leaf list -- and go
+// through the exact same archive-status filtering every other leaf in that
+// list goes through, instead of being silently dropped.
+func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) (fg *featureGroup, leaf *bean.Bean) {
+	built := buildFeatureGroup(feature, children, includeDone)
+	if len(built.Items) > 0 {
+		return &built, nil
+	}
+	return nil, feature
 }
 
 // buildFeatureGroup builds a feature group: all leaf descendants found

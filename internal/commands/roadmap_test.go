@@ -479,3 +479,139 @@ func TestUnscheduledNestedFeatureNotDoubleRendered(t *testing.T) {
 		t.Errorf("fg.Items = %v, want [t1]", fg.Items)
 	}
 }
+
+// beans-n8zw D01: a Feature is a container IFF it has >=1 leaf descendant
+// (respecting includeDone). Childless features must render as flat leaf
+// lines instead of vanishing from the roadmap.
+
+// Ta: orphan feature, 0 children, status todo -> flat leaf in
+// Unscheduled.Other, never as a featureGroup, never dropped.
+func TestOrphanChildlessFeatureAppearsAsFlatLeaf(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	beans := []*bean.Bean{
+		{ID: "f1", Type: "feature", Title: "Lonely", Status: "todo"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if result.Unscheduled == nil {
+		t.Fatal("expected Unscheduled to be non-nil")
+	}
+	if len(result.Unscheduled.Features) != 0 {
+		t.Errorf("got %d unscheduled featureGroups, want 0 (childless feature must not become a container)", len(result.Unscheduled.Features))
+	}
+	if len(result.Unscheduled.Other) != 1 || result.Unscheduled.Other[0].ID != "f1" {
+		t.Errorf("Unscheduled.Other = %v, want [f1]", result.Unscheduled.Other)
+	}
+}
+
+// Tb: feature under epic, 0 children -> flat leaf in epic.Items, not in
+// epic.Features.
+func TestChildlessFeatureUnderEpicAppearsInEpicItems(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	now := time.Now()
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+		{ID: "e1", Type: "epic", Title: "Auth", Status: "todo", Parent: "m1"},
+		{ID: "f1", Type: "feature", Title: "Lonely", Status: "todo", Parent: "e1"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Milestones) != 1 {
+		t.Fatalf("got %d milestones, want 1", len(result.Milestones))
+	}
+	epics := result.Milestones[0].Epics
+	if len(epics) != 1 {
+		t.Fatalf("got %d epics, want 1", len(epics))
+	}
+	epic := epics[0]
+	if len(epic.Features) != 0 {
+		t.Errorf("got %d epic feature groups, want 0", len(epic.Features))
+	}
+	if len(epic.Items) != 1 || epic.Items[0].ID != "f1" {
+		t.Errorf("epic.Items = %v, want [f1]", epic.Items)
+	}
+}
+
+// Tc: feature directly under milestone, 0 children -> flat leaf in
+// milestone.Other.
+func TestChildlessFeatureDirectUnderMilestoneAppearsInOther(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	now := time.Now()
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+		{ID: "f1", Type: "feature", Title: "Lonely", Status: "todo", Parent: "m1"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Milestones) != 1 {
+		t.Fatalf("got %d milestones, want 1", len(result.Milestones))
+	}
+	ms := result.Milestones[0]
+	if len(ms.Features) != 0 {
+		t.Errorf("got %d milestone feature groups, want 0", len(ms.Features))
+	}
+	if len(ms.Other) != 1 || ms.Other[0].ID != "f1" {
+		t.Errorf("milestone.Other = %v, want [f1]", ms.Other)
+	}
+}
+
+// Td (regression guard): a feature with >=1 live child still renders as a
+// featureGroup container, even when a childless sibling feature is present
+// in the same epic -- the two code paths must not cross-contaminate.
+func TestFeatureWithChildRemainsContainerAlongsideChildlessSibling(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	now := time.Now()
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+		{ID: "e1", Type: "epic", Title: "Auth", Status: "todo", Parent: "m1"},
+		{ID: "f1", Type: "feature", Title: "Childless", Status: "todo", Parent: "e1"},
+		{ID: "f2", Type: "feature", Title: "Has a child", Status: "todo", Parent: "e1"},
+		{ID: "t1", Type: "task", Title: "OIDC login", Status: "todo", Parent: "f2"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	epic := result.Milestones[0].Epics[0]
+	if len(epic.Items) != 1 || epic.Items[0].ID != "f1" {
+		t.Errorf("epic.Items = %v, want [f1] (childless feature flattened)", epic.Items)
+	}
+	if len(epic.Features) != 1 || epic.Features[0].Feature.ID != "f2" {
+		t.Fatalf("epic.Features = %+v, want exactly [f2]", epic.Features)
+	}
+	if len(epic.Features[0].Items) != 1 || epic.Features[0].Items[0].ID != "t1" {
+		t.Errorf("epic.Features[0].Items = %v, want [t1]", epic.Features[0].Items)
+	}
+}
+
+// Te (edge case): a childless feature with an archive status is dropped by
+// the normal archive-status filter, exactly like any other leaf.
+func TestChildlessCompletedFeatureDroppedByArchiveFilter(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	beans := []*bean.Bean{
+		{ID: "f1", Type: "feature", Title: "Done and lonely", Status: "completed"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if result.Unscheduled != nil {
+		t.Errorf("expected Unscheduled to be nil (completed childless feature dropped), got %+v", result.Unscheduled)
+	}
+}
