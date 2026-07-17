@@ -2,6 +2,17 @@
 - {{typeBadge .}} {{.Title}} {{beanRef .}}
 {{end -}}
 
+{{- define "featureGroup" -}}
+#### Feature: {{.Feature.Title}} {{beanRef .Feature}}
+{{with firstParagraph .Feature.Body}}
+> {{.}}
+{{end}}
+
+{{range .Items -}}
+{{template "beanLine" .}}
+{{- end}}
+{{- end -}}
+
 {{- define "epicGroup" -}}
 ### Epic: {{.Epic.Title}} {{beanRef .Epic}}
 {{with firstParagraph .Epic.Body}}
@@ -10,6 +21,9 @@
 
 {{range .Items -}}
 {{template "beanLine" .}}
+{{- end}}
+{{- range .Features -}}
+{{template "featureGroup" .}}
 {{- end}}
 {{- end -}}
 
@@ -22,8 +36,11 @@
 {{range .Epics -}}
 {{template "epicGroup" .}}
 {{- end}}
+{{- range .Features -}}
+{{template "featureGroup" .}}
+{{- end}}
 {{- if .Other}}
-{{- if len .Epics}}
+{{- if or (len .Epics) (len .Features)}}
 ### Miscellaneous
 {{end}}
 
@@ -39,8 +56,11 @@
 {{- range .Unscheduled.Epics -}}
 {{template "epicGroup" .}}
 {{- end}}
+{{- range .Unscheduled.Features -}}
+{{template "featureGroup" .}}
+{{- end}}
 {{- if .Unscheduled.Other}}
-{{- if len .Unscheduled.Epics}}
+{{- if or (len .Unscheduled.Epics) (len .Unscheduled.Features)}}
 ### Miscellaneous
 {{end}}
 
