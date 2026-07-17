@@ -223,7 +223,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 			// here to avoid double-rendering. Childless features (D01,
 			// beans-n8zw) are not containers -- fall through and treat
 			// them as a flat leaf like any other orphan item below.
-			if len(collectLeafDescendants(b.ID, children, includeDone)) > 0 {
+			if fg, _ := classifyFeatureChild(b, children, includeDone); fg != nil {
 				continue
 			}
 		}
