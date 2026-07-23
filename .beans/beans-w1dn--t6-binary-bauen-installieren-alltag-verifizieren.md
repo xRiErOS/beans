@@ -1,11 +1,11 @@
 ---
 # beans-w1dn
 title: T6 Binary bauen, installieren, Alltag verifizieren
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T20:28:43Z
+updated_at: 2026-07-23T22:15:21Z
 parent: beans-1ec3
 blocked_by:
     - beans-zb00
@@ -74,3 +74,54 @@ Titel, gleicher Body, im falschen ID-Namensraum angelegt (I01).
 ## Betroffene Pfade
 
 Keine Quelldatei. Build, Install, `.beans/bt-xy2i--*.md`.
+
+## Prelude 2026-07-24 (aus T1-T5-Reviews) — drei SCs sind woertlich untauglich
+
+T3, T4 und T5 waren **jeweils erst in Runde 2** gruen. Jedes Mal fand die Mutations-Probe eine
+load-bearing Zeile ohne Test, bei komplett gruener Suite. T6 ist der Abschluss-Task — hier
+zaehlt zusaetzlich, dass die Pruef-Kommandos selbst messen, was sie messen sollen.
+
+### P-1 Drei Akzeptanzkriterien dieses beans sind auf dieser Maschine nicht woertlich erfuellbar
+
+- **SC-601 sagt `mise test`.** Das ist **kein** Gate (D19): `mise test` haengt an `test:e2e`,
+  und der Playwright-Browser fehlt lokal (`browserType.launch: Executable doesn't exist`).
+  Alle e2e-Specs failen in 0-1 ms als Setup-Fail, unabhaengig vom Code. **Ersatz-Gate:**
+  `command go test ./...` mit EXIT=0. `mise test` **nicht** ausfuehren.
+
+- **SC-604 nutzt `awk "{print length($0)}"`.** `/usr/bin/awk` ist hier **nicht multibyte-aware**
+  (D22). Bei der Glyphen-Ausgabe (`■ ▸ ▪`) meldet es **240 statt 80** — der Wert waere
+  scheinbar hart verletzt, obwohl die Ausgabe zeichengenau korrekt ist. **Ersatz:** `wc -m`
+  oder Rune-Zaehlung in `command python3`. Die **Absicht** des Kriteriums (keine Zeile ueber
+  80 Zeichen) gilt unveraendert, nur sein Buchstabe nicht.
+
+- **Jeder Go-Aufruf braucht `command`-Praefix** (D21). `go` ist eine Shell-Funktion
+  (dotfiles-Sync), die den Compiler verdeckt und mit **Exit 0** durchlaeuft, **ohne einen Test
+  auszufuehren**. Ein Beweis ohne `command` ist wertlos.
+
+### P-2 Vor dem Ueberschreiben von /opt/homebrew/bin/beans
+
+Das installierte Binary ist Eriks Alltags-Werkzeug. **Vor** dem Kopieren:
+
+- aktuelle Version festhalten (`/opt/homebrew/bin/beans version`) — erwartet `0.4.2-fork.ti53`,
+- das vorhandene Binary nach `/tmp/beans-backup-<version>` sichern und den Pfad im Report nennen,
+- **EARS-3 ist bindend:** zeigt der Pipe-Diff (SC-605) eine Abweichung, **nicht installieren**,
+  sondern melden. Byte-Identitaet schlaegt Installation.
+
+### P-3 Was ein Agent hier NICHT abschliessend verifizieren kann
+
+**R01** (Glyphen `■ ▸ ▪` sind East-Asian-Ambiguous — bei doppelter Breite verschieben sich
+Spalten um 1) laesst sich nur an Eriks **echtem** Terminal-Emulator abschliessend beurteilen,
+nicht in tmux/pty eines Agents. Pruefe, was du kannst (tmux 80 Spalten, pty), und **melde
+explizit als offenen PO-Verifikationspunkt**, was du nicht abschliessend zeigen konntest.
+Keine Behauptung ueber das echte Terminal, die du nicht belegt hast.
+
+### P-4 Weiteres
+
+- **EARS-6 ist ernst:** `.beans/` traegt fremde uncommittete Aenderungen. Nur explizite
+  Einzelpfade stagen, **nie** per Glob, **nie** `git add -A`.
+- `stash@{0}` ("pnpm autogen allowBuilds") ist **nicht** Task-Arbeit — nicht poppen, nicht droppen.
+- Bekannte Grenzen, kein Defekt dieses Epos: kinderlose Orphan-Epics fehlen in **beiden**
+  Ausgabepfaden (bug `beans-36fa`, Ursache in `buildRoadmap`).
+- **N01 aus dem T5-Review:** `fmt.Print` vs. `Println` in `RunE` ist durch keinen Test
+  festgenagelt (strukturell, `RunE` braucht echten `os.Stdout`). Per pty als korrekt
+  verifiziert. Nur relevant, falls hier ein Refactor ansetzt — tu das nicht.
