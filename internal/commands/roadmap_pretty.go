@@ -125,3 +125,101 @@ func roadmapLine(prefix string, b *bean.Bean, showPrio bool, width int) string {
 	}
 	return sb.String()
 }
+
+// roadmapClampWidth clamps a terminal column count to [roadmapMinWidth,
+// roadmapMaxWidth] (D08). A cols value of 0 (no terminal detected) lands on
+// the floor like any other too-small value.
+func roadmapClampWidth(cols int) int {
+	if cols < roadmapMinWidth {
+		return roadmapMinWidth
+	}
+	if cols > roadmapMaxWidth {
+		return roadmapMaxWidth
+	}
+	return cols
+}
+
+// roadmapLeafPrefix renders the "- <type>" prefix for a leaf bean at the
+// given indent, per the DESIGN.md "### Zeilen-Präfixe" table.
+func roadmapLeafPrefix(indent int, b *bean.Bean) string {
+	return strings.Repeat(" ", indent) + "- " + b.Type
+}
+
+// renderRoadmapPretty walks the roadmapData produced by buildRoadmap and
+// renders the TTY plain-text tree (symmetric to renderRoadmapMarkdown, which
+// walks the template over the same structure). It performs no sorting of
+// its own (SC-406) -- order comes entirely from buildRoadmap's slices, and
+// within a group it renders .Items before .Features, exactly like
+// roadmap.tmpl.
+func renderRoadmapPretty(data *roadmapData, width int) string {
+	var sb strings.Builder
+	sb.WriteString("Roadmap\n")
+	sb.WriteString(strings.Repeat("═", width))
+	sb.WriteString("\n")
+
+	for _, mg := range data.Milestones {
+		sb.WriteString("\n")
+		sb.WriteString(roadmapLine("■ Milestone", mg.Milestone, false, width))
+		sb.WriteString("\n")
+		for _, eg := range mg.Epics {
+			renderRoadmapEpicGroup(&sb, eg, 2, width)
+		}
+		for _, fg := range mg.Features {
+			renderRoadmapFeatureGroup(&sb, fg, 2, width)
+		}
+		for _, it := range mg.Other {
+			sb.WriteString(roadmapLine(roadmapLeafPrefix(2, it), it, true, width))
+			sb.WriteString("\n")
+		}
+	}
+
+	// D18: "No Milestone" renders whenever data.Unscheduled is non-nil,
+	// independent of whether any milestones were rendered above (EARS-6) --
+	// unlike the Markdown template, which only headers it when milestones
+	// exist. buildRoadmap already excludes milestone-typed beans from
+	// Unscheduled.Other (roadmap.go's orphanItems loop), so this walker
+	// does not need to filter by type itself.
+	if data.Unscheduled != nil {
+		sb.WriteString("\n")
+		sb.WriteString("No Milestone\n")
+		sb.WriteString("\n")
+		for _, eg := range data.Unscheduled.Epics {
+			renderRoadmapEpicGroup(&sb, eg, 2, width)
+		}
+		for _, fg := range data.Unscheduled.Features {
+			renderRoadmapFeatureGroup(&sb, fg, 2, width)
+		}
+		for _, it := range data.Unscheduled.Other {
+			sb.WriteString(roadmapLine(roadmapLeafPrefix(2, it), it, true, width))
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
+// renderRoadmapEpicGroup renders an Epic branch: the epic row itself (no
+// priority, D10), its direct leaf items, then its nested Feature branches --
+// items before features, per roadmap.tmpl.
+func renderRoadmapEpicGroup(sb *strings.Builder, eg epicGroup, indent int, width int) {
+	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▸ Epic", eg.Epic, false, width))
+	sb.WriteString("\n")
+	for _, it := range eg.Items {
+		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width))
+		sb.WriteString("\n")
+	}
+	for _, fg := range eg.Features {
+		renderRoadmapFeatureGroup(sb, fg, indent+2, width)
+	}
+}
+
+// renderRoadmapFeatureGroup renders a Feature branch: the feature row
+// itself (with priority, D15) followed by its flattened leaf items.
+func renderRoadmapFeatureGroup(sb *strings.Builder, fg featureGroup, indent int, width int) {
+	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▪ Feature", fg.Feature, true, width))
+	sb.WriteString("\n")
+	for _, it := range fg.Items {
+		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width))
+		sb.WriteString("\n")
+	}
+}

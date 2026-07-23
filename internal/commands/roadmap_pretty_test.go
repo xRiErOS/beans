@@ -205,6 +205,199 @@ func TestRoadmapLineOverlongPrefix(t *testing.T) {
 // a 26-rune prefix and does not exercise this boundary at all.
 // Verified independently via `command python3`: correct/mutated outputs
 // differ ("================= Word" vs "=================Word").
+// prettyFixture builds the roadmapData literal that mirrors the DESIGN.md
+// "## Ziel-Format (eingefroren)" demo hierarchy: Milestone Payment
+// Integration -> Epic Checkout Flow -> (task, bug, Feature Stripe card
+// entry -> task), plus Feature Apple Pay express button (direct under the
+// milestone) -> task, plus a loose task directly under the milestone, and a
+// "No Milestone" section with an orphan Epic Observability -> task and an
+// orphan task. IDs/titles/types/status/priority/parent per beans-g5hz
+// "Notes for T3".
+func prettyFixture() *roadmapData {
+	milestone := &bean.Bean{ID: "beans-fexy", Title: "Payment Integration", Type: "milestone", Status: "todo"}
+	epic := &bean.Bean{ID: "beans-9m0d", Title: "Checkout Flow", Type: "epic", Status: "in-progress", Parent: "beans-fexy"}
+	task9zpz := &bean.Bean{ID: "beans-9zpz", Title: "Validate card number (Luhn)", Type: "task", Status: "in-progress", Parent: "beans-9m0d"}
+	bugWa9y := &bean.Bean{ID: "beans-wa9y", Title: "Total rounds off by one cent", Type: "bug", Status: "todo", Priority: "critical", Parent: "beans-9m0d"}
+	feature1vvd := &bean.Bean{ID: "beans-1vvd", Title: "Stripe card entry", Type: "feature", Status: "todo", Priority: "high", Parent: "beans-9m0d"}
+	taskB58r := &bean.Bean{ID: "beans-b58r", Title: "Refactor payment reconciliation ledger to support multi-currency settlement", Type: "task", Status: "todo", Priority: "high", Parent: "beans-1vvd"}
+	feature9bi1 := &bean.Bean{ID: "beans-9bi1", Title: "Apple Pay express button", Type: "feature", Status: "draft", Priority: "high", Parent: "beans-fexy"}
+	taskLnff := &bean.Bean{ID: "beans-lnff", Title: "Wire up sheet", Type: "task", Status: "todo", Parent: "beans-9bi1"}
+	task635g := &bean.Bean{ID: "beans-635g", Title: "Update pricing copy", Type: "task", Status: "todo", Priority: "low", Parent: "beans-fexy"}
+	epicH5km := &bean.Bean{ID: "beans-h5km", Title: "Observability", Type: "epic", Status: "todo"}
+	taskXm6j := &bean.Bean{ID: "beans-xm6j", Title: "Add trace IDs", Type: "task", Status: "todo", Parent: "beans-h5km"}
+	taskNfun := &bean.Bean{ID: "beans-nfun", Title: "Rotate signing key", Type: "task", Status: "todo"}
+
+	return &roadmapData{
+		Milestones: []milestoneGroup{
+			{
+				Milestone: milestone,
+				Epics: []epicGroup{
+					{
+						Epic:  epic,
+						Items: []*bean.Bean{task9zpz, bugWa9y},
+						Features: []featureGroup{
+							{Feature: feature1vvd, Items: []*bean.Bean{taskB58r}},
+						},
+					},
+				},
+				Features: []featureGroup{
+					{Feature: feature9bi1, Items: []*bean.Bean{taskLnff}},
+				},
+				Other: []*bean.Bean{task635g},
+			},
+		},
+		Unscheduled: &unscheduledGroup{
+			Epics: []epicGroup{
+				{Epic: epicH5km, Items: []*bean.Bean{taskXm6j}},
+			},
+			Other: []*bean.Bean{taskNfun},
+		},
+	}
+}
+
+// TestRoadmapClampWidth pins EARS-1/D08: clamp(terminalCols, 80, 110), with
+// 0 (no terminal) landing on the floor like any other too-small value.
+func TestRoadmapClampWidth(t *testing.T) {
+	tests := []struct {
+		name string
+		cols int
+		want int
+	}{
+		{"below floor", 40, 80},
+		{"zero: no terminal (D08)", 0, 80},
+		{"at floor", 80, 80},
+		{"within range", 96, 96},
+		{"at cap", 110, 110},
+		{"above cap", 200, 110},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := roadmapClampWidth(tt.cols); got != tt.want {
+				t.Errorf("roadmapClampWidth(%d) = %d, want %d", tt.cols, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRenderRoadmapPrettyAt80 pins the eingefroren DESIGN.md target format
+// verbatim (extracted programmatically from docs/roadmap-tty-output/DESIGN.md
+// "## Ziel-Format (eingefroren)" via `command python3`, not hand-typed --
+// see task report for the extraction command). It is byte-for-byte the same
+// block render-prototype.py produces against the equivalent demo data.
+func TestRenderRoadmapPrettyAt80(t *testing.T) {
+	want := `Roadmap
+════════════════════════════════════════════════════════════════════════════════
+
+■ Milestone      Payment Integration                           todo         fexy
+  ▸ Epic         Checkout Flow                                 in-progress  9m0d
+    - task       Validate card number (Luhn)                   in-progress  9zpz
+    - bug        Total rounds off by one cent        critical  todo         wa9y
+    ▪ Feature    Stripe card entry                       high  todo         1vvd
+      - task     Refactor payment reconciliation         high  todo         b58r
+                 ledger to support multi-currency
+                 settlement
+  ▪ Feature      Apple Pay express button                high  draft        9bi1
+    - task       Wire up sheet                                 todo         lnff
+  - task         Update pricing copy                      low  todo         635g
+
+No Milestone
+
+  ▸ Epic         Observability                                 todo         h5km
+    - task       Add trace IDs                                 todo         xm6j
+  - task         Rotate signing key                            todo         nfun
+`
+	got := renderRoadmapPretty(prettyFixture(), 80)
+	if got != want {
+		t.Errorf("renderRoadmapPretty() =\n%s\nwant\n%s", got, want)
+	}
+}
+
+// TestRenderRoadmapPrettyLineWidths pins EARS-7 across all three clamp
+// corners (floor, mid, cap): no rendered line may exceed W runes.
+func TestRenderRoadmapPrettyLineWidths(t *testing.T) {
+	for _, w := range []int{80, 96, 110} {
+		got := renderRoadmapPretty(prettyFixture(), w)
+		for i, line := range strings.Split(got, "\n") {
+			if n := utf8.RuneCountInString(line); n > w {
+				t.Errorf("width %d: line %d has %d runes (> %d): %q", w, i, n, w, line)
+			}
+		}
+	}
+}
+
+// TestRenderRoadmapPrettyTitleColumn pins SC-404: every non-trivial rendered
+// line (bean first-lines and their wrapped continuations) carries a
+// non-space rune at column 17 -- the title never drifts off the fixed
+// raster. Lines shorter than 18 runes (header, blank lines, "No Milestone")
+// are skipped, since indexing rune 17 would be meaningless/out of range.
+func TestRenderRoadmapPrettyTitleColumn(t *testing.T) {
+	got := renderRoadmapPretty(prettyFixture(), 80)
+	for i, line := range strings.Split(got, "\n") {
+		runes := []rune(line)
+		if len(runes) <= roadmapTitleCol {
+			continue
+		}
+		if runes[roadmapTitleCol] == ' ' {
+			t.Errorf("line %d: rune at column %d is a space (title misaligned): %q", i, roadmapTitleCol, line)
+		}
+	}
+}
+
+// TestRenderRoadmapPrettyPriorityVisibility pins EARS-4/D10/D15 per row
+// type: Milestone and Epic rows never show priority, Feature-branch and
+// leaf rows do. All four beans here share Priority "high" so the assertion
+// is only satisfiable if the walker passes the correct showPrio bool for
+// each of the four row kinds -- the frozen DESIGN.md fixture alone cannot
+// catch a showPrio mix-up on Milestone/Epic, since their priority there is
+// empty and would render identically (blank) whether shown or suppressed.
+func TestRenderRoadmapPrettyPriorityVisibility(t *testing.T) {
+	ms := &bean.Bean{ID: "beans-aaaa", Title: "M", Type: "milestone", Status: "todo", Priority: "high"}
+	epic := &bean.Bean{ID: "beans-bbbb", Title: "E", Type: "epic", Status: "todo", Priority: "high", Parent: "beans-aaaa"}
+	feat := &bean.Bean{ID: "beans-cccc", Title: "F", Type: "feature", Status: "todo", Priority: "high", Parent: "beans-bbbb"}
+	leaf := &bean.Bean{ID: "beans-dddd", Title: "L", Type: "task", Status: "todo", Priority: "high", Parent: "beans-cccc"}
+
+	data := &roadmapData{
+		Milestones: []milestoneGroup{
+			{
+				Milestone: ms,
+				Epics: []epicGroup{
+					{Epic: epic, Features: []featureGroup{
+						{Feature: feat, Items: []*bean.Bean{leaf}},
+					}},
+				},
+			},
+		},
+	}
+	got := renderRoadmapPretty(data, 80)
+	lines := strings.Split(got, "\n")
+	if len(lines) < 7 {
+		t.Fatalf("expected at least 7 lines, got %d:\n%s", len(lines), got)
+	}
+	msLine, epicLine, featLine, leafLine := lines[3], lines[4], lines[5], lines[6]
+	if strings.Contains(msLine, "high") {
+		t.Errorf("milestone row must not show priority (D10): %q", msLine)
+	}
+	if strings.Contains(epicLine, "high") {
+		t.Errorf("epic row must not show priority (D10): %q", epicLine)
+	}
+	if !strings.Contains(featLine, "high") {
+		t.Errorf("feature row must show priority (D15): %q", featLine)
+	}
+	if !strings.Contains(leafLine, "high") {
+		t.Errorf("leaf row must show priority: %q", leafLine)
+	}
+}
+
+// TestRenderRoadmapPrettyEmpty pins EARS-9: an empty roadmapData renders
+// only the header and separator line.
+func TestRenderRoadmapPrettyEmpty(t *testing.T) {
+	got := renderRoadmapPretty(&roadmapData{}, 80)
+	want := "Roadmap\n" + strings.Repeat("═", 80) + "\n"
+	if got != want {
+		t.Errorf("renderRoadmapPretty(empty) =\n%q\nwant\n%q", got, want)
+	}
+}
+
 func TestRoadmapLinePrefixExactlyAtTitleCol(t *testing.T) {
 	prefix := strings.Repeat("=", roadmapTitleCol) // synthetic, exactly 17 runes
 	if n := utf8.RuneCountInString(prefix); n != roadmapTitleCol {
