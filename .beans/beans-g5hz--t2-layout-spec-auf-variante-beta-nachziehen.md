@@ -1,11 +1,11 @@
 ---
 # beans-g5hz
 title: T2 Layout-Spec auf Variante beta nachziehen
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T20:34:50Z
+updated_at: 2026-07-23T20:53:36Z
 parent: beans-1ec3
 ---
 
@@ -86,3 +86,15 @@ oben keine eigene EARS/SC-Entsprechung hatten. Sie sind hiermit verbindlich erg�
 - [ ] **SC-209** `grep -c 'Nur Epics sind Äste' docs/roadmap-tty-output/DESIGN.md` liefert `0`.
 - [ ] **SC-210** `grep -c 'Rekursive Äste (Feature-Branches)' docs/roadmap-tty-output/DESIGN.md`
       liefert `0`.
+
+## Prelude 2026-07-23 (aus T1-Review, vor der eigentlichen Task-Arbeit erledigen)
+
+Non-blocking Findings des `ce-specs-reviewer` zu T1 (`beans-l36h`). Quelle: T1-Review,
+Verdict APPROVED, keine Blocker.
+
+- **P-1** Go-Aufrufe **immer** als `command go ...` — die Shell hat eine `go`-Funktion, die
+  den Compiler verdeckt und mit Exit 0 durchlaeuft, ohne einen Test auszufuehren. Siehe **D21**
+  im Epic-bean `beans-1ec3`. Ein Beweis ohne `command`-Praefix zaehlt nicht.
+- **P-2** Verlasse dich nicht auf die in T1 notierte Commit-Zahl ("12 unpushed gegen origin").
+  Sie ist durch den T1-Abschluss-Commit `67ea3a5` bereits off-by-one. Zaehle bei Bedarf frisch:
+  `git log origin/main..main --oneline | wc -l`.

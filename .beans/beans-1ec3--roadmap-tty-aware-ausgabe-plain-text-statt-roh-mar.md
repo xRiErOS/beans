@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-07-23T20:45:05Z
+updated_at: 2026-07-23T20:53:27Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -107,3 +107,26 @@ als Vorbedingung.
 - Terminal-Smoke am echten TTY (T6).
 
 Die uebrigen DoD-Punkte bleiben unveraendert.
+
+## Nachtrag 2026-07-23 (ce-specs-reviewer T1, Finding fuer ALLE Kinder) — D21 `command go`
+
+**Befund:** Die lokale Shell hat eine **Funktion namens `go`** (aus dem `~/.claude`/dotfiles-Sync).
+Sie verdeckt den Go-Compiler. Ein blosses `go test ./...` ruft das Sync-Skript, **nicht** den
+Compiler — und endet mit Exit 0, ohne dass je ein Test lief. Ein Agent, der das nicht weiss,
+meldet gruene Tests, die nie stattgefunden haben.
+
+**D21 (verbindlich fuer alle Tasks dieses Epos):** Jeder Go-Aufruf **immer** mit `command`-Praefix:
+
+```
+command go test ./...
+command go test ./internal/commands/
+command go build ...
+```
+
+Ein Test-Beweis ohne `command`-Praefix ist **kein Beweis** und wird vom Review zurueckgewiesen.
+Belegt am T1-Review (2026-07-23); der T1-Implementer hatte es korrekt, weil SC-104 es
+zufaellig vorgab.
+
+**Zaehler-Hinweis:** Die in bean-Bodies fixierten Commit-Zahlen (`git log origin/main..main`)
+veralten, sobald ein bean-Abschluss-Commit dazukommt. Jeder Task zaehlt selbst frisch, statt
+sich auf eine im bean notierte Zahl zu verlassen.
