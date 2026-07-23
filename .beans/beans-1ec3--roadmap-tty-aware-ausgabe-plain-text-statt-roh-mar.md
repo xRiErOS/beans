@@ -4,8 +4,10 @@ title: 'roadmap: TTY-aware Ausgabe (Plain-Text statt Roh-Markdown)'
 status: todo
 type: epic
 priority: normal
+tags:
+    - to-review
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-07-23T21:08:54Z
+updated_at: 2026-07-23T22:32:11Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -170,3 +172,54 @@ Milestone-beans selbst aus `kids[""]` (sonst Doppel-Render).
 `docs/roadmap-tty-output/render-prototype.py` und der DESIGN.md-Block "Ziel-Format
 (eingefroren)" — **nicht** der Quelltext-Block in PLAN.md. Wer PLAN.md Task 2 Step 1 als
 Vorlage nimmt, laeuft in dieselbe Luecke.
+
+## Abschluss der Realisierung 2026-07-24 — Tag `to-review`
+
+Alle sechs Task-beans `completed` und `ce-specs-reviewer`-gruen. T3, T4 und T5 jeweils erst in
+**Runde 2** — jedes Mal fand die Mutations-Probe eine load-bearing Zeile ohne Test bei
+komplett gruener Suite.
+
+| bean | Task | Runden | Kern-Befund der roten Runde |
+| --- | --- | --- | --- |
+| `beans-l36h` | T1 ti53-Integration | 1 | — |
+| `beans-g5hz` | T2 Layout-Spec beta | 1 | (Plan-Luecke gefunden, s.u.) |
+| `beans-ejoz` | T3 Layout-Primitive | 2 | D17-Grenzfall + Rune-Counting ungetestet |
+| `beans-h30q` | T4 Tree-Walker | 2 | `Unscheduled.Features`-Loop ungetestet |
+| `beans-zb00` | T5 TTY-Weiche | 2 | `links`-Parameter nur einseitig beobachtet |
+| `beans-w1dn` | T6 Binary + Alltag | 1 | — |
+
+## Definition of Done — Nachweis
+
+| DoD-Punkt | Beleg |
+| --- | --- |
+| main enthaelt ti53-Merge + TTY-Renderer | `git merge-base --is-ancestor` bestaetigt |
+| fork/main gepusht, origin unberuehrt | `main == fork/main == f58cc59`; `git ls-remote origin main` = `99260bf`, unveraendert |
+| Test-Gate gruen (D19: `command go test ./...`) | reviewer-eigener Lauf, alle Pakete `ok`, EXIT=0 |
+| `beans roadmap` gepiped **byte-identisch** | Reviewer-eigener Diff Backup-Binary vs. installiertes, SHA-256 gleich |
+| vier Ebenen am Terminal, keine Badges/Links | Reviewer-eigener Demo-Baum via tmux pty, `grep -c "img.shields.io\|]("` = 0 |
+| bei 80 Spalten kein Umbruch | tmux + Rune-Zaehlung, max = 80 |
+| `/opt/homebrew/bin/beans` meldet `0.4.2-fork.tty` | verifiziert; wirkt in beans-tui und lean-stack (EXIT=0) |
+| `bt-xy2i` scrapped | `status: scrapped` + Reasons-Sektion, versioniert in `3bbf1fa` |
+
+## Was der PO abnehmen muss (nicht agentisch belegbar)
+
+- **R01 — der einzige strukturell offene Punkt des Epos.** Die Glyphen `■ ▸ ▪` sind
+  East-Asian-Ambiguous. tmux und pty rendern sie einspaltig; ob Eriks **echter**
+  Terminal-Emulator das ebenso tut, ist durch keinen Agenten-Test beweisbar. Bei doppelter
+  Breite verschieben sich alle Spalten um 1. Bitte `beans roadmap` am echten Terminal ansehen.
+- Terminalbreiten **ausserhalb** 80/110 wurden nicht am echten Terminal geprueft (nur die
+  80-Spalten-Grenze und ein 100-Spalten-Lauf).
+
+## Nach der Realisierung entstanden
+
+- **bug `beans-36fa`** — kinderlose Orphan-**Epic** verschwindet aus **beiden** Ausgabepfaden
+  (real betroffen: `beans-en7i`). Ursache in `buildRoadmap`, **aelter** als der Pretty-Pfad und
+  im Markdown identisch — **keine Regression dieses Epos**. Zwilling von `beans-n8zw` (der
+  Feature-Fall, bereits gefixt). Ein Fix wuerde den Markdown-Output **aendern** und damit dessen
+  Byte-Identitaets-Garantie beruehren → **PO-Entscheid noetig**, bevor jemand es anfasst.
+- **LESSONS-LEARNED LL-10 bis LL-19** fortgeschrieben. LL-10 ist unangenehm: der Forward-Guard
+  von LL-02 (`go`-Shell-Falle, 2026-07-17) war nie verdrahtet worden, weshalb dieselbe Falle
+  erneut zuschlug. Jetzt in `docs/SSTD.md` § Nicht-Ableitbarkeiten verankert — nicht in
+  `CLAUDE.md`, das ist eine Upstream-Datei und vergroessert das Fork-Delta.
+- **Aufgeraeumt:** stale git-worktree `beans-src-worktrees/fix-ti53` entfernt (clean, Branch
+  vollstaendig in main, keine unique Commits; der Branch selbst bleibt bestehen).
