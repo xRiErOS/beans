@@ -1,11 +1,11 @@
 ---
 # beans-zb00
 title: T5 TTY-Weiche + Markdown-Regressionsschutz
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T20:28:43Z
+updated_at: 2026-07-23T21:54:24Z
 parent: beans-1ec3
 blocked_by:
     - beans-h30q
@@ -81,3 +81,46 @@ der Ersetzungsblock im Plan bringt diese Klammern selbst mit.
 ```go
 func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPrefix string) string
 ```
+
+## Prelude 2026-07-23 (aus T1-T4-Reviews, vor der Task-Arbeit lesen)
+
+T3 und T4 waren jeweils erst in Runde 2 gruen — beide Male fand die **Mutations-Probe** eine
+load-bearing Zeile ohne Test, bei komplett gruener Suite. Was T5 mitnimmt:
+
+- **P-1 Umgebungsfallen (D21/D22, Epic-bean `beans-1ec3`).**
+  - `go` ist eine **Shell-Funktion** (dotfiles-Sync), verdeckt den Compiler, laeuft mit Exit 0
+    durch **ohne einen Test auszufuehren** → immer `command go test ./...`.
+  - `awk` misst **Bytes statt Zeichen** → Breitenpruefungen mit `wc -m` oder Rune-Zaehlung.
+  - `mise test` ist **kein** Gate (D19) — zieht `test:e2e` mit, Playwright-Browser fehlt lokal.
+
+- **P-2 Mutations-Selbstpruefung ist Abschlussbedingung, nicht Kuer.** Fuer jede load-bearing
+  Zeile deiner Weiche (die TTY-Bedingung selbst, der Fallback bei unbestimmbarer Breite, die
+  Auswahl zwischen den beiden Renderern): Zeile brechen → failt mindestens ein Test? Wenn nein,
+  fehlt der Test. Mutation setzen, Rot-Ausgabe zitieren, byte-identisch zurueckbauen. Der
+  Reviewer reproduziert das und ergaenzt eigene Mutationen.
+
+  Konkret gefunden in T3/T4, damit du dieselben Gattungen vermeidest:
+  - Grenzwert-Testfall lag **neben** der Grenze (26 statt 17) → Mutation blieb gruen.
+  - Multibyte-Testfall hatte **zufaellig gleiche Margin** (7 Runen == 8 Bytes, beide <= 8) →
+    Rune-vs-Byte war nicht unterscheidbar.
+  - Ein ganzer **Loop-Zweig** (`Unscheduled.Features`) war von keiner Fixture erreicht → No-Op
+    lief durch die ganze Suite gruen.
+
+- **P-3 `prettyFixture()` nicht erweitern, um neue Zweige abzudecken.** Sie speist
+  `TestRenderRoadmapPrettyAt80`, dessen `want` der **eingefrorene** DESIGN.md-Block ist
+  (1155 Runen, dreifach verifiziert: Prototyp == DESIGN.md == Go-Literal). Eine
+  Fixture-Aenderung verschoebe die Spec-Referenz. Muster aus T4: eigenstaendiges
+  `roadmapData`-Literal im neuen Test bauen.
+
+- **P-4 Byte-Identitaet ist die Kern-Anforderung dieses Tasks.** Der Markdown-Pfad
+  (`renderRoadmapMarkdown`, `renderBeanRef`, `typeBadge`, `firstParagraph`, `roadmap.tmpl`,
+  `buildRoadmap`) darf sich **nicht um ein Byte** aendern. Golden-Snapshot vorher/nachher,
+  zweifach verglichen. Ein Diff-freier `git diff` allein genuegt nicht als Beweis — die
+  Ausgabe selbst vergleichen.
+
+- **P-5 Bekannte Grenzen, nicht dein Scope:** kinderlose Orphan-Epics fehlen in **beiden**
+  Ausgabepfaden (bug `beans-36fa`, Ursache in `buildRoadmap`, aelter als der Pretty-Pfad).
+  `buildRoadmap` bleibt unberuehrt. Die Clamp-Grenzoperatoren sind Equivalent-Mutanten
+  (`cols == 80` liefert in beiden Zweigen 80) — kein Coverage-Loch, kein Fix noetig.
+
+- **P-6 Zahlen zaehlen, nicht schaetzen** (`grep -c "^    --- PASS"`).
