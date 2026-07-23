@@ -1,11 +1,11 @@
 ---
 # beans-w1dn
 title: T6 Binary bauen, installieren, Alltag verifizieren
-status: in-progress
+status: completed
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T22:15:21Z
+updated_at: 2026-07-23T22:25:00Z
 parent: beans-1ec3
 blocked_by:
     - beans-zb00
@@ -53,23 +53,34 @@ Titel, gleicher Body, im falschen ID-Namensraum angelegt (I01).
 
 ## Akzeptanzkriterien
 
-- [ ] **SC-601** `mise test` ohne `FAIL` (Vorbestehende Fehler außerhalb `internal/commands` per
-      `git stash` gegenprüfen — nur eigene Regressionen sind Blocker).
-- [ ] **SC-602** `/tmp/beans-fork version` meldet `beans 0.4.2-fork.tty (<sha>) built <datum>`.
-- [ ] **SC-603** `/tmp/beans-fork roadmap` am echten Terminal zeigt `Roadmap`-Kopf, `═`-Linie,
-      Glyphen `■ ▸ ▪ -`, keine `img.shields.io`, keine `](`.
-- [ ] **SC-604** tmux-Smoke bei 80 Spalten: `awk '{print length($0)}' | sort -rn | head -3`
-      liefert keinen Wert über 80.
-- [ ] **SC-605** `diff /tmp/roadmap-old.md /tmp/roadmap-new.md` meldet keine Unterschiede
-      (`IDENTISCH`).
-- [ ] **SC-606** `which beans` = `/opt/homebrew/bin/beans`, `beans version` = `0.4.2-fork.tty`.
-- [ ] **SC-607** `beans roadmap` in `beans-tui-repository` und in `lean-stack` liefert die
-      gerenderte Tabelle ohne Fehler.
-- [ ] **SC-608** `bt-xy2i` hat Status `scrapped` und im Body eine `## Reasons for Scrapping`-
-      Sektion mit Verweis auf `beans-f1t4`.
-- [ ] **SC-609** Commit `chore(beans): bt-xy2i scrapped (dup of beans-f1t4)` mit explizitem
-      Einzelpfad.
-- [ ] **SC-610** `git push fork main` erfolgreich, kein Push nach `origin`.
+- [x] **SC-601** (Ersatz-Gate D19) `command go test ./... -count=1` — EXIT=0, kein FAIL. `mise
+      test` nicht ausgeführt (P-1, hängt an fehlendem Playwright-Browser).
+- [x] **SC-602** `/tmp/beans-fork version` → `beans 0.4.2-fork.tty (9e11e67) built
+      2026-07-23T22:17:29Z`.
+- [x] **SC-603** `/tmp/beans-fork roadmap` am echten pty (tmux, keine Stdout-Umleitung) zeigt
+      `Roadmap`-Kopf, `═`-Linie, Glyphen `■ ▸ ▪ -`, keine `img.shields.io`, keine `](`. Da die
+      echten Repo-Daten aktuell kein offenes Milestone/Feature-Container haben (verifiziert),
+      zusätzlich per Demo-`.beans/`-Baum außerhalb des Repos (`/tmp/beans-demo-roadmap`,
+      danach gelöscht) end-to-end bestätigt.
+- [x] **SC-604** (Ersatz-Messung D22) 80-Spalten-tmux-Smoke via `tmux capture-pane` + Python-
+      Rune-Zählung/`wc -m`: max. Zeilenbreite = 80, keine Zeile > 80. Der wörtliche
+      `awk '{print length($0)}'`-Befehl liefert wie im Prelude vorhergesagt `240` (Byte- statt
+      Zeichenzählung, nicht multibyte-aware) — als Falsifikations-Beleg mitgeführt, nicht als
+      Nachweis verwendet.
+- [x] **SC-605** `diff /tmp/roadmap-old.md /tmp/roadmap-new.md` → `IDENTISCH`, SHA-256 beider
+      Dateien identisch (`96e05802…`).
+- [x] **SC-606** `which beans` → `/opt/homebrew/bin/beans`; `beans version` →
+      `beans 0.4.2-fork.tty (9e11e67) built 2026-07-23T22:17:29Z`.
+- [x] **SC-607** `beans roadmap` in `beans-tui-repository` (EXIT=0, leerer Body — alle 149 dortigen
+      beans completed/scrapped, keine Regression) und in `lean-stack` (EXIT=0, volle Tabelle mit
+      `■ ▸ -`) ohne Fehler.
+- [x] **SC-608** `bt-xy2i` bereits `scrapped` mit `## Reasons for Scrapping` → Verweis auf
+      `beans-f1t4` (aus einem vorgelagerten Vorflug-Check, vor Start dieses Tasks erledigt).
+- [x] **SC-609** Erfüllt via bereits vorhandenem Commit `3bbf1fa` ("chore(beans): D19 test-gate +
+      bt-xy2i scrapped", explizite Einzelpfade, kein Glob) — Message weicht vom hier zitierten
+      Literal ab, siehe Deviations.
+- [x] **SC-610** `git push fork main` → `67ea3a5..9e11e67 main -> main` nach `xRiErOS/beans`.
+      `origin/main` vor und nach `git fetch origin` unverändert bei `99260bf`.
 
 ## Betroffene Pfade
 
@@ -125,3 +136,181 @@ Keine Behauptung ueber das echte Terminal, die du nicht belegt hast.
 - **N01 aus dem T5-Review:** `fmt.Print` vs. `Println` in `RunE` ist durch keinen Test
   festgenagelt (strukturell, `RunE` braucht echten `os.Stdout`). Per pty als korrekt
   verifiziert. Nur relevant, falls hier ein Refactor ansetzt — tu das nicht.
+
+## Summary
+
+Fork-Binary `0.4.2-fork.tty` (SHA `9e11e67`) aus `./cmd/beans` gebaut, gegen das vorherige
+installierte Binary (`0.4.2-fork.ti53`) im Pipe-Pfad byte-identisch verifiziert (EARS-2/3), und
+erst danach nach `/opt/homebrew/bin/beans` installiert. TTY-Rendering (vier Ebenen, alle Glyphen,
+80-Spalten-Grenze) am echten pty (tmux) bestätigt — mit einer Einschränkung: die echten
+`beans-src`-Repo-Daten enthalten aktuell kein offenes Milestone und keinen Feature-Container mit
+offenen Kindern, daher zusätzlich per Wegwerf-Demo-Baum außerhalb des Repos verifiziert.
+Cross-Repo-Wirksamkeit in `beans-tui-repository` und `lean-stack` bestätigt (EARS-5). `bt-xy2i`
+war bereits vor Task-Start `scrapped` (Vorflug-Check). Fork gepusht, `origin/main` nachweislich
+unverändert (EARS-7). Kein Produktionscode geändert.
+
+## Test-Output
+
+Ersatz-Gate (D19, Prelude P-1) statt `mise test`:
+
+```
+$ bash -c 'set -o pipefail; command go test ./... -count=1 > /tmp/go-test-t6.log 2>&1; echo "REAL_EXIT=$?"'
+REAL_EXIT=0
+```
+
+`/tmp/go-test-t6.log` (Auszug, alle Pakete `ok` oder `[no test files]`):
+
+```
+ok  	github.com/hmans/beans/internal/agent	0.566s
+ok  	github.com/hmans/beans/internal/commands	0.575s
+ok  	github.com/hmans/beans/internal/cors	1.508s
+ok  	github.com/hmans/beans/internal/gitutil	10.494s
+ok  	github.com/hmans/beans/internal/graph	1.917s
+ok  	github.com/hmans/beans/internal/portalloc	2.831s
+ok  	github.com/hmans/beans/internal/search	1.879s
+ok  	github.com/hmans/beans/internal/terminal	4.550s
+ok  	github.com/hmans/beans/internal/tui	2.637s
+ok  	github.com/hmans/beans/internal/ui	2.534s
+ok  	github.com/hmans/beans/internal/web	1.958s
+ok  	github.com/hmans/beans/internal/worktree	7.202s
+ok  	github.com/hmans/beans/pkg/bean	2.166s
+ok  	github.com/hmans/beans/pkg/beancore	4.231s
+ok  	github.com/hmans/beans/pkg/config	1.935s
+ok  	github.com/hmans/beans/pkg/forge	1.926s
+ok  	github.com/hmans/beans/pkg/safepath	1.874s
+```
+
+Kein `FAIL` in der vollen Ausgabe. `mise test` (mit `test:e2e`) **nicht** ausgeführt (Prelude
+P-1: e2e-Setup-Fail unabhängig vom Code, kein Gate laut D19).
+
+Build:
+
+```
+$ command go build -ldflags "-X .../internal/version.Version=0.4.2-fork.tty \
+    -X .../internal/version.Commit=9e11e67 \
+    -X .../internal/version.Date=2026-07-23T22:17:29Z" -o /tmp/beans-fork ./cmd/beans
+BUILD_EXIT=0
+$ /tmp/beans-fork version
+beans 0.4.2-fork.tty (9e11e67) built 2026-07-23T22:17:29Z
+```
+
+## Byte-Identitaets-Nachweis
+
+```
+$ which beans && beans version   # vor Install
+/opt/homebrew/bin/beans
+beans 0.4.2-fork.ti53 (3419e8a) built 2026-07-21T18:37:01Z
+
+$ beans roadmap > /tmp/roadmap-old.md          # altes installiertes Binary
+$ /tmp/beans-fork roadmap > /tmp/roadmap-new.md
+$ diff /tmp/roadmap-old.md /tmp/roadmap-new.md && echo "IDENTISCH"
+IDENTISCH
+
+$ shasum -a 256 /tmp/roadmap-old.md /tmp/roadmap-new.md
+96e058021d1817526053fc8aef69e8806459f57bb36a63ce0fe867ecea59455b  /tmp/roadmap-old.md
+96e058021d1817526053fc8aef69e8806459f57bb36a63ce0fe867ecea59455b  /tmp/roadmap-new.md
+```
+
+Beide Dateien 88 Zeilen, identische Prüfsumme. EARS-3-Gate erfüllt → Installation freigegeben.
+
+## Backup / Installation
+
+```
+$ cp /opt/homebrew/bin/beans /tmp/beans-backup-0.4.2-fork.ti53
+$ /tmp/beans-backup-0.4.2-fork.ti53 version
+beans 0.4.2-fork.ti53 (3419e8a) built 2026-07-21T18:37:01Z
+
+$ cp /tmp/beans-fork /opt/homebrew/bin/beans && chmod +x /opt/homebrew/bin/beans
+$ which beans
+/opt/homebrew/bin/beans
+$ beans version
+beans 0.4.2-fork.tty (9e11e67) built 2026-07-23T22:17:29Z
+```
+
+Backup-Pfad: `/tmp/beans-backup-0.4.2-fork.ti53` (ausführbar, geprüft).
+
+## Smoke
+
+**80-Spalten-Grenze (tmux pty, `beans-src`-Repo-Daten, kein Milestone/Feature-Container offen):**
+
+```
+$ tmux new-session -d -s roadmapsmoke80 -x 80 -y 400 "/tmp/beans-fork roadmap; sleep 3"
+$ tmux capture-pane -t roadmapsmoke80 -p -S -400 > /tmp/roadmap80-raw.txt
+$ command python3 -c "print(max(len(l) for l in [...] if l.strip()))"
+80
+$ awk '{print length($0)}' /tmp/roadmap80-raw.txt | sort -rn | head -3   # zum Vergleich, D22
+240
+240
+82
+```
+(Die `82`-Zeile aus `awk` ist die Leerzeile-Kopfzeile mit Steuerzeichen-Artefakt aus der
+Byte-Zählung, nicht Zeichenbreite — Bestätigung, dass `awk` hier unbrauchbar ist.)
+
+**Glyphen-Vollcheck (Demo-`.beans/`-Baum außerhalb des Repos, `/tmp/beans-demo-roadmap`, danach
+gelöscht):**
+
+```
+Roadmap
+════════════════════════════════════════════════════════════════════════════════════════════════════
+
+■ Milestone      Demo Milestone                                                    todo         omy2
+  ▸ Epic         Demo Epic                                                         todo         jhc9
+    - task       Demo leaf under epic                                              todo         60f4
+  ▪ Feature      Demo Feature Branch                                         high  todo         7qhh
+    - task       Demo leaf under feature                                           todo         2sbm
+  - task         Loose leaf under milestone                                        todo         t1i7
+```
+
+`grep -c "img.shields.io"` und `grep -c "]("` → beide `0`.
+
+**Cross-Repo (EARS-5):**
+
+```
+$ cd /Users/erik/Obsidian/tools/beans-tui/beans-tui-repository && beans roadmap
+# Roadmap
+                                          # (leer — alle 149 dortigen beans completed/scrapped, EXIT=0, kein Fehler)
+
+$ cd /Users/erik/Obsidian/tools/lean-stack && beans roadmap   # via tmux pty
+Roadmap
+════════════════════════════════════════════════════════════════════════════════════════════════════
+
+■ Milestone      Claude-Code-Config-Umstellung (TPIC-Rollen)                       completed    jsz1
+  ▸ Epic         Phase A — Rollen-Set-Umbau (cc/profiles/boot-prompts)             completed    84wv
+    - feature    Command: cc-Realization/Implementer-Session starten         high  todo         nhty
+                 (herdr)
+...
+EXITCODE=0
+```
+
+## Offene PO-Verifikationspunkte
+
+- **R01 (East-Asian-Ambiguous-Glyphen `■ ▸ ▪`):** Nur an Eriks echtem Terminal-Emulator
+  abschließend beurteilbar. tmux/pty (dieser Task) rendert die Glyphen einspaltig — ob Eriks
+  konkreter Terminal-Emulator (iTerm2/Terminal.app/Ghostty/etc.) sie ebenfalls einspaltig
+  rendert oder doppelt breit (dann verschieben sich Spalten um 1), ist **nicht** durch diesen
+  Task belegt. Bitte am echten Terminal mit `beans roadmap` gegenprüfen.
+- **Terminalbreiten außerhalb 80/110** (< 80 oder > 110 Spalten, `roadmapClampWidth`) wurden
+  in diesem Task nicht am echten Terminal geprüft, nur die 80-Spalten-Grenze und ein 100-Spalten-
+  Demo-Lauf.
+
+## Deviations/ERRATA
+
+1. **SC-601:** `mise test` nicht ausgeführt, stattdessen `command go test ./... -count=1`
+   (Prelude P-1/D19) — Playwright-Browser fehlt lokal, e2e ist kein Gate für dieses Epos.
+2. **SC-604:** `awk '{print length($0)}'` nicht als Beweis verwendet (liefert `240`, Byte- statt
+   Zeichenzählung, D22) — stattdessen `wc -m`/Python-Rune-Zählung über `tmux capture-pane`
+   (max. 80). Zusätzlich das wörtliche `awk`-Ergebnis als Falsifikations-Beleg dokumentiert.
+3. **SC-603:** wörtlicher Nachweis am realen `beans-src`-Repo unvollständig, weil die
+   Repo-Daten aktuell kein offenes Milestone/keinen offenen Feature-Container enthalten (0/0,
+   verifiziert per `beans list --json`) — kein Code-Defekt, reiner Datenzustand. Ergänzt um
+   Demo-`.beans/`-Baum außerhalb des Repos (angelegt und wieder gelöscht, keine Test-beans im
+   Projekt-`.beans/`).
+4. **SC-609:** Der wörtlich zitierte Commit `chore(beans): bt-xy2i scrapped (dup of
+   beans-f1t4)` existiert nicht als eigenständiger Commit — `bt-xy2i` wurde bereits vor
+   Beginn dieses Tasks in einem vorgelagerten Vorflug-Check gemeinsam mit dem D19-Nachtrag
+   committet (`3bbf1fa`, explizite Einzelpfade, kein Glob, Body referenziert `beans-f1t4`).
+   Intent erfüllt, Commit-Message weicht ab. Kein redundanter Leer-Commit erzeugt.
+5. **Abschluss-Status:** Task-Prompt instruiert explizit `beans-w1dn` auf `completed` (nicht
+   `to-review`) zu setzen, wenn alle SC erfüllt sind — abweichend vom generischen
+   Leaf-Autonomie-Standard. Als explizite Task-spezifische Anweisung befolgt; das Epic
+   `beans-1ec3` bleibt unangetastet (PO-Sache).
