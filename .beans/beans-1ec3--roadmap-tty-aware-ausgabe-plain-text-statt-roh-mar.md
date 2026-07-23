@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-07-23T20:34:50Z
+updated_at: 2026-07-23T20:45:05Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -86,3 +86,24 @@ Risikoregister vervollständigt — R05 fehlte:
   plus TTY-Renderer). Ein späterer Upstream-Merge wird dadurch aufwendiger.
   **Umgang:** bewusst akzeptiert (D01/D14) — PR #207 bleibt offen liegen, der Fork ist das
   Produkt. Kein Aktionsbedarf, nur Registrierung.
+
+## Nachtrag 2026-07-23 (PO, Vorflug-Check Realisierung) — D19 Test-Gate praezisiert
+
+**Befund:** `mise test` ist `depends = ["codegen", "test:e2e"]` + `run = "go test ./..."`.
+Der e2e-Teil ist lokal rot, aber nicht wegen Code:
+`browserType.launch: Executable doesn't exist at .../ms-playwright/chromium_headless_shell-1208/...`
+— das Playwright-Browser-Binary fehlt auf dieser Maschine. Alle Specs failen in 0-1 ms
+(Setup-Fail, kein Assertion-Fail). `go test ./...` allein: **EXIT=0, gruen**.
+
+**D19 (PO 2026-07-23):** Das Test-Gate dieses Epos ist **`go test ./...` gruen**, nicht
+`mise test`. Der e2e-Pfad ist **explizit ausgeklammert**: dieser Epos beruehrt ausschliesslich
+`internal/commands/roadmap*.go`, kein Frontend, kein GraphQL-Schema, kein Codegen-Input.
+Das e2e-Rot ist preexistierend und umgebungsbedingt. Kein Playwright-Browser-Download
+als Vorbedingung.
+
+**Ersetzt** in der Definition of Done die Zeile "mise test gruen" durch:
+- `go test ./...` gruen (EXIT=0).
+- `beans roadmap` gepiped byte-identisch zum Stand vorher.
+- Terminal-Smoke am echten TTY (T6).
+
+Die uebrigen DoD-Punkte bleiben unveraendert.
