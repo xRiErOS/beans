@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T21:54:24Z
+updated_at: 2026-07-23T22:09:05Z
 parent: beans-1ec3
 blocked_by:
     - beans-h30q
@@ -233,6 +233,71 @@ diff: KEIN UNTERSCHIED
 Jede Mutation isoliert nur die erwarteten Tests, keine Kollateral-Fehlschlaege in anderen Paketen.
 Rueckbau nach jeder Mutation via `cp /tmp/roadmap.go.backup internal/commands/roadmap.go`,
 `diff` gegen Backup leer (`RUECKBAU IDENTISCH`), danach volle Suite erneut gruen bestaetigt.
+
+## Blocker-Behebung (Runde 2, ce-specs-reviewer B01)
+
+**Blocker:** `TestRoadmapMarkdownByteIdentical` rief `roadmapOutput` in allen Faellen nur mit
+`links=true` auf. Der Reviewer mutierte den Markdown-Zweig auf `renderRoadmapMarkdown(data, true,
+linkPrefix)` (Parameter konstant statt durchgereicht) — alle 12 Tests blieben gruen, weil die
+`false`-Richtung (`--no-links`, `roadmapNoLinks`) nie beobachtet wurde.
+
+**Fix:** `TestRoadmapMarkdownByteIdentical` auf table-driven umgebaut, zwei Faelle
+(`links: true` / `links: false`), plus eine Fixture-Invariante-Assertion (die beiden
+`renderRoadmapMarkdown`-Aufrufe mit `links=true`/`false` muessen sich fuer die Fixture
+tatsaechlich unterscheiden — sonst waeren beide Subtests vakuos gruen gewesen, selbst gegen einen
+konstanten Parameter). Kein neuer Testname noetig, SC-502 bleibt an `TestRoadmapMarkdownByteIdentical`
+gebunden.
+
+**Mutations-Rot-Ausgabe** (beide Richtungen, wie vom Reviewer gefordert):
+
+Mutation `links` → `true` hardcodiert (`return renderRoadmapMarkdown(data, true, linkPrefix)`):
+
+```
+$ command go test ./internal/commands/ -run 'TestRoadmapMarkdownByteIdentical|TestRoadmapOutputSwitchesOnTTY|TestRoadmapOutputZeroColsFallsBackTo80' -v
+=== RUN   TestRoadmapMarkdownByteIdentical
+=== RUN   TestRoadmapMarkdownByteIdentical/links_enabled
+=== RUN   TestRoadmapMarkdownByteIdentical/links_disabled_(--no-links)
+    roadmap_test.go:704: roadmapOutput(non-tty, links=false) diverged from renderRoadmapMarkdown:
+        got:  "# Roadmap\n\n## Milestone: v1.0 ([beans-m1](some/prefix/m1--v10.md))\n\n### Epic: Auth ([beans-e1](some/prefix/e1--auth.md))\n\n\n- ![task](https://img.shields.io/badge/task-1d76db?style=flat-square) Login ([beans-t1](some/prefix/t1--login.md))\n\n"
+        want: "# Roadmap\n\n## Milestone: v1.0 (beans-m1)\n\n### Epic: Auth (beans-e1)\n\n\n- ![task](https://img.shields.io/badge/task-1d76db?style=flat-square) Login (beans-t1)\n\n"
+--- FAIL: TestRoadmapMarkdownByteIdentical (0.00s)
+    --- PASS: TestRoadmapMarkdownByteIdentical/links_enabled (0.00s)
+    --- FAIL: TestRoadmapMarkdownByteIdentical/links_disabled_(--no-links) (0.00s)
+```
+
+Nur der `links_disabled_(--no-links)`-Subtest failt (erwartet — `links=true`-Hardcode ist fuer
+den `links=true`-Fall unsichtbar, faellt aber genau dort auf, wo `--no-links` gesetzt ist).
+
+Mutation `links` → `false` hardcodiert (`return renderRoadmapMarkdown(data, false, linkPrefix)`):
+
+```
+$ command go test ./internal/commands/ -run 'TestRoadmapMarkdownByteIdentical' -v
+=== RUN   TestRoadmapMarkdownByteIdentical
+=== RUN   TestRoadmapMarkdownByteIdentical/links_enabled
+    roadmap_test.go:704: roadmapOutput(non-tty, links=true) diverged from renderRoadmapMarkdown:
+        got:  "# Roadmap\n\n## Milestone: v1.0 (beans-m1)\n\n### Epic: Auth (beans-e1)\n\n\n- ![task](https://img.shields.io/badge/task-1d76db?style=flat-square) Login (beans-t1)\n\n"
+        want: "# Roadmap\n\n## Milestone: v1.0 ([beans-m1](some/prefix/m1--v10.md))\n\n### Epic: Auth ([beans-e1](some/prefix/e1--auth.md))\n\n\n- ![task](https://img.shields.io/badge/task-1d76db?style=flat-square) Login ([beans-t1](some/prefix/t1--login.md))\n\n"
+=== RUN   TestRoadmapMarkdownByteIdentical/links_disabled_(--no-links)
+--- FAIL: TestRoadmapMarkdownByteIdentical (0.00s)
+    --- FAIL: TestRoadmapMarkdownByteIdentical/links_enabled (0.00s)
+    --- PASS: TestRoadmapMarkdownByteIdentical/links_disabled_(--no-links) (0.00s)
+```
+
+Nur der `links_enabled`-Subtest failt (spiegelbildlich). Beide Mutations-Richtungen isoliert
+nachgewiesen — der Parameter wird jetzt in beiden Richtungen ueberwacht.
+
+**Rueckbau:** `cp /tmp/roadmap.go.backup2 internal/commands/roadmap.go` nach jeder Mutation,
+`diff` gegen Backup leer (`RUECKBAU A IDENTISCH` / `RUECKBAU B IDENTISCH`). `git diff --stat
+internal/commands/roadmap.go` danach leer (Datei identisch zum Commit-Stand `21b6d0b`). Volle
+Suite erneut gruen: `command go clean -testcache && command go test ./...` — alle 17 Pakete `ok`,
+EXIT=0. `command gofmt -l internal/commands/roadmap.go` weiterhin leer; `roadmap_test.go` zeigt
+ausschliesslich die bereits dokumentierte, vorbestehende Dirtiness in Zeile 35/147 — der neue
+table-driven Testkoerper selbst ist gofmt-clean.
+
+**N01/N02 (Reviewer-Findings, zur Kenntnis genommen, kein Handlungsbedarf):** `fmt.Print` vs.
+`Println` in `RunE` bleibt strukturell untestbar (echter `os.Stdout`-Zugriff, wie die uebrigen
+7 `RunE`-Zeilen) — vom Reviewer per `pty` verifiziert, korrekt. Die `cmd.OutOrStdout()`/
+`os.Stdout`-Inkonsistenz zwischen JSON- und Markdown/TTY-Pfad ist aelter als T5 und nicht Scope.
 
 ## Deviations/ERRATA
 

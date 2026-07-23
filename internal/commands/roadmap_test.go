@@ -678,12 +678,41 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 // -through to renderRoadmapMarkdown -- character-for-character, with the
 // exact same arguments. This is the regression guard for the Q07/D02
 // byte-identity constraint at the function level.
+// Table-driven over both `links` values (reviewer B01): a prior version of
+// this test only ever passed links=true, so a mutation hardcoding the
+// markdown branch's `links` argument to `true` left the whole suite green --
+// the `false` direction was never exercised. `--no-links` is a real user
+// flag (roadmapNoLinks, roadmap.go); if roadmapOutput ever stopped
+// forwarding it, the piped/redirected markdown output would silently ignore
+// it. Both directions must be observed for the wiring itself to be pinned.
 func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 	data := roadmapOutputFixture()
-	got := roadmapOutput(data, false, 0, true, "some/prefix")
-	want := renderRoadmapMarkdown(data, true, "some/prefix")
-	if got != want {
-		t.Errorf("roadmapOutput(non-tty) diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", got, want)
+
+	tests := []struct {
+		name  string
+		links bool
+	}{
+		{name: "links enabled", links: true},
+		{name: "links disabled (--no-links)", links: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := roadmapOutput(data, false, 0, tt.links, "some/prefix")
+			want := renderRoadmapMarkdown(data, tt.links, "some/prefix")
+			if got != want {
+				t.Errorf("roadmapOutput(non-tty, links=%v) diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", tt.links, got, want)
+			}
+			// links=false must actually change the rendered output relative
+			// to links=true for this fixture (has a milestone with a bean
+			// ref) -- otherwise the two subtests could both pass vacuously
+			// against a `links` argument that was never wired through at all.
+			withLinks := renderRoadmapMarkdown(data, true, "some/prefix")
+			withoutLinks := renderRoadmapMarkdown(data, false, "some/prefix")
+			if withLinks == withoutLinks {
+				t.Fatal("fixture invariant broken: renderRoadmapMarkdown output identical for links=true/false -- test cannot distinguish the two branches")
+			}
+		})
 	}
 }
 
