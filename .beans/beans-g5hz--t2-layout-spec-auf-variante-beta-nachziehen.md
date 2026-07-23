@@ -5,7 +5,7 @@ status: todo
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T20:28:32Z
+updated_at: 2026-07-23T20:34:50Z
 parent: beans-1ec3
 ---
 
@@ -60,3 +60,29 @@ getippte Layout-Literale waren 2-5 Zeichen zu kurz (3 blockierende Findings).
 - `docs/roadmap-tty-output/DESIGN.md` (Layout-Regeln, Ziel-Format-Block, Gruppierungs-Abschnitt)
 - `docs/roadmap-tty-output/DECISIONS.md` (D13-D18 anhängen, D11 markieren)
 - `docs/roadmap-tty-output/TASKS.md` (T04-Zeile)
+
+
+## Nachtrag 2026-07-23 (Gate-B-Verifikation, F01/F02)
+
+Die Verifikation der Operationalisierung fand zwei Plan-Anforderungen aus Task 2 Step 3, die
+oben keine eigene EARS/SC-Entsprechung hatten. Sie sind hiermit verbindlich ergänzt.
+
+### Zusätzliche EARS-Anforderungen
+
+- **EARS-8** THE DESIGN.md SHALL im Abschnitt „### Gruppierung" den Satz „**Nur Epics sind Äste.**
+  Features/Tasks bleiben Blätter …" nicht mehr enthalten; er SHALL durch die D13-Formulierung
+  ersetzt sein („**Epics und Features sind Äste**", inkl. Hinweis auf flaches `featureGroup.Items`
+  und fixe Render-Tiefe 4).
+- **EARS-9** THE DESIGN.md SHALL im Abschnitt „## Bewusst ausgeklammert" die Zeile
+  „- Rekursive Äste (Feature-Branches)." nicht mehr enthalten (durch D13 erledigt).
+
+### Zusätzliche Akzeptanzkriterien
+
+- [ ] **SC-208** Der „Ziel-Format"-Codeblock in DESIGN.md ist **zeichengleich** mit dem
+      `want`-Literal aus `TestRenderRoadmapPrettyAt80` (Task 4 / bean beans-h30q).
+      Prüfung: beide Blöcke extrahieren und `diff`en — keine Abweichung.
+      Grund: Spec und Test dürfen nicht auseinanderlaufen; Runde 1 des Plan-Reviews fiel
+      über genau diese Art Drift.
+- [ ] **SC-209** `grep -c 'Nur Epics sind Äste' docs/roadmap-tty-output/DESIGN.md` liefert `0`.
+- [ ] **SC-210** `grep -c 'Rekursive Äste (Feature-Branches)' docs/roadmap-tty-output/DESIGN.md`
+      liefert `0`.

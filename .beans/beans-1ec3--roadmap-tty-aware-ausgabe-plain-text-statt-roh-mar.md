@@ -3,8 +3,9 @@
 title: 'roadmap: TTY-aware Ausgabe (Plain-Text statt Roh-Markdown)'
 status: todo
 type: epic
+priority: normal
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-07-23T20:26:08Z
+updated_at: 2026-07-23T20:34:50Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -75,3 +76,13 @@ Remotes: `fork` = xRiErOS, `origin` = hmans. **Push nur nach `fork`, nie nach `o
 - `beans roadmap` am Terminal: vier Ebenen, bündige Titel, keine Badges/Links, bei 80 Spalten
   kein Umbruch.
 - `/opt/homebrew/bin/beans` meldet `0.4.2-fork.tty` und wirkt in `beans-tui` und `lean-stack`.
+
+
+## Nachtrag 2026-07-23 (Gate-B-Verifikation, F03)
+
+Risikoregister vervollständigt — R05 fehlte:
+
+- **R05** Das Fork-Delta gegen `hmans/beans` wächst um einen zweiten Commit-Strang (Nesting-Fix
+  plus TTY-Renderer). Ein späterer Upstream-Merge wird dadurch aufwendiger.
+  **Umgang:** bewusst akzeptiert (D01/D14) — PR #207 bleibt offen liegen, der Fork ist das
+  Produkt. Kein Aktionsbedarf, nur Registrierung.
