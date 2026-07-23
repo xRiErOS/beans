@@ -1,11 +1,11 @@
 ---
 # beans-h30q
 title: T4 Tree-Walker renderRoadmapPretty
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T20:28:43Z
+updated_at: 2026-07-23T21:27:02Z
 parent: beans-1ec3
 blocked_by:
     - beans-ejoz
@@ -75,3 +75,39 @@ Layout-Konstanten.
 func renderRoadmapPretty(data *roadmapData, width int) string
 func roadmapClampWidth(cols int) int
 ```
+
+## Prelude 2026-07-23 (aus T1-T3-Reviews, vor der Task-Arbeit lesen)
+
+T3 (`beans-ejoz`) ist APPROVED — aber erst in Runde 2. Der erste Lauf war CHANGES_REQUIRED bei
+**komplett gruener Suite**. Was T4 daraus mitnimmt:
+
+- **P-1 Umgebungsfallen (D21/D22 im Epic-bean `beans-1ec3`).**
+  - `go` ist eine **Shell-Funktion** (dotfiles-Sync), verdeckt den Compiler, laeuft mit Exit 0
+    durch **ohne einen Test auszufuehren** → immer `command go test ./...`.
+  - `awk` misst **Bytes statt Zeichen** → Breitenpruefungen mit `wc -m` oder Rune-Zaehlung.
+
+- **P-2 PLAN.md ist NICHT die Layout-Referenz.** Der Quelltext-Block in `PLAN.md` Task 2 Step 1
+  ist nachweislich lueckenhaft (keine `No Milestone`-Verarbeitung; 277 von 278 beans fielen raus).
+  Maßgeblich sind allein `docs/roadmap-tty-output/render-prototype.py` (ausfuehren, Ausgabe
+  uebernehmen) und der DESIGN.md-Abschnitt **"## Ziel-Format (eingefroren)"** — letzterer wird
+  von dir woertlich als `want`-Literal uebernommen.
+
+- **P-3 Kein Demo-Datensatz im Repo.** Brauchst du einen, baue ihn **ausserhalb** des Repos
+  (z. B. `/tmp`) mit `--beans-path`, niemals im Projekt-`.beans/`. IDs/Titel stehen in
+  `## Notes for T3` von `beans-g5hz`.
+
+- **P-4 Ein gruener Test beweist nicht, dass die Zeile getestet ist.** T3 fiel ueber genau das:
+  - Der D17-Grenzfall (`prefixW == 17`) war ungetestet — der vorhandene Fall nutzte 26 Runen,
+    weit jenseits der Grenze. Mutation `>=`→`>` liess die Suite gruen.
+  - Ein Umlaut-Testfall suggerierte Rune-Abdeckung, hatte aber zu grosse Margin:
+    `"Pruefung"` ist 7 Runen **und** 8 Bytes, beide <= 8 — Byte- und Rune-Zaehlung lieferten
+    zufaellig dasselbe. Erst `"ab é"` bei Breite 4 (Rune-Summe 4, Byte-Summe 5) trennte sie.
+
+  **Konsequenz fuer T4:** Fuer jede load-bearing Zeile (Guards, Grenzwerte, Zaehl-Logik,
+  Inclusion-Bedingungen) selbst pruefen: *Zeile brechen → failt mindestens ein Test?* Wenn nein,
+  fehlt der Test. Konstruiere Testfaelle an der **Grenze**, nicht bequem daneben. Der Reviewer
+  wird genau das per Mutation nachpruefen.
+
+- **P-5 Zahlen zaehlen, nicht schaetzen.** Die T3-Summary behauptete "17 Subtests"; tatsaechlich
+  8 Testfunktionen / 12 Subtests. Zahlen frisch aus dem `-v`-Output ziehen
+  (`grep -c "^    --- PASS"`).
