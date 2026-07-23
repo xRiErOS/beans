@@ -15,6 +15,7 @@ import (
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 //go:embed roadmap.tmpl
@@ -85,17 +86,42 @@ var roadmapCmd = &cobra.Command{
 			return enc.Encode(data)
 		}
 
-		// Markdown output
+		// TTY-aware rendering: gerendert am Terminal, Markdown bei Pipe/Redirect
+		// (D02). The width is only queried when stdout is a terminal (EARS-6) --
+		// a non-TTY caller never pays for term.GetSize, and its result would be
+		// discarded by roadmapOutput's markdown branch anyway.
 		links := !roadmapNoLinks
 		linkPrefix := roadmapLinkPrefix
 		if links && linkPrefix == "" {
 			// Default: relative path from cwd to .beans directory
 			linkPrefix = defaultLinkPrefix()
 		}
-		md := renderRoadmapMarkdown(data, links, linkPrefix)
-		fmt.Print(md)
+
+		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+		cols := 0
+		if isTTY {
+			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
+				cols = w
+			}
+		}
+
+		fmt.Print(roadmapOutput(data, isTTY, cols, links, linkPrefix))
 		return nil
 	},
+}
+
+// roadmapOutput is the testable TTY switch (EARS-1/EARS-2/EARS-5): TTY gets
+// the plain-text tree via renderRoadmapPretty, everything else (pipe,
+// redirect, non-terminal) gets renderRoadmapMarkdown unchanged -- byte-
+// identical to calling renderRoadmapMarkdown directly (Q07/D02). cols is
+// clamped via roadmapClampWidth regardless of what the caller passed in; a
+// caller that could not determine a terminal width passes 0, which lands on
+// the 80-column floor (D08).
+func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPrefix string) string {
+	if isTTY {
+		return renderRoadmapPretty(data, roadmapClampWidth(cols))
+	}
+	return renderRoadmapMarkdown(data, links, linkPrefix)
 }
 
 // buildRoadmap constructs the roadmap data structure from beans.

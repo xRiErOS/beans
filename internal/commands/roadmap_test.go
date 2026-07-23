@@ -1,8 +1,10 @@
 package commands
 
 import (
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/config"
@@ -613,5 +615,92 @@ func TestChildlessCompletedFeatureDroppedByArchiveFilter(t *testing.T) {
 
 	if result.Unscheduled != nil {
 		t.Errorf("expected Unscheduled to be nil (completed childless feature dropped), got %+v", result.Unscheduled)
+	}
+}
+
+// --- T5: roadmapOutput TTY switch -------------------------------------------
+//
+// roadmapOutputFixture is a standalone roadmapData literal (T4 pattern) --
+// NOT prettyFixture(), whose want-literal in TestRenderRoadmapPrettyAt80 is
+// the frozen DESIGN.md block and must not be perturbed by an unrelated test.
+
+func roadmapOutputFixture() *roadmapData {
+	now := time.Now()
+	m := &bean.Bean{ID: "beans-m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now, Path: "m1--v10.md"}
+	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "Auth", Status: "todo", Path: "e1--auth.md"}
+	t1 := &bean.Bean{ID: "beans-t1", Type: "task", Title: "Login", Status: "todo", Priority: "high", Path: "t1--login.md"}
+	return &roadmapData{
+		Milestones: []milestoneGroup{
+			{
+				Milestone: m,
+				Epics: []epicGroup{
+					{Epic: e, Items: []*bean.Bean{t1}},
+				},
+			},
+		},
+	}
+}
+
+// SC-501: the TTY flag alone must decide which renderer roadmapOutput picks
+// -- pipe gets the markdown artifact (badges + links), TTY gets the plain
+// table (no badges, no markdown link syntax, glyph tree).
+func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
+	data := roadmapOutputFixture()
+
+	t.Run("pipe (non-tty) renders markdown", func(t *testing.T) {
+		got := roadmapOutput(data, false, 0, true, "")
+		if !strings.HasPrefix(got, "# Roadmap") {
+			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
+		}
+		if !strings.Contains(got, "img.shields.io") {
+			t.Error("expected markdown output to contain an img.shields.io badge")
+		}
+	})
+
+	t.Run("tty renders plain-text table", func(t *testing.T) {
+		got := roadmapOutput(data, true, 80, true, "")
+		if !strings.HasPrefix(got, "Roadmap") {
+			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
+		}
+		if strings.Contains(got, "img.shields.io") {
+			t.Error("TTY output must not contain shields.io badges (EARS-4)")
+		}
+		if strings.Contains(got, "](") {
+			t.Error("TTY output must not contain markdown link syntax (EARS-4)")
+		}
+		if !strings.Contains(got, "■ Milestone") {
+			t.Error("expected TTY output to contain the milestone glyph line")
+		}
+	})
+}
+
+// SC-502 / EARS-5: the non-TTY path of roadmapOutput must be a pure pass
+// -through to renderRoadmapMarkdown -- character-for-character, with the
+// exact same arguments. This is the regression guard for the Q07/D02
+// byte-identity constraint at the function level.
+func TestRoadmapMarkdownByteIdentical(t *testing.T) {
+	data := roadmapOutputFixture()
+	got := roadmapOutput(data, false, 0, true, "some/prefix")
+	want := renderRoadmapMarkdown(data, true, "some/prefix")
+	if got != want {
+		t.Errorf("roadmapOutput(non-tty) diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", got, want)
+	}
+}
+
+// Mutation guard for the "fallback bei unbestimmbarer Breite" line (D08):
+// roadmapOutput must run cols through roadmapClampWidth, not use it raw. A
+// cols=0 caller (no terminal detected) must land on the 80-column floor, not
+// a 0-width render.
+func TestRoadmapOutputZeroColsFallsBackTo80(t *testing.T) {
+	data := roadmapOutputFixture()
+	got := roadmapOutput(data, true, 0, true, "")
+
+	lines := strings.SplitN(got, "\n", 3)
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d: %q", len(lines), got)
+	}
+	sepWidth := utf8.RuneCountInString(lines[1])
+	if sepWidth != 80 {
+		t.Errorf("separator width = %d, want 80 (roadmapClampWidth(0) floor, D08)", sepWidth)
 	}
 }
