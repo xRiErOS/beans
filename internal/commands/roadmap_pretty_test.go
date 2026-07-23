@@ -60,8 +60,8 @@ func TestRoadmapRightBlock(t *testing.T) {
 			if got != tt.want {
 				t.Errorf("roadmapRightBlock() =\n%q\nwant\n%q", got, tt.want)
 			}
-			if len(got) != roadmapRightW {
-				t.Errorf("roadmapRightBlock() width = %d, want %d", len(got), roadmapRightW)
+			if utf8.RuneCountInString(got) != roadmapRightW {
+				t.Errorf("roadmapRightBlock() width = %d, want %d", utf8.RuneCountInString(got), roadmapRightW)
 			}
 		})
 	}
@@ -107,6 +107,30 @@ func TestRoadmapWrapTitle(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestRoadmapWrapTitleRuneVsByteWidth pins D16 (utf8.RuneCountInString, not
+// len()) inside the word-boundary-wrap decision of roadmapWrapTitle itself.
+// "ab é": rune-sum of "ab" + space + "é" is 2+1+1 = 4 == width, so the words
+// fit onto one line under rune counting. Byte-sum is 2+1+2 = 5 > width,
+// because "é" is a 2-byte, 1-rune UTF-8 sequence — if the decision used
+// len() it would wrap one word too early ("ab", "é" on separate lines).
+// Both words individually stay within the width in both rune and byte
+// counting, so the hard-break loop is never entered and this cannot panic
+// regardless of which counting the mutation under test uses.
+// Verified independently via `command python3` (rune sum 4, byte sum 5).
+func TestRoadmapWrapTitleRuneVsByteWidth(t *testing.T) {
+	got := roadmapWrapTitle("ab é", 4)
+	want := []string{"ab é"}
+	if len(got) != len(want) {
+		t.Fatalf("roadmapWrapTitle(%q, 4) = %q (%d lines), want %q (%d lines)",
+			"ab é", got, len(got), want, len(want))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Errorf("line %d = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 
@@ -167,5 +191,30 @@ func TestRoadmapLineOverlongPrefix(t *testing.T) {
 	got := roadmapLine("      - verylongcustomtype", b, true, 80)
 	if !strings.HasPrefix(got, "      - verylongcustomtype Titel") {
 		t.Errorf("overlong prefix not followed by single space + title: %q", got)
+	}
+}
+
+// TestRoadmapLinePrefixExactlyAtTitleCol pins the D17 boundary itself: a
+// prefix of EXACTLY roadmapTitleCol (17) runes. D17 says "Präfix >= 17"
+// (epic bean beans-1ec3) — at prefixW == 17 the overflow branch (one
+// separating space) must fire, not the normal padding branch. The two
+// branches happen to produce the same padding COUNT at this exact boundary
+// (roadmapTitleCol-prefixW degenerates to 0 spaces), so a mutated `>`
+// instead of `>=` produces prefix+title with NO separating space, while the
+// correct `>=` produces prefix+" "+title. TestRoadmapLineOverlongPrefix uses
+// a 26-rune prefix and does not exercise this boundary at all.
+// Verified independently via `command python3`: correct/mutated outputs
+// differ ("================= Word" vs "=================Word").
+func TestRoadmapLinePrefixExactlyAtTitleCol(t *testing.T) {
+	prefix := strings.Repeat("=", roadmapTitleCol) // synthetic, exactly 17 runes
+	if n := utf8.RuneCountInString(prefix); n != roadmapTitleCol {
+		t.Fatalf("test setup: prefix has %d runes, want %d", n, roadmapTitleCol)
+	}
+	b := &bean.Bean{ID: "beans-ex17", Title: "Word", Type: "task",
+		Status: "todo", Priority: "normal"}
+	got := roadmapLine(prefix, b, false, 80)
+	want := prefix + " " + "Word"
+	if !strings.HasPrefix(got, want) {
+		t.Errorf("prefix at exactly title col %d: got %q, want prefix %q", roadmapTitleCol, got, want)
 	}
 }

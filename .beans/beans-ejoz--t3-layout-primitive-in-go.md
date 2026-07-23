@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T21:13:15Z
+updated_at: 2026-07-23T21:23:55Z
 parent: beans-1ec3
 blocked_by:
     - beans-l36h
@@ -61,6 +61,11 @@ TDD in vier Schritten: erst `roadmapShortID` + `roadmapRightBlock` (Step 1-4), d
 - [x] **SC-307** Jeder Fehlschlag-Step wurde vor der Implementierung ausgeführt und zeigte den
       im Plan angegebenen `undefined:`-Fehler (RED vor GREEN).
 - [x] **SC-308** Commit `feat(roadmap): layout primitives for tty output` mit `Refs: <bean-id>`.
+- [x] **SC-309** (Review-Nachtrag, `ce-specs-reviewer` Blocker 1) `TestRoadmapLinePrefixExactlyAtTitleCol`
+      pinnt D17 an der exakten Grenze (`prefixW == roadmapTitleCol`); Mutation `>=`→`>` verifiziert rot.
+- [x] **SC-310** (Review-Nachtrag, `ce-specs-reviewer` Blocker 2) `TestRoadmapWrapTitleRuneVsByteWidth`
+      pinnt D16 (Rune- statt Byte-Zählung) innerhalb von `roadmapWrapTitle`; Mutation
+      `utf8.RuneCountInString`→`len()` (nur in dieser Funktion) verifiziert rot.
 
 ## Betroffene Pfade
 
@@ -123,9 +128,23 @@ Priority/Status/ID, D10-Ausblendung von `normal`), `roadmapWrapTitle` (Wortgrenz
 Hard-Break für überlange Wörter, Rune-basiert nach D16), `roadmapLine` (eine Bean-Zeile,
 Titel-Start Spalte 17, D17-Overflow-Regel, D07-Hanging-Indent ohne Attribute auf
 Fortsetzungszeilen). TDD strikt in den zwei Plan-Schritten (Step 1-4, dann 5-8) durchgeführt,
-RED vor jeder Implementierung belegt. Alle 6 Testfunktionen (17 Subtests) grün, `command go
-test ./...` grün, `command go build ./...` grün. Markdown-Pfad unangetastet (nur zwei neue
-Dateien, `git status --short internal/commands/` zeigt ausschließlich die beiden `??`-Einträge).
+RED vor jeder Implementierung belegt. `command go test ./...` grün, `command go build ./...`
+grün. Markdown-Pfad unangetastet (nur zwei neue Dateien, `git status --short internal/commands/`
+zeigt ausschließlich die beiden `??`-Einträge).
+
+**Review-Nachtrag (`ce-specs-reviewer`, CHANGES_REQUIRED → behoben, keine Logikänderung):** zwei
+Mutations-Coverage-Lücken geschlossen — `TestRoadmapLinePrefixExactlyAtTitleCol` (D17-Grenzfall
+`prefixW == roadmapTitleCol`) und `TestRoadmapWrapTitleRuneVsByteWidth` (D16 Rune- vs.
+Byte-Zählung *innerhalb* von `roadmapWrapTitle`, isoliert von der bereits getesteten Nutzung in
+`roadmapLine`). Beide Mutationen wurden selbst gesetzt, verifiziert rot, sauber zurückgebaut
+(`git checkout --`, `diff` gegen Vor-Mutation-Kopie identisch) — siehe „Test-Output" und
+„Blocker-Behebung". Zusätzlich `TestRoadmapRightBlock`s Breitencheck von `len()` auf
+`utf8.RuneCountInString` gezogen (D16-Konsistenz, non-blocking Finding). Nach der Erweiterung:
+**8 Testfunktionen, davon 3 table-driven mit insgesamt 12 Subtests** (`TestRoadmapShortID` 4,
+`TestRoadmapRightBlock` 3, `TestRoadmapWrapTitle` 5) plus 5 Einzeltests ohne Subtests
+(`TestRoadmapWrapTitleRuneVsByteWidth`, `TestRoadmapLine`, `TestRoadmapLineWrapsWithHangingIndent`,
+`TestRoadmapLineOverlongPrefix`, `TestRoadmapLinePrefixExactlyAtTitleCol`) — frisch gezählt aus
+dem `-v`-Output (`grep -c '^    --- PASS'` → 12, `grep -c '^--- PASS'` → 8), nicht geschätzt.
 
 ## Test-Output
 
@@ -170,7 +189,7 @@ FAIL	github.com/hmans/beans/internal/commands [build failed]
 FAIL
 ```
 
-**GREEN — Step 8 (alle sechs Testfunktionen, 17 Subtests):**
+**GREEN — Step 8 (ursprünglich sechs Testfunktionen, vor dem Review-Nachtrag):**
 
 ```
 $ command go test ./internal/commands/ -run 'TestRoadmap' -v
@@ -182,6 +201,26 @@ $ command go test ./internal/commands/ -run 'TestRoadmap' -v
 --- PASS: TestRoadmapLineOverlongPrefix
 PASS
 ok  	github.com/hmans/beans/internal/commands	0.624s
+```
+
+**GREEN — nach Review-Nachtrag (8 Testfunktionen, 12 Subtests):**
+
+```
+$ command go test ./internal/commands/ -run TestRoadmap -v -count=1
+--- PASS: TestRoadmapShortID (4 Subtests)
+--- PASS: TestRoadmapRightBlock (3 Subtests)
+--- PASS: TestRoadmapWrapTitle (5 Subtests)
+--- PASS: TestRoadmapWrapTitleRuneVsByteWidth
+--- PASS: TestRoadmapLine
+--- PASS: TestRoadmapLineWrapsWithHangingIndent
+--- PASS: TestRoadmapLineOverlongPrefix
+--- PASS: TestRoadmapLinePrefixExactlyAtTitleCol
+PASS
+ok  	github.com/hmans/beans/internal/commands	0.629s
+$ command go test ./internal/commands/ -run TestRoadmap -v -count=1 2>&1 | grep -c '^    --- PASS'
+12
+$ command go test ./internal/commands/ -run TestRoadmap -v -count=1 2>&1 | grep -c '^--- PASS'
+8
 ```
 
 **Gate — voller Build + volle Testsuite (D19, `go test ./...`, nicht `mise test`):**
@@ -220,14 +259,33 @@ $ git diff --stat -- internal/commands/roadmap.go internal/commands/roadmap.tmpl
 (leer)
 ```
 
+## Blocker-Behebung (Review-Runde 2, `ce-specs-reviewer`, CHANGES_REQUIRED)
+
+Beide Blocker waren Mutations-Coverage-Lücken, keine Logikfehler — `roadmap_pretty.go` blieb
+unverändert (nur `roadmap_pretty_test.go` geändert). Jede Mutation wurde selbst gesetzt,
+verifiziert rot, dann sauber zurückgebaut.
+
+| Blocker | Neuer Test | Mutation | Rot-Beweis (zitiert) | Rückbau |
+|---|---|---|---|---|
+| 1 (D17-Grenzfall) | `TestRoadmapLinePrefixExactlyAtTitleCol` | `if prefixW >= roadmapTitleCol` → `if prefixW > roadmapTitleCol` | `--- FAIL: TestRoadmapLinePrefixExactlyAtTitleCol (0.00s)` mit `got "=================Word...", want prefix "================= Word"` — genau dieser eine Test fällt, alle anderen `TestRoadmap*` bleiben `PASS` | `git checkout -- internal/commands/roadmap_pretty.go`; `git diff --stat` leer; `diff` gegen Vor-Mutation-Kopie → `IDENTICAL_TO_ORIG` |
+| 2 (D16 in `roadmapWrapTitle`) | `TestRoadmapWrapTitleRuneVsByteWidth` | alle 3 `utf8.RuneCountInString`-Aufrufe *innerhalb* der Funktion `roadmapWrapTitle` (nicht `roadmapLine`) → `len` | `--- FAIL: TestRoadmapWrapTitleRuneVsByteWidth (0.00s)` mit `roadmapWrapTitle("ab é", 4) = ["ab" "é"] (2 lines), want ["ab é"] (1 lines)` — der vorbestehende Subtest `TestRoadmapWrapTitle/umlauts_count_as_one_cell` bleibt unter dieser Mutation weiterhin `PASS` (bestätigt exakt die Diagnose des Reviewers: zu großzügige Margin) | `git checkout -- internal/commands/roadmap_pretty.go`; `git diff --stat` leer; `diff` gegen Vor-Mutation-Kopie → `IDENTICAL_TO_ORIG` |
+
+Nach beiden Rückbauten: `command go build ./...` → `BUILD_OK`; `command go test ./...` → alle
+Pakete `ok`, `EXIT=0`. `git status --short internal/commands/` zeigt danach nur noch
+`M internal/commands/roadmap_pretty_test.go` (die Implementierungsdatei ist unverändert
+gegenüber dem Vor-Review-Commit).
+
 ## Deviations/ERRATA
 
-Keine. `PLAN.md` Task 3 war (anders als Task 2 Step 1, siehe P-2) vollständig und intern
-konsistent — Go-Quelltext und Testfälle wurden wörtlich übernommen (die Task-bean weist das
-explizit an: „von dort übernehmen"). Trotzdem wurde jedes literale `want`-Zeichenkettenliteral
-vor Verwendung unabhängig per `command python3` aus der jeweiligen Formel nachgerechnet statt
-blind abgeschrieben — siehe Herkunft-der-Literale-Abschnitt im Supervisor-Report. Keine
-Abweichung von Signatur, Konstanten oder Testfällen des Produzieren-Blocks.
+Keine inhaltliche Abweichung. `PLAN.md` Task 3 war (anders als Task 2 Step 1, siehe P-2)
+vollständig und intern konsistent — Go-Quelltext und Testfälle wurden wörtlich übernommen (die
+Task-bean weist das explizit an: „von dort übernehmen"). Jedes literale `want`-Zeichenkettenliteral
+wurde vor Verwendung unabhängig per `command python3` aus der jeweiligen Formel nachgerechnet
+statt blind abgeschrieben — siehe Herkunft-der-Literale-Abschnitt im Supervisor-Report. Keine
+Abweichung von Signatur, Konstanten oder Testfällen des Produzieren-Blocks. Review-Runde 2
+(CHANGES_REQUIRED) verlangte zwei zusätzliche Tests plus eine D16-Konsistenzkorrektur in
+`TestRoadmapRightBlock` (`len()`→`utf8.RuneCountInString`) — siehe „Blocker-Behebung", eigener
+Fix-Commit, keine Änderung an `roadmap_pretty.go`.
 
 ## Notes for T4
 
