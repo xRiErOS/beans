@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-07-23T20:53:27Z
+updated_at: 2026-07-23T21:08:54Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -130,3 +130,43 @@ zufaellig vorgab.
 **Zaehler-Hinweis:** Die in bean-Bodies fixierten Commit-Zahlen (`git log origin/main..main`)
 veralten, sobald ein bean-Abschluss-Commit dazukommt. Jeder Task zaehlt selbst frisch, statt
 sich auf eine im bean notierte Zahl zu verlassen.
+
+## Nachtrag 2026-07-23 (ce-specs-reviewer T2) — D22 `awk` misst Bytes + PLAN-Luecke
+
+**D22 (verbindlich fuer alle Tasks dieses Epos):** `/usr/bin/awk` auf dieser Maschine ist
+**nicht multibyte-aware**, trotz UTF-8-Locale. `awk "{print length(\$0)}"` misst **Bytes**, nicht
+Zeichen. Bei einer Ausgabe mit den Glyphen `■ ▸ ▪` meldet es **240 statt 80**.
+
+Fuer jede Breitenpruefung stattdessen:
+
+```
+wc -m                      # Zeichen, nicht Bytes
+command python3 -c "..."   # Rune-Zaehlung
+```
+
+Mehrere Akzeptanzkriterien dieses Epos zitieren woertlich einen `awk`-Befehl. **Der Buchstabe
+dieser Kriterien ist auf dieser Maschine untauglich — die Absicht zaehlt (Zeilenbreite in
+Zeichen).** Wer den awk-Wert als Beweis meldet, meldet einen Fehlbefund.
+
+Zusammen mit **D21** (`go` ist eine Shell-Funktion, verdeckt den Compiler) ist das die zweite
+Stelle, an der ein naiv abgesetztes Standard-Kommando hier still das Falsche misst. **Generelle
+Regel:** Bevor ein Kommando als Beweis zitiert wird, verifizieren, dass es misst, was es messen
+soll.
+
+## Nachtrag 2026-07-23 — PLAN.md Task 2 Step 1 ist lueckenhaft (bestaetigt)
+
+Der `ce-specs-reviewer` hat unabhaengig bestaetigt: der in `docs/roadmap-tty-output/PLAN.md`
+Task 2 Step 1 (Zeilen 169-260) woertlich vorgegebene Python-Quelltext iteriert **nur** ueber
+Milestones und kennt **keine** Verarbeitung von `kids[""]`. Derselbe Plan-Abschnitt zeigt in
+Step 3 aber eine Zielausgabe **mit** `No Milestone`-Sektion (D18). **Der Plan ist intern
+inkonsistent** — der gegebene Quelltext kann die vom selben Plan geforderte Ausgabe nicht
+erzeugen. Konkrete Auswirkung an echten Daten: 277 von 278 Nicht-Milestone-beans waeren
+kommentarlos aus der Ausgabe gefallen.
+
+**Behoben** in `docs/roadmap-tty-output/render-prototype.py` (T2), inkl. Ausschluss des
+Milestone-beans selbst aus `kids[""]` (sonst Doppel-Render).
+
+**Verbindlich fuer alle Folge-Tasks:** Maßgebliche Layout-Referenz ist die **Datei**
+`docs/roadmap-tty-output/render-prototype.py` und der DESIGN.md-Block "Ziel-Format
+(eingefroren)" — **nicht** der Quelltext-Block in PLAN.md. Wer PLAN.md Task 2 Step 1 als
+Vorlage nimmt, laeuft in dieselbe Luecke.

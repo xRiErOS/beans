@@ -1,11 +1,11 @@
 ---
 # beans-ejoz
 title: T3 Layout-Primitive in Go
-status: todo
+status: in-progress
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T20:28:43Z
+updated_at: 2026-07-23T21:09:15Z
 parent: beans-1ec3
 blocked_by:
     - beans-l36h
@@ -87,3 +87,30 @@ func roadmapLine(prefix string, b *bean.Bean, showPrio bool, width int) string
 
 `roadmapLine` liefert mehrzeilig, mit `
 ` verbunden, **ohne** Trailing-Newline.
+
+## Prelude 2026-07-23 (aus T1- und T2-Review, vor der eigentlichen Task-Arbeit lesen)
+
+Non-blocking Findings der `ce-specs-reviewer`-Laeufe zu T1 (`beans-l36h`) und T2 (`beans-g5hz`),
+beide APPROVED, keine Blocker.
+
+- **P-1 Umgebungsfallen (D21/D22 im Epic-bean `beans-1ec3`).** Zwei Standard-Kommandos liefern
+  hier still Falsches:
+  - `go` ist eine **Shell-Funktion** (dotfiles-Sync), die den Compiler verdeckt und mit Exit 0
+    durchlaeuft, **ohne einen Test auszufuehren** → immer `command go test ./...`.
+  - `awk` misst **Bytes statt Zeichen** → fuer Breitenpruefungen `wc -m` oder Rune-Zaehlung.
+  Ein Beweis aus einem dieser Kommandos ohne Gegenprobe wird vom Review zurueckgewiesen.
+
+- **P-2 PLAN.md ist NICHT die Layout-Referenz.** Der Quelltext-Block in `PLAN.md` Task 2 Step 1
+  ist nachweislich lueckenhaft (keine `No Milestone`-Verarbeitung; 277 von 278 beans fielen
+  raus). Maßgeblich sind allein:
+  - die Datei `docs/roadmap-tty-output/render-prototype.py` (ausfuehren, Ausgabe uebernehmen),
+  - der DESIGN.md-Abschnitt **"## Ziel-Format (eingefroren)"** — wird von T4 woertlich als
+    `want`-Literal uebernommen.
+
+- **P-3 Kein Demo-Datensatz im Repo.** Der `.beans`-Demo-Datensatz, aus dem das eingefrorene
+  Ziel-Format erzeugt wurde, existiert nicht mehr. Wer die Referenz regenerieren will, baut ihn
+  aus den in "Notes for T3" von `beans-g5hz` gelisteten IDs/Titeln neu auf — **ausserhalb des
+  Repos** (z. B. `/tmp`) und mit `--beans-path`, niemals im Projekt-`.beans/`.
+
+- **P-4 Redaktionell:** die T2-Deviation nennt "D12/D18" als Quelle der No-Milestone-Sektion;
+  tragend ist allein **D18**. Keine Handlungsrelevanz.
