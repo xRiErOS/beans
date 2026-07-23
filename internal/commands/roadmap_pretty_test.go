@@ -388,6 +388,72 @@ func TestRenderRoadmapPrettyPriorityVisibility(t *testing.T) {
 	}
 }
 
+// TestRenderRoadmapPrettyUnscheduledFeature pins the data.Unscheduled.Features
+// branch (ce-specs-reviewer B01): an orphan Feature -- no milestone and no
+// epic ancestor -- that buildRoadmap classifies into unscheduledFeatures
+// (roadmap.go's unscheduledFeatures loop, covered there by
+// TestUnscheduledFeatureResolvesNesting) must still render under "No
+// Milestone" with its leaf children indented beneath it. prettyFixture()
+// never populates Unscheduled.Features (the frozen DESIGN.md demo data has
+// no orphan feature), so without this test the loop at
+// data.Unscheduled.Features could be replaced with a no-op and the whole
+// suite would stay green -- the feature and its children would silently
+// vanish from the TTY output (the same LL-08 failure mode as the ti53
+// childless-feature bug, just in the sibling Unscheduled.Features loop
+// instead of Unscheduled.Other).
+func TestRenderRoadmapPrettyUnscheduledFeature(t *testing.T) {
+	feat := &bean.Bean{ID: "beans-eeee", Title: "Orphan Feature", Type: "feature", Status: "todo", Priority: "high"}
+	leaf := &bean.Bean{ID: "beans-ffff", Title: "Orphan Leaf", Type: "task", Status: "todo", Parent: "beans-eeee"}
+
+	data := &roadmapData{
+		Unscheduled: &unscheduledGroup{
+			Features: []featureGroup{
+				{Feature: feat, Items: []*bean.Bean{leaf}},
+			},
+		},
+	}
+	got := renderRoadmapPretty(data, 80)
+	lines := strings.Split(got, "\n")
+	// [0] Roadmap, [1] separator, [2] blank, [3] "No Milestone", [4] blank,
+	// [5] the feature row, [6] its leaf.
+	if len(lines) < 7 {
+		t.Fatalf("expected at least 7 lines, got %d:\n%s", len(lines), got)
+	}
+	if lines[3] != "No Milestone" {
+		t.Fatalf("line 3 = %q, want %q", lines[3], "No Milestone")
+	}
+	featureLine, leafLine := lines[5], lines[6]
+
+	if !strings.HasPrefix(featureLine, "  ▪ Feature") {
+		t.Errorf("feature line prefix = %q, want prefix %q", featureLine, "  ▪ Feature")
+	}
+	if !strings.Contains(featureLine, "Orphan Feature") {
+		t.Errorf("feature line missing title: %q", featureLine)
+	}
+	if !strings.Contains(featureLine, "high") {
+		t.Errorf("feature row must show priority (D15): %q", featureLine)
+	}
+	if !strings.HasSuffix(featureLine, "eeee") {
+		t.Errorf("feature line missing short id: %q", featureLine)
+	}
+
+	if !strings.HasPrefix(leafLine, "    - task") {
+		t.Errorf("leaf line prefix = %q, want prefix %q", leafLine, "    - task")
+	}
+	if !strings.Contains(leafLine, "Orphan Leaf") {
+		t.Errorf("leaf line missing title: %q", leafLine)
+	}
+	if !strings.HasSuffix(leafLine, "ffff") {
+		t.Errorf("leaf line missing short id: %q", leafLine)
+	}
+
+	for i, l := range lines {
+		if n := utf8.RuneCountInString(l); n > 80 {
+			t.Errorf("line %d exceeds 80 runes (%d): %q", i, n, l)
+		}
+	}
+}
+
 // TestRenderRoadmapPrettyEmpty pins EARS-9: an empty roadmapData renders
 // only the header and separator line.
 func TestRenderRoadmapPrettyEmpty(t *testing.T) {

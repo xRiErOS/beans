@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: high
 created_at: 2026-07-23T20:28:32Z
-updated_at: 2026-07-23T21:37:29Z
+updated_at: 2026-07-23T21:51:24Z
 parent: beans-1ec3
 blocked_by:
     - beans-ejoz
@@ -255,3 +255,64 @@ $ git status --porcelain
   **direkte** Dependency in `go.mod` (Zeile 25, `golang.org/x/term v0.38.0`) — `term.IsTerminal`/
   `term.GetSize` sind D04-konform ohne neuen Dependency verwendbar, verifiziert via
   `grep -n "x/term" go.mod`.
+
+
+## Blocker-Behebung (Runde 2, ce-specs-reviewer B01)
+
+**Blocker:** `data.Unscheduled.Features`-Loop (`roadmap_pretty.go:189-191`) war ungetestet —
+`prettyFixture()` (DESIGN.md-Fixture) setzt `Unscheduled.Features` nie, nur `Unscheduled.Epics`
+und `Unscheduled.Other`. Der Reviewer ersetzte den Loop-Body durch ein No-Op: `command go test
+./...` blieb komplett grün.
+
+**Fix:** Kein Produktionscode-Fehler — die Loop-Logik war korrekt, nur ungetestet. Neuer Test
+`TestRenderRoadmapPrettyUnscheduledFeature` ergänzt: eine Orphan-Feature (kein Milestone-, kein
+Epic-Parent) mit einem Leaf-Kind, direkt als `roadmapData{Unscheduled: &unscheduledGroup{Features:
+...}}` konstruiert (kein `prettyFixture()`-Umbau, um das eingefrorene `want`-Literal in
+`TestRenderRoadmapPrettyAt80` nicht zu gefährden). Prüft: Zeilenanzahl (Fatalf bei No-Op, da die
+Zeilen dann fehlen), Präfix `  ▪ Feature` mit Priority (D15), Präfix `    - task` der Leaf-Zeile
+(Einrückung `indent+2`), Titel/Short-ID beider Zeilen, Breiten-Invariante (EARS-7).
+
+**Mutations-Rot-Ausgabe** (Reviewer-Mutation exakt reproduziert: Loop-Body durch No-Op ersetzt):
+
+```
+$ command go test ./internal/commands/ -run 'TestRenderRoadmapPretty' -v
+=== RUN   TestRenderRoadmapPrettyAt80
+--- PASS: TestRenderRoadmapPrettyAt80 (0.00s)
+=== RUN   TestRenderRoadmapPrettyLineWidths
+--- PASS: TestRenderRoadmapPrettyLineWidths (0.00s)
+=== RUN   TestRenderRoadmapPrettyTitleColumn
+--- PASS: TestRenderRoadmapPrettyTitleColumn (0.00s)
+=== RUN   TestRenderRoadmapPrettyPriorityVisibility
+--- PASS: TestRenderRoadmapPrettyPriorityVisibility (0.00s)
+=== RUN   TestRenderRoadmapPrettyUnscheduledFeature
+    roadmap_pretty_test.go:420: expected at least 7 lines, got 6:
+        Roadmap
+        ════════════════════════════════════════════════════════════════════════════════
+
+        No Milestone
+
+--- FAIL: TestRenderRoadmapPrettyUnscheduledFeature (0.00s)
+=== RUN   TestRenderRoadmapPrettyEmpty
+--- PASS: TestRenderRoadmapPrettyEmpty (0.00s)
+FAIL
+FAIL	github.com/hmans/beans/internal/commands	0.625s
+FAIL
+```
+
+Nur `TestRenderRoadmapPrettyUnscheduledFeature` schlägt an — Mutation ist präzise isoliert, alle
+anderen Tests bleiben unberührt korrekt (kein Kollateral-Fehlschlag, der den Befund verwässern
+würde).
+
+**Rückbau:** `diff` zwischen Backup und mutierter Datei bestätigte genau die eine geänderte
+Loop-Body-Zeile; nach `cp`-Rückbau `diff <backup> roadmap_pretty.go` leer. `git diff --stat` zeigt
+danach ausschließlich die beabsichtigten Dateien (Test + bean), `roadmap_pretty.go` selbst
+unverändert gegenüber dem Runde-1-Commit `229fe6a` (keine Produktionscode-Änderung nötig).
+
+**Danach:** `command go test ./...` erneut grün (alle Pakete `ok`, EXIT=0).
+
+**Ergänzung Mutations-Proben-Tabelle** (9. Zeile, zusätzlich zu den 8 aus Runde 1 + reviewer-
+bestätigten):
+
+| Mutation | welcher Test failte | Zeile getestet |
+|---|---|---|
+| `Unscheduled.Features`-Loop-Body → No-Op | `TestRenderRoadmapPrettyUnscheduledFeature`: `expected at least 7 lines, got 6` | ja (nach Ergänzung) |
