@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T10:10:00Z
+updated_at: 2026-07-24T11:16:28Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
@@ -27,3 +27,11 @@ Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direc
 **Konventionen:** TDD (RED→GREEN), ein Commit je Task (`Refs: beans-e040`), `mise test`/`mise build`, table-driven Tests. STOPP am git-Merge-Gate (Agent merged nicht nach main).
 
 **Review-Historie:** ce-plan-reviewer R1 ROT → R2 ROT → R3 GRÜN. Alle Findings (B01-B08, I01-I06, Q01-Q02) eingearbeitet + gegen echten Code verifiziert.
+
+## KRITISCH — Tooling-Nicht-Ableitbarkeiten (SSTD, vor JEDEM Testlauf)
+
+Der Plan zitiert `go test .../...` und `mise test`/`mise build`. Auf DIESER Maschine gilt stattdessen (SSTD D19/D21, LL-02/LL-11):
+- **`go` ist eine Shell-Funktion** (dotfiles-Sync), die den Compiler verdeckt. `go test ./...` endet still mit Exit 0 OHNE Tests. IMMER `command go test ./...` / `command go build` / `command go vet`.
+- **`mise test` ist KEIN brauchbares Gate** — es zieht `test:e2e` mit, Playwright-Browser fehlt lokal, alle e2e failen als Setup-Fail. Backend-Gate ist `command go test ./...`.
+- **`awk` misst Bytes, nicht Zeichen** (nicht multibyte-aware). Für Breiten `wc -m`/`command python3`. (Hier nur relevant, falls Ausgaben geprüft werden.)
+- Build-Target ist `./cmd/beans`; Version-Stamp per ldflags. `mise codegen` (T09) ist ok — nur `mise test` ist das Problem.
