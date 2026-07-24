@@ -17,6 +17,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterInitCmd(root)
 	RegisterListCmd(root)
 	RegisterPrimeCmd(root)
+	RegisterRenameCmd(root)
 	RegisterRoadmapCmd(root)
 	RegisterShowCmd(root)
 	RegisterUpdateCmd(root)
