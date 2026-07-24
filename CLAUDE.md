@@ -1,3 +1,16 @@
+# Fork-Status (xRiErOS/beans) — unabhängiges Produkt
+
+Dieses Repo ist **Erik-Fork** von `hmans/beans`. Der Upstream-Autor (hmans) hat auf GitHub
+öffentlich erklärt, **beans nicht mehr weiterzuentwickeln**. Damit gilt (bestätigt D14):
+
+- **Wir entwickeln beans selbst weiter** — der Fork ist das Produkt, nicht ein PR-Kandidat.
+- **Keine Abhängigkeit mehr zu hmans/upstream.** `origin` (hmans) wird nicht mehr verfolgt;
+  Push ausschließlich nach `fork` (xRiErOS). Kein Chasing von Upstream-PRs.
+- Diese `CLAUDE.md` ist damit **nicht** mehr „Upstream-Datei, nicht anfassen" — sie ist unsere.
+  Fork-Delta ist ab jetzt erwünscht, nicht Kostenfaktor.
+
+Der Rest dieser Datei ist die (weiterhin gültige) Projekt-/Codebase-Doku aus dem Upstream.
+
 # What we're building
 
 Beans is an agentic-first issue tracker. Issues ("beans") live as markdown files in a `.beans/` directory inside a project repo. The system has three interfaces:
