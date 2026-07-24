@@ -77,6 +77,24 @@ Key packages:
 - The central (main workspace) agent session uses ID `__central__` (defined as `CentralSessionID` in `internal/graph/resolver.go` and `MAIN_WORKSPACE_ID` in `frontend/src/lib/worktrees.svelte.ts`). These must stay in sync — the backend uses this ID to determine work directory and system prompt.
 - Worktree agent sessions use the worktree ID as their session ID.
 
+# Renaming Beans
+
+`beans rename` changes a bean's slug, a single bean's ID (cascading refs), or the project-wide ID prefix. Exactly one mode per invocation:
+
+- **slug** — `beans rename <id> --slug "new-slug"` / `--no-slug` (clears the slug, filename becomes `id.md`) / `--reslug` (regenerate from the title). Single-file `os.Rename`; no ref cascade (the slug isn't stored in frontmatter or in any cross-ref).
+- **id** — `beans rename <id> <new-id>` (full new ID) or `beans rename <id> --suffix k7x2` (new suffix, keeps the configured prefix; refuses if `<id>` doesn't already start with that prefix). Cascades: rewrites `parent`/`blocking`/`blocked_by` refs across every bean, corrects the `# <id>` comment, applied via an atomic staging+swap of the whole `.beans/` tree (`pkg/beancore/rename.go`).
+- **prefix** — `beans rename --prefix "bew-"` project-wide ID rebrand (e.g. shortening `bew_BeWiki-Python-Download-` to `bew-`). Same cascade mechanism as id-mode, plus writes the new prefix to `.beans.yml`. Refuses if any bean's ID doesn't already start with the current configured prefix (avoids silently double-prefixing on a mixed-prefix repo).
+
+Flags (all modes): `--dry-run` prints the plan without writing anything; `--json` renders the plan as JSON instead of the human summary.
+
+Prefix rebrand additionally: requires `--yes` (or an interactive `y`/`N` confirm) before applying, and refuses outright while `beans serve` is listening on the configured port or while any active worktree (`~/.beans/worktrees/<project>/*.meta.json`) exists — verified error text: `beans serve appears to be running on port <port>; stop it before a prefix rebrand`.
+
+**`--json` on apply (non-dry-run) writes two separate JSON documents to stdout, not one.** First the plan document (same shape as `--dry-run --json`: `{"Mode","Changes","RefUpdates","NewPrefix","ConfigWrite"}`), then on its own line a second, unrelated JSON object with the result (`{"success":true,"mode":...,"changed":<n>}`). Verified against the built binary for both `id` and `prefix` modes. A naive `json.loads(stdout)` in a scripting consumer parses only the first document and silently drops the result — read stdout as an NDJSON-like multi-document stream, or parse the last line if only the result is needed. (Collapsing this into a single JSON document is a possible future follow-up, not yet tracked as a bean.)
+
+Non-goals (by design):
+- **No auto-git.** All rename modes are plain filesystem operations (`os.Rename` / atomic directory swap) — beans never stages, commits, or runs `git mv`. You stage/commit the changed bean files yourself; git detects renames by content, not by beans telling it to.
+- **External ID references are not rewritten.** Anything outside `.beans/` that mentions an old ID — commit messages, docs, SSTD entries — is left as-is after a rename. Out of scope by design, not an oversight.
+
 # Extra rules for our own beans/issues
 
 - Use the `idea` tag for ideas and proposals.
