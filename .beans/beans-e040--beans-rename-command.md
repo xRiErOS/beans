@@ -5,9 +5,9 @@ status: todo
 type: epic
 priority: normal
 tags:
-    - to-review
+    - accepted
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T12:47:20Z
+updated_at: 2026-07-24T13:08:38Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
@@ -51,3 +51,22 @@ T04-specs-review (rename.go:221-227): der Zwei-`os.Rename`-Dir-Swap hat ein stru
 
 ### D02 (PO-Gate) — .beans.yml-Config-Write bei Prefix-Rebrand nicht-atomar, Deviation-Begründung unvollständig
 T06-specs-review: `writeRebrandConfig` läuft NACH `stageAndSwap` (EARS-konform wörtlich: 'Kaskade atomar UND DANACH .beans.yml'). Aber `config.Save()` (pkg/config/config.go:343-363) ist selbst nicht-atomar (`os.WriteFile`, kein temp+rename). Bricht der Save ab, sind Bean-Dateien schon auf newPrefix umbenannt, `.beans.yml` hält aber noch oldPrefix. Die T06-bean-Deviation-Notiz nennt das 'folgenlos' — das ist FALSCH: `c.config.Beans.Prefix` treibt projekt-weite Short-ID-Normalisierung (core.go:321,344,697,834) UND die Prefix-Vergabe bei Core.Create (core.go:490-499). Nach Reload nach Teilausfall: (a) Short-ID-Lookups brechen für alle Beans (falscher Prefix), (b) neue Beans bekommen wieder oldPrefix → exakt der Mixed-Prefix-Zustand, den PlanRebrands B04-Guard beim nächsten Rebrand verweigert. Kein Test deckt diesen Pfad. ENTSCHEIDUNG PO: (a) SC/EARS bewusst eng lassen → nur Doku-Fix der Deviation-Begründung, oder (b) Hardening-Task für atomareren Config-Write (temp+rename) + Post-Reload-Prefix-Validierung. Verwandt mit D01 (stageAndSwap-Crash-Fenster) — beide sind Partial-Failure-Residualrisiken der Rename-Op. Nicht-blockierend für die Epos-Realisierung.
+
+## Review 2026-07-24
+US-01 · Slug ändern (--slug/--no-slug/--reslug, Single-File-Rename, keine Kaskade) · a
+US-02 · Einzelne Bean-ID ändern, Refs kaskadieren projektweit (atomarer Swap) · a
+US-03 · Nur Suffix tauschen, konfigurierten Prefix behalten, Refusal bei fremdem Prefix · a
+
+US-04 · Prefix projekt-weit rebranden (--prefix, alle IDs + Refs + .beans.yml, Refusal bei fremdem Prefix); via Dry-Run gegen echtes bew_-Projekt geprüft · a
+
+US-06 · Prefix-Rebrand fragt ohne --yes nach (y/N), Decline lässt alles unverändert; nur prefix-Modus fragt · a
+US-07 · Rebrand verweigert bei laufendem beans serve / aktivem Worktree, Check direkt vor Apply (kein TOCTOU-Fenster) · a
+
+US-05 · --dry-run in allen Modi druckt Plan, schreibt nichts · a
+US-08 · Klares Fehler-Feedback (conflicting options, positional/prefix, suffix-wrong-prefix), Exit 1, keine Mutation · a
+US-09 · --json Plan-Ausgabe; bekannte Kante Zwei-Dokument-Stream bei Apply, als Multi-Doc dokumentiert (Single-Doc = Follow-up) · a
+
+US-10 · Feature dokumentiert in beans-src/CLAUDE.md §# Renaming Beans (Modi, Flags, Guards, --json-Kante, Non-goals), gegen Binary faktengeprüft · a
+
+### D03 (Review-Entscheidung PO, 2026-07-24)
+beans prime führt rename NICHT + ce-beans-Skill kennt rename NICHT. PO entschieden: KEINE Lücke — rename ist Sonderfall, beans --help genügt. Keine Follow-up-beans für prime/skill.
