@@ -2,8 +2,10 @@ package beancore
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/hmans/beans/pkg/bean"
 )
@@ -132,4 +134,98 @@ func rewriteRefs(b *bean.Bean, m map[string]string) int {
 // package compiles for the slug-rename path.
 func (c *Core) applyRenameCascade(plan *RenamePlan) error {
 	return fmt.Errorf("cascade rename not yet implemented")
+}
+
+// copyTree recursively copies src into dst, skipping any src-relative path
+// present in skip (a directory match skips the whole subtree).
+func copyTree(src, dst string, skip map[string]bool) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relToSrc, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		if skip[relToSrc] {
+			if info.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		target := filepath.Join(dst, relToSrc)
+		if info.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		in, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return err
+		}
+		out, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+		defer out.Close()
+		if _, err := io.Copy(out, in); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+// stageAndSwap builds a new .beans tree in a temp sibling dir (a full clone
+// of the current tree with removes/writes applied), then atomically swaps it
+// in for c.root. writes/removes keys are .beans-relative (matching
+// Bean.Path, e.g. "x.md" or "epic/x.md"). Any error before the swap leaves
+// the original .beans tree untouched and removes the staging dir.
+func (c *Core) stageAndSwap(writes map[string][]byte, removes []string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	repo := c.repoRoot()
+	staging, err := os.MkdirTemp(repo, ".beans-staging-*")
+	if err != nil {
+		return fmt.Errorf("creating staging dir: %w", err)
+	}
+	cleanup := true
+	defer func() {
+		if cleanup {
+			os.RemoveAll(staging)
+		}
+	}()
+
+	// skip set: removed files, keyed .beans-relative (== copyTree's walk keys)
+	skip := map[string]bool{}
+	for _, r := range removes {
+		skip[filepath.Clean(r)] = true
+	}
+	if err := copyTree(c.root, staging, skip); err != nil {
+		return fmt.Errorf("cloning tree: %w", err)
+	}
+	for relPath, content := range writes {
+		target := filepath.Join(staging, relPath)
+		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
+			return fmt.Errorf("staging write dir: %w", err)
+		}
+		if err := os.WriteFile(target, content, 0644); err != nil {
+			return fmt.Errorf("staging write: %w", err)
+		}
+	}
+
+	// atomic swap
+	backup := filepath.Join(repo, fmt.Sprintf(".beans.bak-%d", time.Now().UnixNano()))
+	if err := os.Rename(c.root, backup); err != nil {
+		return fmt.Errorf("backing up .beans: %w", err)
+	}
+	if err := os.Rename(staging, c.root); err != nil {
+		os.Rename(backup, c.root) // best-effort rollback
+		return fmt.Errorf("swapping in new tree: %w", err)
+	}
+	cleanup = false
+	os.RemoveAll(backup)
+	return nil
 }

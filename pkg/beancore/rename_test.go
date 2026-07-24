@@ -3,6 +3,7 @@ package beancore
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hmans/beans/pkg/bean"
@@ -183,6 +184,148 @@ func TestRewriteRefs(t *testing.T) {
 			}
 			if !equalStrSlices(b.BlockedBy, tt.wantBlockedBy) {
 				t.Errorf("BlockedBy = %v, want %v", b.BlockedBy, tt.wantBlockedBy)
+			}
+		})
+	}
+}
+
+func TestStageAndSwap_atomicOnPreSwapFailure(t *testing.T) {
+	tests := []struct {
+		name    string
+		writes  map[string][]byte
+		removes []string
+	}{
+		{
+			name: "write path with NUL byte fails MkdirAll during staging",
+			writes: map[string][]byte{
+				filepath.Join("\x00bad", "x.md"): []byte("nope"),
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestCore(t, "tp-", map[string]string{
+				"tp-aaaa--a.md": "content-a",
+				"tp-bbbb--b.md": "content-b",
+			})
+			err := c.stageAndSwap(tt.writes, tt.removes)
+			if err == nil {
+				t.Fatal("expected staging failure, got nil")
+			}
+			// original tree intact, byte-for-byte
+			got, readErr := os.ReadFile(filepath.Join(c.Root(), "tp-aaaa--a.md"))
+			if readErr != nil || string(got) != "content-a" {
+				t.Errorf("original file corrupted: content=%q err=%v", got, readErr)
+			}
+			got2, readErr2 := os.ReadFile(filepath.Join(c.Root(), "tp-bbbb--b.md"))
+			if readErr2 != nil || string(got2) != "content-b" {
+				t.Errorf("original file corrupted: content=%q err=%v", got2, readErr2)
+			}
+			// no staging/backup siblings left behind
+			entries, err := os.ReadDir(c.repoRoot())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range entries {
+				name := e.Name()
+				if name != ".beans" && strings.HasPrefix(name, ".beans") {
+					t.Errorf("leftover sibling: %s", name)
+				}
+			}
+		})
+	}
+}
+
+func TestStageAndSwap_appliesWritesAndRemoves(t *testing.T) {
+	tests := []struct {
+		name          string
+		writes        map[string][]byte
+		removes       []string
+		wantPresent   map[string]string // .beans-relative path -> expected content
+		wantAbsent    []string
+		wantUntouched map[string]string
+	}{
+		{
+			name: "write applied, remove applied, untouched file survives",
+			writes: map[string][]byte{
+				"tp-cccc--c.md": []byte("content-c"),
+			},
+			removes:       []string{"tp-bbbb--b.md"},
+			wantPresent:   map[string]string{"tp-cccc--c.md": "content-c"},
+			wantAbsent:    []string{"tp-bbbb--b.md"},
+			wantUntouched: map[string]string{"tp-aaaa--a.md": "content-a"},
+		},
+		{
+			name:          "no writes/removes leaves tree unchanged",
+			writes:        nil,
+			removes:       nil,
+			wantUntouched: map[string]string{"tp-aaaa--a.md": "content-a", "tp-bbbb--b.md": "content-b"},
+		},
+		{
+			name: "non-bean file (e.g. archive/) survives the swap",
+			writes: map[string][]byte{
+				"tp-cccc--c.md": []byte("content-c"),
+			},
+			wantUntouched: map[string]string{
+				"tp-aaaa--a.md":       "content-a",
+				"archive/old-note.md": "kept",
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newTestCore(t, "tp-", map[string]string{
+				"tp-aaaa--a.md": "content-a",
+				"tp-bbbb--b.md": "content-b",
+			})
+			if _, ok := tt.wantUntouched["archive/old-note.md"]; ok {
+				archiveDir := filepath.Join(c.Root(), "archive")
+				if err := os.MkdirAll(archiveDir, 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(archiveDir, "old-note.md"), []byte("kept"), 0644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := c.stageAndSwap(tt.writes, tt.removes); err != nil {
+				t.Fatal(err)
+			}
+			for relPath := range tt.wantPresent {
+				wantContent := tt.wantPresent[relPath]
+				got, err := os.ReadFile(filepath.Join(c.Root(), relPath))
+				if err != nil {
+					t.Errorf("write not applied at %q: %v", relPath, err)
+					continue
+				}
+				if string(got) != wantContent {
+					t.Errorf("write %q = %q, want %q", relPath, got, wantContent)
+				}
+			}
+			for _, relPath := range tt.wantAbsent {
+				if _, err := os.Stat(filepath.Join(c.Root(), relPath)); !os.IsNotExist(err) {
+					t.Errorf("removed file %q still present", relPath)
+				}
+			}
+			for relPath, wantContent := range tt.wantUntouched {
+				got, err := os.ReadFile(filepath.Join(c.Root(), relPath))
+				if err != nil {
+					t.Errorf("untouched file %q missing: %v", relPath, err)
+					continue
+				}
+				if string(got) != wantContent {
+					t.Errorf("untouched file %q changed: %q, want %q", relPath, got, wantContent)
+				}
+			}
+			// no staging/backup siblings left behind after success
+			entries, err := os.ReadDir(c.repoRoot())
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, e := range entries {
+				name := e.Name()
+				if name != ".beans" && strings.HasPrefix(name, ".beans") {
+					t.Errorf("leftover sibling: %s", name)
+				}
 			}
 		})
 	}
