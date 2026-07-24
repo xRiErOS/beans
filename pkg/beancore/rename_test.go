@@ -38,9 +38,20 @@ func newTestCore(t *testing.T, prefix string, files map[string]string) *Core {
 }
 
 func TestApplyRenameSlug_setsSlug(t *testing.T) {
+	// I02 (T05-Review prelude): correct fixture form is `---\n# id\n<yaml>\n---`
+	// (the "# id" comment INSIDE the frontmatter block). The previous "# id"
+	// -before-"---" form parses to zero-value fields silently; assert on a
+	// parsed field (Title) below to prove this fixture actually parses.
 	c := newTestCore(t, "tp-", map[string]string{
-		"tp-aaaa--old-slug.md": "# tp-aaaa\n---\ntitle: Test Bean\nstatus: todo\ntype: task\n---\nBody.\n",
+		"tp-aaaa--old-slug.md": "---\n# tp-aaaa\ntitle: Test Bean\nstatus: todo\ntype: task\n---\nBody.\n",
 	})
+	b, err := c.Get("tp-aaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Title != "Test Bean" {
+		t.Fatalf("fixture did not parse: Title = %q, want %q", b.Title, "Test Bean")
+	}
 	plan, err := c.PlanRenameSlug("tp-aaaa", strPtr("new-slug"), false)
 	if err != nil {
 		t.Fatal(err)
@@ -64,9 +75,10 @@ func TestApplyRenameSlug_setsSlug(t *testing.T) {
 }
 
 func TestApplyRenameSlug_idAndRefsUnchanged(t *testing.T) {
+	// I02 (T05-Review prelude): corrected fixture form, see comment above.
 	c := newTestCore(t, "tp-", map[string]string{
-		"tp-aaaa--parent.md": "# tp-aaaa\n---\ntitle: Parent\nstatus: todo\ntype: epic\n---\n",
-		"tp-bbbb--child.md":  "# tp-bbbb\n---\ntitle: Child\nstatus: todo\ntype: task\nparent: tp-aaaa\n---\n",
+		"tp-aaaa--parent.md": "---\n# tp-aaaa\ntitle: Parent\nstatus: todo\ntype: epic\n---\n",
+		"tp-bbbb--child.md":  "---\n# tp-bbbb\ntitle: Child\nstatus: todo\ntype: task\nparent: tp-aaaa\n---\n",
 	})
 	plan, err := c.PlanRenameSlug("tp-aaaa", strPtr("renamed"), false)
 	if err != nil {
@@ -537,6 +549,117 @@ func TestStageAndSwap_rollsBackOnSwapFailure(t *testing.T) {
 		if name != ".beans" && strings.HasPrefix(name, ".beans-staging") {
 			t.Errorf("leftover staging sibling: %s", name)
 		}
+	}
+}
+
+// TestPlanRebrand_countsBlockingRefs closes I01 (T05-Review prelude):
+// countRefHits' Blocking loop was 0%-covered — no existing PlanRenameID/
+// PlanRebrand fixture used a `blocking:` field (TestRenameID_cascadesRefs
+// only exercises parent + blocked_by). Prefix-rebrand drives countRefHits
+// project-wide via planCascade, so assert the ref count here.
+func TestPlanRebrand_countsBlockingRefs(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: epic\n---\n",
+		"tp-bbbb--b.md": "---\n# tp-bbbb\ntitle: B\nstatus: todo\ntype: task\nblocking:\n  - tp-aaaa\n---\n",
+	})
+	plan, err := c.PlanRebrand("op-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.RefUpdates["tp-bbbb"] != 1 {
+		t.Errorf("RefUpdates[tp-bbbb] = %d, want 1 (blocking ref counted)", plan.RefUpdates["tp-bbbb"])
+	}
+}
+
+func TestPlanRebrand_remapsAllAndWritesConfig(t *testing.T) {
+	c := newTestCore(t, "old_Long-Prefix-", map[string]string{
+		"old_Long-Prefix-aaaa--a.md": "---\n# old_Long-Prefix-aaaa\ntitle: A\nstatus: todo\ntype: epic\n---\n",
+		"old_Long-Prefix-bbbb--b.md": "---\n# old_Long-Prefix-bbbb\ntitle: B\nstatus: todo\ntype: task\nparent: old_Long-Prefix-aaaa\nblocked_by:\n  - old_Long-Prefix-aaaa\n---\n",
+	})
+	plan, err := c.PlanRebrand("op-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Mode != "prefix" || !plan.ConfigWrite || plan.NewPrefix != "op-" {
+		t.Fatalf("unexpected plan: mode=%q configWrite=%v newPrefix=%q", plan.Mode, plan.ConfigWrite, plan.NewPrefix)
+	}
+	if len(plan.Changes) != 2 {
+		t.Fatalf("Changes = %d, want 2", len(plan.Changes))
+	}
+	if plan.RefUpdates["op-bbbb"] == 0 && plan.RefUpdates["old_Long-Prefix-bbbb"] == 0 {
+		t.Errorf("RefUpdates missing entry for the child bean: %+v", plan.RefUpdates)
+	}
+
+	if err := c.ApplyRename(plan); err != nil {
+		t.Fatal(err)
+	}
+
+	// .beans.yml now carries the new prefix.
+	cfg2, err := config.LoadFromDirectory(c.repoRoot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg2.Beans.Prefix != "op-" {
+		t.Errorf("config prefix = %q, want op-", cfg2.Beans.Prefix)
+	}
+
+	// Same-core in-memory state already reflects the new IDs.
+	if _, err := c.Get("op-aaaa"); err != nil {
+		t.Errorf("same-core Get(op-aaaa) failed: %v", err)
+	}
+	if _, err := c.Get("old_Long-Prefix-aaaa"); err == nil {
+		t.Error("same-core still resolves an old-prefix ID after rebrand")
+	}
+
+	// Disk state is consistent for a fresh Core load, refs intact.
+	c2 := New(c.Root(), cfg2)
+	if err := c2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	child, err := c2.Get("op-bbbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Parent != "op-aaaa" {
+		t.Errorf("child.Parent = %q, want op-aaaa", child.Parent)
+	}
+	if len(child.BlockedBy) != 1 || child.BlockedBy[0] != "op-aaaa" {
+		t.Errorf("child.BlockedBy = %v, want [op-aaaa]", child.BlockedBy)
+	}
+	if _, err := c2.Get("op-aaaa"); err != nil {
+		t.Errorf("rebranded parent not found under new ID: %v", err)
+	}
+	if _, err := c2.Get("old_Long-Prefix-aaaa"); err == nil {
+		t.Error("old-prefix ID still resolvable after rebrand")
+	}
+}
+
+// TestRebrand_mixedPrefixRefused proves the B04 guard: a repo where not
+// every bean starts with the configured prefix is refused outright (no
+// staging, no mutation) rather than emitting a double-prefixed ID.
+func TestRebrand_mixedPrefixRefused(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md":    "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+		"other-bbbb--b.md": "---\n# other-bbbb\ntitle: B\nstatus: todo\ntype: task\n---\n",
+	})
+	if _, err := c.PlanRebrand("op-"); err == nil {
+		t.Fatal("expected refusal on a mixed-prefix repo (B04 guard)")
+	}
+	// no mutation on refusal
+	if _, err := os.Stat(filepath.Join(c.Root(), "tp-aaaa--a.md")); err != nil {
+		t.Errorf("original file disturbed by refused rebrand: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root(), "other-bbbb--b.md")); err != nil {
+		t.Errorf("original file disturbed by refused rebrand: %v", err)
+	}
+}
+
+func TestPlanRebrand_samePrefixRejected(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	if _, err := c.PlanRebrand("tp-"); err == nil {
+		t.Fatal("expected error when newPrefix equals current prefix")
 	}
 }
 

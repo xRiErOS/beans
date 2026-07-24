@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/hmans/beans/pkg/bean"
@@ -78,8 +79,13 @@ func (c *Core) ApplyRename(plan *RenamePlan) error {
 	switch plan.Mode {
 	case "slug":
 		return c.applyRenameSlug(plan)
-	case "id", "prefix":
+	case "id":
 		return c.applyRenameCascade(plan)
+	case "prefix":
+		if err := c.applyRenameCascade(plan); err != nil {
+			return err
+		}
+		return c.writeRebrandConfig(plan.NewPrefix)
 	default:
 		return fmt.Errorf("unknown rename mode %q", plan.Mode)
 	}
@@ -192,6 +198,56 @@ func countRefHits(b *bean.Bean, m map[string]string) int {
 	return n
 }
 
+// PlanRebrand computes a dry-run plan that maps every bean's ID from the
+// project's current prefix (c.config.Beans.Prefix) to newPrefix, preserving
+// each ID's suffix (bean.RebrandID). Mode is "prefix", NewPrefix and
+// ConfigWrite are set so ApplyRename also persists the new prefix to
+// .beans.yml after the cascade swap.
+//
+// B04 guard: refuses outright (no partial plan) if any bean ID does not
+// start with the current prefix — RebrandID would otherwise double-prefix
+// it (newPrefix + the untouched full old ID), corrupting that ID.
+func (c *Core) PlanRebrand(newPrefix string) (*RenamePlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	oldPrefix := ""
+	if c.config != nil {
+		oldPrefix = c.config.Beans.Prefix
+	}
+	if newPrefix == oldPrefix {
+		return nil, fmt.Errorf("new prefix equals current prefix %q", oldPrefix)
+	}
+
+	idMap := map[string]string{}
+	renamed := map[string]*bean.Bean{}
+	for id, b := range c.beans {
+		if oldPrefix != "" && !strings.HasPrefix(id, oldPrefix) {
+			return nil, fmt.Errorf("bean %q does not start with the current prefix %q; refusing rebrand to avoid ID corruption", id, oldPrefix)
+		}
+		nid := bean.RebrandID(id, oldPrefix, newPrefix)
+		if nid == id {
+			continue
+		}
+		if _, clash := c.beans[nid]; clash {
+			return nil, fmt.Errorf("rebrand collision: %q already exists", nid)
+		}
+		idMap[id] = nid
+		renamed[id] = b
+	}
+	if len(idMap) == 0 {
+		return nil, fmt.Errorf("no beans matched prefix %q", oldPrefix)
+	}
+
+	plan, err := c.planCascade("prefix", idMap, renamed)
+	if err != nil {
+		return nil, err
+	}
+	plan.NewPrefix = newPrefix
+	plan.ConfigWrite = true
+	return plan, nil
+}
+
 // applyRenameCascade is the shared apply path for Mode "id" and "prefix": it
 // re-renders every bean touched by the plan's ID map — the renamed bean(s)
 // themselves (new filename, corrected "# id" comment via Render) plus every
@@ -248,6 +304,25 @@ func (c *Core) applyRenameCascade(plan *RenamePlan) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.loadFromDisk()
+}
+
+// writeRebrandConfig persists newPrefix to .beans.yml after a successful
+// prefix-rebrand cascade swap. Runs after (not inside) stageAndSwap's
+// atomic swap: the bean-file cascade is the primary invariant (an
+// interrupted config write leaves beans self-consistent — Bean IDs are read
+// from filenames, not from the config prefix — while an interrupted cascade
+// mid-config-write would be far harder to reason about).
+func (c *Core) writeRebrandConfig(newPrefix string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.config == nil {
+		return fmt.Errorf("no config to update")
+	}
+	c.config.Beans.Prefix = newPrefix
+	if err := c.config.Save(c.config.ConfigDir()); err != nil {
+		return fmt.Errorf("writing .beans.yml: %w", err)
+	}
+	return nil
 }
 
 // copyTree recursively copies src into dst, skipping any src-relative path
