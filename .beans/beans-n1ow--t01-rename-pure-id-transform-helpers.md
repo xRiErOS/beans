@@ -1,13 +1,11 @@
 ---
 # beans-n1ow
 title: 'T01 rename: pure ID transform helpers'
-status: in-progress
+status: completed
 type: task
 priority: high
-tags:
-    - to-review
 created_at: 2026-07-24T10:10:14Z
-updated_at: 2026-07-24T11:37:37Z
+updated_at: 2026-07-24T11:40:23Z
 parent: beans-e040
 ---
 

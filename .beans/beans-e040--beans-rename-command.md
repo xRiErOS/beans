@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T11:16:28Z
+updated_at: 2026-07-24T11:40:31Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
@@ -35,3 +35,11 @@ Der Plan zitiert `go test .../...` und `mise test`/`mise build`. Auf DIESER Masc
 - **`mise test` ist KEIN brauchbares Gate** — es zieht `test:e2e` mit, Playwright-Browser fehlt lokal, alle e2e failen als Setup-Fail. Backend-Gate ist `command go test ./...`.
 - **`awk` misst Bytes, nicht Zeichen** (nicht multibyte-aware). Für Breiten `wc -m`/`command python3`. (Hier nur relevant, falls Ausgaben geprüft werden.)
 - Build-Target ist `./cmd/beans`; Version-Stamp per ldflags. `mise codegen` (T09) ist ok — nur `mise test` ist das Problem.
+
+## Review-Preludes (Supervisor, 2026-07-24)
+
+### Q01 (non-blocking, fürs PO-Gate) — Co-Authored-By-Trailer
+T01-specs-review flaggt: Commits tragen `Co-Authored-By`-Trailer. lean-stack/CLAUDE.md fordert ihn explizit (Abschnitt 'Commits autonom'), globaler tools/CLAUDE.md-Hook E2 verbietet ihn tools-weit. Layer-Konflikt. Commit ging durch (Hook greift in beans-src offenbar nicht). ENTSCHEIDUNG PO: gilt beans-src als bewusster Fork-Override von E2 (Trailer behalten) oder Trailer droppen? Betrifft alle Task-Commits dieses Epos.
+
+### I01 (non-blocking) — vorbestehendes gofmt in pkg/bean/id_test.go
+gofmt -l meldet Alignment-Abweichung in TestContainsBlockedWord (Z.198f), NICHT durch T01 eingeführt. Bei nächstem Touch von pkg/bean via gofmt -w mitnehmen.
