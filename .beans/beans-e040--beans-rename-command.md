@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T11:40:31Z
+updated_at: 2026-07-24T11:56:44Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
@@ -43,3 +43,6 @@ T01-specs-review flaggt: Commits tragen `Co-Authored-By`-Trailer. lean-stack/CLA
 
 ### I01 (non-blocking) — vorbestehendes gofmt in pkg/bean/id_test.go
 gofmt -l meldet Alignment-Abweichung in TestContainsBlockedWord (Z.198f), NICHT durch T01 eingeführt. Bei nächstem Touch von pkg/bean via gofmt -w mitnehmen.
+
+### D01 (PO-Gate) — Crash-Fenster stageAndSwap: Residualrisiko akzeptieren oder härten?
+T04-specs-review (rename.go:221-227): der Zwei-`os.Rename`-Dir-Swap hat ein strukturell unschließbares Fenster, in dem `.beans/` transient komplett fehlt; ein Absturz/Kill exakt dort hinterlässt echte Daten nur unter `.beans.bak-<ts>`, und es gibt KEINE Waisen-Recovery beim Load(). Kein Go-stdlib-atomarer Cross-FS-Dir-Exchange verfügbar. Der Plan hat das Zwei-Rename-Verfahren implizit akzeptiert. ENTSCHEIDUNG PO vor Public-Rollout: (a) Residualrisiko akzeptieren (single-shot CLI, seltener Rename) oder (b) eigener Hardening-Task (Startup-Check erkennt `.beans.bak-*`-Waisen + repariert). Nicht-blockierend für die Epos-Realisierung.
