@@ -231,3 +231,37 @@ func TestParseFilenameAndBuildFilenameRoundtrip(t *testing.T) {
 		})
 	}
 }
+
+func TestIDSuffix(t *testing.T) {
+	tests := []struct {
+		name, id, prefix, want string
+	}{
+		{"strips prefix", "bew_BeWiki-Python-Download-ljs5", "bew_BeWiki-Python-Download-", "ljs5"},
+		{"no prefix match returns id", "abc-ljs5", "xyz-", "abc-ljs5"},
+		{"empty prefix returns id", "abc-ljs5", "", "abc-ljs5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := IDSuffix(tt.id, tt.prefix); got != tt.want {
+				t.Errorf("IDSuffix(%q,%q) = %q, want %q", tt.id, tt.prefix, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRebrandID(t *testing.T) {
+	tests := []struct {
+		name, id, oldP, newP, want string
+	}{
+		{"long to short", "bew_BeWiki-Python-Download-ljs5", "bew_BeWiki-Python-Download-", "bew-", "bew-ljs5"},
+		{"idempotent when already short", "bew-ljs5", "bew-", "bew-", "bew-ljs5"},
+		{"id without old prefix keeps suffix", "ljs5", "bew_", "bew-", "bew-ljs5"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RebrandID(tt.id, tt.oldP, tt.newP); got != tt.want {
+				t.Errorf("RebrandID(%q,%q,%q) = %q, want %q", tt.id, tt.oldP, tt.newP, got, tt.want)
+			}
+		})
+	}
+}

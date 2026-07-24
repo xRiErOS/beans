@@ -130,3 +130,17 @@ func Slugify(title string) string {
 
 	return s
 }
+
+// IDSuffix returns id with prefix removed. If id does not start with
+// prefix (or prefix is empty), id is returned unchanged.
+func IDSuffix(id, prefix string) string {
+	if prefix == "" {
+		return id
+	}
+	return strings.TrimPrefix(id, prefix)
+}
+
+// RebrandID rewrites id from oldPrefix to newPrefix, preserving the suffix.
+func RebrandID(id, oldPrefix, newPrefix string) string {
+	return newPrefix + IDSuffix(id, oldPrefix)
+}
