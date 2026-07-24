@@ -7,7 +7,7 @@ priority: normal
 tags:
     - accepted
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T13:08:38Z
+updated_at: 2026-07-24T13:21:02Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
@@ -70,3 +70,6 @@ US-10 · Feature dokumentiert in beans-src/CLAUDE.md §# Renaming Beans (Modi, F
 
 ### D03 (Review-Entscheidung PO, 2026-07-24)
 beans prime führt rename NICHT + ce-beans-Skill kennt rename NICHT. PO entschieden: KEINE Lücke — rename ist Sonderfall, beans --help genügt. Keine Follow-up-beans für prime/skill.
+
+### Q01 GELÖST (PO, 2026-07-24)
+Co-Authored-By-Layer-Konflikt: PO entschieden 'lean-stack ist falsch für den hook' → Hook E2 (verbietet Trailer) ist die durchgesetzte Autorität, gewinnt. KEIN Co-Authored-By kuenftig. lean-stack/CLAUDE.md Zeile 47 korrigiert. Historie-Inkonsistenz (T01-06 mit / T07+ ohne) bleibt als Artefakt, kein Rewrite.
