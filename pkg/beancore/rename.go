@@ -102,6 +102,31 @@ func (c *Core) applyRenameSlug(plan *RenamePlan) error {
 	return nil
 }
 
+// rewriteRefs replaces mapped old IDs with their new IDs in b's relationship
+// fields (Parent/Blocking/BlockedBy). It mutates b in place and returns the
+// number of individual ref fields changed. A ref value not present in m is
+// left unchanged; an empty Parent is never considered a match.
+func rewriteRefs(b *bean.Bean, m map[string]string) int {
+	changed := 0
+	if nv, ok := m[b.Parent]; ok && b.Parent != "" {
+		b.Parent = nv
+		changed++
+	}
+	for i, id := range b.Blocking {
+		if nv, ok := m[id]; ok {
+			b.Blocking[i] = nv
+			changed++
+		}
+	}
+	for i, id := range b.BlockedBy {
+		if nv, ok := m[id]; ok {
+			b.BlockedBy[i] = nv
+			changed++
+		}
+	}
+	return changed
+}
+
 // applyRenameCascade handles Mode "id" and "prefix". Implemented in a
 // follow-up task (single-ID rename / prefix rebrand); stubbed here so the
 // package compiles for the slug-rename path.

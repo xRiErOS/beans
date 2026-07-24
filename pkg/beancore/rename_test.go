@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/config"
 )
 
@@ -114,6 +115,89 @@ func TestPlanRenameSlug_noopWhenPathsIdentical(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(c.Root(), "tp-aaaa--same.md")); err != nil {
 		t.Errorf("file should still be present: %v", err)
 	}
+}
+
+func TestRewriteRefs(t *testing.T) {
+	tests := []struct {
+		name          string
+		parent        string
+		blocking      []string
+		blockedBy     []string
+		m             map[string]string
+		wantN         int
+		wantParent    string
+		wantBlocking  []string
+		wantBlockedBy []string
+	}{
+		{
+			name:          "mixed map: parent + one blocking entry changed, rest untouched",
+			parent:        "old-1",
+			blocking:      []string{"old-1", "keep-9"},
+			blockedBy:     []string{"other-5"},
+			m:             map[string]string{"old-1": "new-1"},
+			wantN:         2,
+			wantParent:    "new-1",
+			wantBlocking:  []string{"new-1", "keep-9"},
+			wantBlockedBy: []string{"other-5"},
+		},
+		{
+			name:          "ref not in map left unchanged",
+			parent:        "untouched-1",
+			blocking:      nil,
+			blockedBy:     []string{"untouched-2"},
+			m:             map[string]string{"old-1": "new-1"},
+			wantN:         0,
+			wantParent:    "untouched-1",
+			wantBlocking:  nil,
+			wantBlockedBy: []string{"untouched-2"},
+		},
+		{
+			name:          "empty parent never matched",
+			parent:        "",
+			blocking:      []string{"old-1"},
+			blockedBy:     nil,
+			m:             map[string]string{"": "should-not-apply", "old-1": "new-1"},
+			wantN:         1,
+			wantParent:    "",
+			wantBlocking:  []string{"new-1"},
+			wantBlockedBy: nil,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			b := &bean.Bean{
+				ID:        "x-2",
+				Parent:    tt.parent,
+				Blocking:  append([]string(nil), tt.blocking...),
+				BlockedBy: append([]string(nil), tt.blockedBy...),
+			}
+			n := rewriteRefs(b, tt.m)
+			if n != tt.wantN {
+				t.Errorf("changed count = %d, want %d", n, tt.wantN)
+			}
+			if b.Parent != tt.wantParent {
+				t.Errorf("Parent = %q, want %q", b.Parent, tt.wantParent)
+			}
+			if !equalStrSlices(b.Blocking, tt.wantBlocking) {
+				t.Errorf("Blocking = %v, want %v", b.Blocking, tt.wantBlocking)
+			}
+			if !equalStrSlices(b.BlockedBy, tt.wantBlockedBy) {
+				t.Errorf("BlockedBy = %v, want %v", b.BlockedBy, tt.wantBlockedBy)
+			}
+		})
+	}
+}
+
+func equalStrSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func strPtr(s string) *string { return &s }
