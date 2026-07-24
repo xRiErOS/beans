@@ -2,6 +2,7 @@ package beancore
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -660,6 +661,100 @@ func TestRebrand_samePrefixRejected(t *testing.T) {
 	})
 	if _, err := c.PlanRebrand("tp-"); err == nil {
 		t.Fatal("expected error when newPrefix equals current prefix")
+	}
+}
+
+// TestGuard_activeWorktreeRefusesRebrand proves the D05/T07 worktree guard:
+// a rebrand is refused (SC-002: no mutation) while an active worktree marker
+// (*.meta.json) exists under the resolved worktree directory, and the
+// project-name resolution mirrors serve.go:115-117 (GetProjectName() first,
+// basename(ConfigDir()) only as fallback).
+func TestGuard_activeWorktreeRefusesRebrand(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	projectName := c.config.GetProjectName()
+	if projectName == "" {
+		projectName = filepath.Base(c.config.ConfigDir())
+	}
+	wtPath, err := c.config.ResolveWorktreePath(projectName)
+	if err != nil {
+		t.Skipf("cannot resolve worktree path: %v", err)
+	}
+	if err := os.MkdirAll(wtPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtPath)
+	if err := os.WriteFile(filepath.Join(wtPath, "tp-aaaa.meta.json"), []byte("{}"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := c.PlanRebrand("op-"); err == nil {
+		t.Fatal("expected refusal due to active worktree")
+	}
+	// SC-002: no mutation on refusal.
+	if _, err := os.Stat(filepath.Join(c.Root(), "tp-aaaa--a.md")); err != nil {
+		t.Errorf("original file disturbed by refused rebrand: %v", err)
+	}
+}
+
+// TestGuard_activeWorktreeAllowsRebrand_whenDirEmpty proves the guard does
+// not false-positive: an existing (but empty, or marker-less) worktree
+// directory must not block a rebrand.
+func TestGuard_activeWorktreeAllowsRebrand_whenDirEmpty(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	projectName := c.config.GetProjectName()
+	if projectName == "" {
+		projectName = filepath.Base(c.config.ConfigDir())
+	}
+	wtPath, err := c.config.ResolveWorktreePath(projectName)
+	if err != nil {
+		t.Skipf("cannot resolve worktree path: %v", err)
+	}
+	if err := os.MkdirAll(wtPath, 0755); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(wtPath)
+
+	if _, err := c.PlanRebrand("op-"); err != nil {
+		t.Fatalf("unexpected refusal with no worktree markers present: %v", err)
+	}
+}
+
+// TestGuard_runningServerRefusesRebrand proves the D05/T07 server guard: a
+// rebrand is refused (SC-002: no mutation) while a listener occupies the
+// project's configured server port.
+func TestGuard_runningServerRefusesRebrand(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	port := c.config.GetServerPort()
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		t.Skipf("cannot bind configured port %d: %v", port, err)
+	}
+	defer ln.Close()
+
+	if _, err := c.PlanRebrand("op-"); err == nil {
+		t.Fatal("expected refusal while a listener occupies the configured port")
+	}
+	// SC-002: no mutation on refusal.
+	if _, err := os.Stat(filepath.Join(c.Root(), "tp-aaaa--a.md")); err != nil {
+		t.Errorf("original file disturbed by refused rebrand: %v", err)
+	}
+}
+
+// TestGuard_noServerRunningAllowsRebrand proves the server guard does not
+// false-positive: with nothing listening on the configured port, PlanRebrand
+// must proceed normally.
+func TestGuard_noServerRunningAllowsRebrand(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	if _, err := c.PlanRebrand("op-"); err != nil {
+		t.Fatalf("unexpected refusal with no server running: %v", err)
 	}
 }
 

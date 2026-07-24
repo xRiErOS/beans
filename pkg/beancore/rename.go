@@ -3,6 +3,7 @@ package beancore
 import (
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -198,6 +199,58 @@ func countRefHits(b *bean.Bean, m map[string]string) int {
 	return n
 }
 
+// checkNoActiveWorktrees refuses (returns a non-nil error) if the resolved
+// worktree directory for this project contains any *.meta.json marker
+// (an active worktree — see the Worktree State Architecture section of
+// CLAUDE.md). Project-name resolution mirrors serve.go:115-117 exactly:
+// GetProjectName() first, basename(ConfigDir()) only as a fallback. Using
+// only the basename would resolve the wrong worktree dir when project.name
+// is configured, silently letting a rebrand through and undermining D05.
+// If the worktree path cannot be resolved, or the directory does not exist,
+// this is treated as "no active worktrees" (nothing to guard against).
+func (c *Core) checkNoActiveWorktrees() error {
+	if c.config == nil {
+		return nil
+	}
+	projectName := c.config.GetProjectName()
+	if projectName == "" {
+		projectName = filepath.Base(c.config.ConfigDir())
+	}
+	wtPath, err := c.config.ResolveWorktreePath(projectName)
+	if err != nil {
+		return nil // cannot resolve -> assume none
+	}
+	entries, err := os.ReadDir(wtPath)
+	if err != nil {
+		return nil // dir absent -> none
+	}
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".meta.json") {
+			return fmt.Errorf("active worktrees present under %s; merge or remove them before a prefix rebrand", wtPath)
+		}
+	}
+	return nil
+}
+
+// checkServerNotRunning refuses (returns a non-nil error) if a TCP dial to
+// 127.0.0.1:<GetServerPort()> succeeds — a heuristic proxy for "a beans
+// serve process is running against this project" (D05). This cannot detect
+// a server bound to a different interface/host, or a rebrand check racing
+// a server that starts immediately after the probe; it is a best-effort
+// fail-fast, not a lock. Documented limitation, matches the plan (Task 7).
+func (c *Core) checkServerNotRunning() error {
+	if c.config == nil {
+		return nil
+	}
+	port := c.config.GetServerPort()
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port), 200*time.Millisecond)
+	if err == nil {
+		conn.Close()
+		return fmt.Errorf("beans serve appears to be running on port %d; stop it before a prefix rebrand", port)
+	}
+	return nil
+}
+
 // PlanRebrand computes a dry-run plan that maps every bean's ID from the
 // project's current prefix (c.config.Beans.Prefix) to newPrefix, preserving
 // each ID's suffix (bean.RebrandID). Mode is "prefix", NewPrefix and
@@ -207,7 +260,19 @@ func countRefHits(b *bean.Bean, m map[string]string) int {
 // B04 guard: refuses outright (no partial plan) if any bean ID does not
 // start with the current prefix — RebrandID would otherwise double-prefix
 // it (newPrefix + the untouched full old ID), corrupting that ID.
+//
+// D05 guards (checkServerNotRunning, checkNoActiveWorktrees) run first,
+// fail-fast, before any lock is taken or staging happens — a prefix rebrand
+// is refused outright while a beans server is running or active worktrees
+// exist, since either could produce a divergent/half-migrated state.
 func (c *Core) PlanRebrand(newPrefix string) (*RenamePlan, error) {
+	if err := c.checkServerNotRunning(); err != nil {
+		return nil, err
+	}
+	if err := c.checkNoActiveWorktrees(); err != nil {
+		return nil, err
+	}
+
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
