@@ -557,7 +557,7 @@ func TestStageAndSwap_rollsBackOnSwapFailure(t *testing.T) {
 // PlanRebrand fixture used a `blocking:` field (TestRenameID_cascadesRefs
 // only exercises parent + blocked_by). Prefix-rebrand drives countRefHits
 // project-wide via planCascade, so assert the ref count here.
-func TestPlanRebrand_countsBlockingRefs(t *testing.T) {
+func TestRebrand_countsBlockingRefs(t *testing.T) {
 	c := newTestCore(t, "tp-", map[string]string{
 		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: epic\n---\n",
 		"tp-bbbb--b.md": "---\n# tp-bbbb\ntitle: B\nstatus: todo\ntype: task\nblocking:\n  - tp-aaaa\n---\n",
@@ -571,7 +571,7 @@ func TestPlanRebrand_countsBlockingRefs(t *testing.T) {
 	}
 }
 
-func TestPlanRebrand_remapsAllAndWritesConfig(t *testing.T) {
+func TestRebrand_remapsAllAndWritesConfig(t *testing.T) {
 	c := newTestCore(t, "old_Long-Prefix-", map[string]string{
 		"old_Long-Prefix-aaaa--a.md": "---\n# old_Long-Prefix-aaaa\ntitle: A\nstatus: todo\ntype: epic\n---\n",
 		"old_Long-Prefix-bbbb--b.md": "---\n# old_Long-Prefix-bbbb\ntitle: B\nstatus: todo\ntype: task\nparent: old_Long-Prefix-aaaa\nblocked_by:\n  - old_Long-Prefix-aaaa\n---\n",
@@ -654,7 +654,7 @@ func TestRebrand_mixedPrefixRefused(t *testing.T) {
 	}
 }
 
-func TestPlanRebrand_samePrefixRejected(t *testing.T) {
+func TestRebrand_samePrefixRejected(t *testing.T) {
 	c := newTestCore(t, "tp-", map[string]string{
 		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
 	})
