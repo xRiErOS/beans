@@ -4,8 +4,10 @@ title: beans rename command
 status: todo
 type: epic
 priority: normal
+tags:
+    - to-review
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T12:18:28Z
+updated_at: 2026-07-24T12:47:20Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
