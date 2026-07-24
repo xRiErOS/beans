@@ -1,6 +1,7 @@
 package beancore
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,7 +20,11 @@ func newTestCore(t *testing.T, prefix string, files map[string]string) *Core {
 		t.Fatal(err)
 	}
 	for name, content := range files {
-		if err := os.WriteFile(filepath.Join(beansDir, name), []byte(content), 0644); err != nil {
+		full := filepath.Join(beansDir, name)
+		if err := os.MkdirAll(filepath.Dir(full), 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(content), 0644); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -328,6 +333,210 @@ func TestStageAndSwap_appliesWritesAndRemoves(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestNewBeanPath proves subdir preservation for newBeanPath (Prelude I01
+// from T02-Review): nested Bean.Path values (e.g. "epic-auth/id--slug.md")
+// must keep their directory across a rename, not just flat files.
+func TestNewBeanPath(t *testing.T) {
+	tests := []struct {
+		name           string
+		oldPath        string
+		newID, newSlug string
+		want           string
+	}{
+		{
+			name: "flat file with slug", oldPath: "tp-aaaa--slug.md",
+			newID: "tp-zzzz", newSlug: "slug", want: "tp-zzzz--slug.md",
+		},
+		{
+			name: "flat file without slug", oldPath: "tp-aaaa.md",
+			newID: "tp-zzzz", newSlug: "", want: "tp-zzzz.md",
+		},
+		{
+			name: "nested subdir preserved", oldPath: "epic-auth/tp-aaaa--slug.md",
+			newID: "tp-zzzz", newSlug: "slug", want: filepath.Join("epic-auth", "tp-zzzz--slug.md"),
+		},
+		{
+			name: "deeply nested subdir preserved", oldPath: "epic-auth/sub/tp-aaaa--slug.md",
+			newID: "tp-zzzz", newSlug: "newslug", want: filepath.Join("epic-auth", "sub", "tp-zzzz--newslug.md"),
+		},
+		{
+			name: "nested subdir, slug cleared", oldPath: "epic-auth/tp-aaaa--slug.md",
+			newID: "tp-zzzz", newSlug: "", want: filepath.Join("epic-auth", "tp-zzzz.md"),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := newBeanPath(tt.oldPath, tt.newID, tt.newSlug)
+			if got != tt.want {
+				t.Errorf("newBeanPath(%q,%q,%q) = %q, want %q", tt.oldPath, tt.newID, tt.newSlug, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestRenameID_cascadesRefs(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--parent.md": "---\n# tp-aaaa\ntitle: Parent\nstatus: todo\ntype: epic\n---\n",
+		"tp-bbbb--child.md":  "---\n# tp-bbbb\ntitle: Child\nstatus: todo\ntype: task\nparent: tp-aaaa\nblocked_by:\n  - tp-aaaa\n---\n",
+	})
+	plan, err := c.PlanRenameID("tp-aaaa", "tp-zzzz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if plan.Mode != "id" {
+		t.Fatalf("mode = %q", plan.Mode)
+	}
+	if plan.RefUpdates["tp-bbbb"] != 2 { // parent + blocked_by
+		t.Errorf("RefUpdates[tp-bbbb] = %d, want 2", plan.RefUpdates["tp-bbbb"])
+	}
+	if err := c.ApplyRename(plan); err != nil {
+		t.Fatal(err)
+	}
+	// I01 (T04-Review): the applied disk state matches the plan exactly.
+	for _, ch := range plan.Changes {
+		if _, err := os.Stat(filepath.Join(c.Root(), ch.NewPath)); err != nil {
+			t.Errorf("planned NewPath %q missing after apply: %v", ch.NewPath, err)
+		}
+		if ch.OldPath != ch.NewPath {
+			if _, err := os.Stat(filepath.Join(c.Root(), ch.OldPath)); !os.IsNotExist(err) {
+				t.Errorf("planned OldPath %q still present after apply", ch.OldPath)
+			}
+		}
+	}
+	// B01: the SAME core must reflect the rename in-memory after apply.
+	if _, err := c.Get("tp-zzzz"); err != nil {
+		t.Errorf("same-core Get(new id) failed — in-memory state not refreshed: %v", err)
+	}
+	if _, err := c.Get("tp-aaaa"); err == nil {
+		t.Error("same-core still resolves the old ID after rename")
+	}
+	// also verify what landed on disk via a fresh core
+	c2 := New(c.Root(), c.Config())
+	if err := c2.Load(); err != nil {
+		t.Fatal(err)
+	}
+	child, err := c2.Get("tp-bbbb")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if child.Parent != "tp-zzzz" {
+		t.Errorf("child.Parent = %q, want tp-zzzz", child.Parent)
+	}
+	if len(child.BlockedBy) != 1 || child.BlockedBy[0] != "tp-zzzz" {
+		t.Errorf("child.BlockedBy = %v", child.BlockedBy)
+	}
+	if _, err := c2.Get("tp-zzzz"); err != nil {
+		t.Errorf("renamed bean not found under new ID: %v", err)
+	}
+	if _, err := c2.Get("tp-aaaa"); err == nil {
+		t.Error("old ID still resolvable")
+	}
+}
+
+// TestRenameID_cascadesRefs_nestedSubdir extends the cascade proof to a bean
+// living in a subdirectory (Prelude I01, T02-Review): the renamed file must
+// land back in the same subdir, not at .beans root.
+func TestRenameID_cascadesRefs_nestedSubdir(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"epic-auth/tp-aaaa--parent.md": "---\n# tp-aaaa\ntitle: Parent\nstatus: todo\ntype: epic\n---\n",
+		"tp-bbbb--child.md":            "---\n# tp-bbbb\ntitle: Child\nstatus: todo\ntype: task\nparent: tp-aaaa\n---\n",
+	})
+	plan, err := c.PlanRenameID("tp-aaaa", "tp-zzzz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantPath := filepath.Join("epic-auth", "tp-zzzz--parent.md")
+	if len(plan.Changes) != 1 || plan.Changes[0].NewPath != wantPath {
+		t.Fatalf("Changes = %+v, want NewPath %q", plan.Changes, wantPath)
+	}
+	if err := c.ApplyRename(plan); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root(), wantPath)); err != nil {
+		t.Errorf("renamed file missing at nested path %q: %v", wantPath, err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root(), "epic-auth", "tp-aaaa--parent.md")); !os.IsNotExist(err) {
+		t.Error("old nested file still present")
+	}
+}
+
+func TestRenameID_collisionRejected(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+		"tp-bbbb--b.md": "---\n# tp-bbbb\ntitle: B\nstatus: todo\ntype: task\n---\n",
+	})
+	if _, err := c.PlanRenameID("tp-aaaa", "tp-bbbb"); err == nil {
+		t.Fatal("expected collision error")
+	}
+	// no mutation on refusal
+	if _, err := os.Stat(filepath.Join(c.Root(), "tp-aaaa--a.md")); err != nil {
+		t.Errorf("original file disturbed by refused rename: %v", err)
+	}
+}
+
+func TestRenameID_sameIDRejected(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	if _, err := c.PlanRenameID("tp-aaaa", "tp-aaaa"); err == nil {
+		t.Fatal("expected error when newID equals oldID")
+	}
+}
+
+func TestRenameID_unknownOldIDRejected(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "---\n# tp-aaaa\ntitle: A\nstatus: todo\ntype: task\n---\n",
+	})
+	if _, err := c.PlanRenameID("tp-nope", "tp-zzzz"); err == nil {
+		t.Fatal("expected error for unknown oldID")
+	}
+}
+
+// TestStageAndSwap_rollsBackOnSwapFailure exercises the rollback branch
+// (rename.go, second os.Rename after the backup rename succeeds) — Prelude
+// I01 from T04-Review. swapRename is a package-level indirection over the
+// second os.Rename call specifically so this failure mode is deterministically
+// injectable in tests (no OS-level race required).
+func TestStageAndSwap_rollsBackOnSwapFailure(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--a.md": "content-a",
+		"tp-bbbb--b.md": "content-b",
+	})
+	orig := swapRename
+	swapRename = func(oldpath, newpath string) error {
+		return fmt.Errorf("simulated swap failure")
+	}
+	defer func() { swapRename = orig }()
+
+	err := c.stageAndSwap(map[string][]byte{"tp-cccc--c.md": []byte("content-c")}, []string{"tp-bbbb--b.md"})
+	if err == nil {
+		t.Fatal("expected swap failure error")
+	}
+	// original tree restored byte-for-byte
+	got, readErr := os.ReadFile(filepath.Join(c.Root(), "tp-aaaa--a.md"))
+	if readErr != nil || string(got) != "content-a" {
+		t.Errorf("original file not restored after rollback: content=%q err=%v", got, readErr)
+	}
+	got2, readErr2 := os.ReadFile(filepath.Join(c.Root(), "tp-bbbb--b.md"))
+	if readErr2 != nil || string(got2) != "content-b" {
+		t.Errorf("removed-then-rolled-back file not restored: content=%q err=%v", got2, readErr2)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root(), "tp-cccc--c.md")); !os.IsNotExist(err) {
+		t.Error("staged write should not be visible after rollback")
+	}
+	// staging dir cleaned up (best-effort rollback still tears down staging)
+	entries, err := os.ReadDir(c.repoRoot())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if name != ".beans" && strings.HasPrefix(name, ".beans-staging") {
+			t.Errorf("leftover staging sibling: %s", name)
+		}
 	}
 }
 

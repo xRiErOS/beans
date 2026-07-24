@@ -129,11 +129,125 @@ func rewriteRefs(b *bean.Bean, m map[string]string) int {
 	return changed
 }
 
-// applyRenameCascade handles Mode "id" and "prefix". Implemented in a
-// follow-up task (single-ID rename / prefix rebrand); stubbed here so the
-// package compiles for the slug-rename path.
+// PlanRenameID computes a dry-run plan to rename a single bean's ID,
+// cascading the change into every referencing bean's Parent/Blocking/
+// BlockedBy fields. Refuses (no mutation) if newID collides with an existing
+// bean.
+func (c *Core) PlanRenameID(oldID, newID string) (*RenamePlan, error) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	if oldID == newID {
+		return nil, fmt.Errorf("new ID equals old ID")
+	}
+	b, ok := c.beans[oldID]
+	if !ok {
+		return nil, fmt.Errorf("bean %q not found", oldID)
+	}
+	if _, exists := c.beans[newID]; exists {
+		return nil, fmt.Errorf("ID collision: %q already exists", newID)
+	}
+	return c.planCascade("id", map[string]string{oldID: newID}, map[string]*bean.Bean{oldID: b})
+}
+
+// planCascade builds a RenamePlan for an ID map (oldID -> newID). renamed
+// holds only the beans whose own ID changes (their filename is recomputed
+// via newBeanPath, preserving any subdir); every bean in c.beans is scanned
+// for ref-field hits against idMap. Must be called with at least a read lock
+// held.
+func (c *Core) planCascade(mode string, idMap map[string]string, renamed map[string]*bean.Bean) (*RenamePlan, error) {
+	plan := &RenamePlan{Mode: mode, RefUpdates: map[string]int{}}
+	for oldID, b := range renamed {
+		newID := idMap[oldID]
+		plan.Changes = append(plan.Changes, RenameChange{
+			OldID: oldID, NewID: newID,
+			OldPath: b.Path,
+			NewPath: newBeanPath(b.Path, newID, b.Slug),
+		})
+	}
+	for _, b := range c.beans {
+		if n := countRefHits(b, idMap); n > 0 {
+			plan.RefUpdates[b.ID] = n
+		}
+	}
+	return plan, nil
+}
+
+// countRefHits counts how many of b's ref fields (Parent/Blocking/BlockedBy)
+// reference an old ID present in m, without mutating b.
+func countRefHits(b *bean.Bean, m map[string]string) int {
+	n := 0
+	if _, ok := m[b.Parent]; ok && b.Parent != "" {
+		n++
+	}
+	for _, id := range b.Blocking {
+		if _, ok := m[id]; ok {
+			n++
+		}
+	}
+	for _, id := range b.BlockedBy {
+		if _, ok := m[id]; ok {
+			n++
+		}
+	}
+	return n
+}
+
+// applyRenameCascade is the shared apply path for Mode "id" and "prefix": it
+// re-renders every bean touched by the plan's ID map — the renamed bean(s)
+// themselves (new filename, corrected "# id" comment via Render) plus every
+// referencing bean (rewritten ref fields) — and drives the whole change
+// through stageAndSwap for atomicity. After a successful swap it refreshes
+// in-memory state from disk so the same Core resolves the new ID(s)
+// immediately (Get(newID) works without a separate Load()).
 func (c *Core) applyRenameCascade(plan *RenamePlan) error {
-	return fmt.Errorf("cascade rename not yet implemented")
+	idMap := map[string]string{}
+	renamedIDs := map[string]bool{}
+	for _, ch := range plan.Changes {
+		idMap[ch.OldID] = ch.NewID
+		renamedIDs[ch.OldID] = true
+	}
+
+	c.mu.RLock()
+	writes := map[string][]byte{}
+	removes := []string{}
+	for _, b := range c.beans {
+		// Work on a shallow clone so live state is never mutated pre-swap —
+		// if rendering or staging fails partway through, c.beans is untouched.
+		clone := *b
+		clone.Blocking = append([]string(nil), b.Blocking...)
+		clone.BlockedBy = append([]string(nil), b.BlockedBy...)
+
+		idChanged := renamedIDs[b.ID]
+		refChanged := rewriteRefs(&clone, idMap) > 0
+		if !idChanged && !refChanged {
+			continue
+		}
+		if idChanged {
+			clone.ID = idMap[b.ID]
+		}
+		content, err := clone.Render()
+		if err != nil {
+			c.mu.RUnlock()
+			return fmt.Errorf("rendering %s: %w", b.ID, err)
+		}
+		if idChanged {
+			// remove old-named file, write new-named file (subdir preserved)
+			removes = append(removes, b.Path)
+			writes[newBeanPath(b.Path, clone.ID, clone.Slug)] = content
+		} else {
+			// same filename, new content (ref-only change)
+			writes[b.Path] = content
+		}
+	}
+	c.mu.RUnlock()
+
+	if err := c.stageAndSwap(writes, removes); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.loadFromDisk()
 }
 
 // copyTree recursively copies src into dst, skipping any src-relative path
@@ -176,6 +290,13 @@ func copyTree(src, dst string, skip map[string]bool) error {
 		return nil
 	})
 }
+
+// swapRename performs the second (staging-into-c.root) rename in
+// stageAndSwap. It is a package-level variable — rather than a bare
+// os.Rename call — purely so tests can inject a deterministic failure here
+// and assert the rollback branch, without depending on an OS-level race
+// between the two renames. Production code always uses the real os.Rename.
+var swapRename = os.Rename
 
 // stageAndSwap builds a new .beans tree in a temp sibling dir (a full clone
 // of the current tree with removes/writes applied), then atomically swaps it
@@ -221,7 +342,7 @@ func (c *Core) stageAndSwap(writes map[string][]byte, removes []string) error {
 	if err := os.Rename(c.root, backup); err != nil {
 		return fmt.Errorf("backing up .beans: %w", err)
 	}
-	if err := os.Rename(staging, c.root); err != nil {
+	if err := swapRename(staging, c.root); err != nil {
 		os.Rename(backup, c.root) // best-effort rollback
 		return fmt.Errorf("swapping in new tree: %w", err)
 	}
