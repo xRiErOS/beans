@@ -5,7 +5,7 @@ status: completed
 type: task
 priority: high
 created_at: 2026-07-24T10:10:14Z
-updated_at: 2026-07-24T12:12:44Z
+updated_at: 2026-07-24T12:18:35Z
 parent: beans-e040
 blocked_by:
     - beans-9p12
@@ -51,3 +51,6 @@ Als Nutzer will ich projekt-weit den ID-Prefix tauschen (`beans rename --prefix 
 ### Deviation (begründet)
 - Testnamen an SC-001 angepasst: die im PLAN.md/T06-Abschnitt vorgeschlagenen Namen (`TestRebrand_remapsAllAndWritesConfig`, `TestRebrand_mixedPrefixRefused`) wurden übernommen; zwei zusätzliche von mir zunächst als `TestPlanRebrand_*` benannte Tests (Blocking-Coverage, Same-Prefix-Guard) liefen dadurch am literalen `-run TestRebrand`-Filter aus SC-001 vorbei und wurden zu `TestRebrand_*` umbenannt (Commit `test(rename): align rebrand test names with SC-001`), damit SC-001 als geschriebene Akzeptanz auch tatsächlich alle vier neuen Tests erfasst.
 - Guards für laufenden Server / aktive Worktrees (`checkServerNotRunning`/`checkNoActiveWorktrees`) sind laut Aufgabenstellung explizit T07-Scope und wurden NICHT in `PlanRebrand` verdrahtet — bewusst außerhalb des T06-Scopes belassen.
+
+## Korrektur (Supervisor, 2026-07-24, aus T06-specs-review)
+Die obige Deviation-Notiz nennt das .beans.yml-Config-Write-Inkonsistenzfenster 'folgenlos' — das ist FALSCH. config.Save() ist nicht-atomar; ein Teilausfall (Beans umbenannt, .beans.yml alt) bricht projekt-weit Short-ID-Lookups + lässt neue Beans den alten Prefix bekommen (Mixed-Prefix-Zustand). Als D02 im Epos beans-e040 für PO-Decision verankert (SC eng lassen vs. Hardening-Task).

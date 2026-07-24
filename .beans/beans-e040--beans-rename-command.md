@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T11:56:44Z
+updated_at: 2026-07-24T12:18:28Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
@@ -46,3 +46,6 @@ gofmt -l meldet Alignment-Abweichung in TestContainsBlockedWord (Z.198f), NICHT 
 
 ### D01 (PO-Gate) — Crash-Fenster stageAndSwap: Residualrisiko akzeptieren oder härten?
 T04-specs-review (rename.go:221-227): der Zwei-`os.Rename`-Dir-Swap hat ein strukturell unschließbares Fenster, in dem `.beans/` transient komplett fehlt; ein Absturz/Kill exakt dort hinterlässt echte Daten nur unter `.beans.bak-<ts>`, und es gibt KEINE Waisen-Recovery beim Load(). Kein Go-stdlib-atomarer Cross-FS-Dir-Exchange verfügbar. Der Plan hat das Zwei-Rename-Verfahren implizit akzeptiert. ENTSCHEIDUNG PO vor Public-Rollout: (a) Residualrisiko akzeptieren (single-shot CLI, seltener Rename) oder (b) eigener Hardening-Task (Startup-Check erkennt `.beans.bak-*`-Waisen + repariert). Nicht-blockierend für die Epos-Realisierung.
+
+### D02 (PO-Gate) — .beans.yml-Config-Write bei Prefix-Rebrand nicht-atomar, Deviation-Begründung unvollständig
+T06-specs-review: `writeRebrandConfig` läuft NACH `stageAndSwap` (EARS-konform wörtlich: 'Kaskade atomar UND DANACH .beans.yml'). Aber `config.Save()` (pkg/config/config.go:343-363) ist selbst nicht-atomar (`os.WriteFile`, kein temp+rename). Bricht der Save ab, sind Bean-Dateien schon auf newPrefix umbenannt, `.beans.yml` hält aber noch oldPrefix. Die T06-bean-Deviation-Notiz nennt das 'folgenlos' — das ist FALSCH: `c.config.Beans.Prefix` treibt projekt-weite Short-ID-Normalisierung (core.go:321,344,697,834) UND die Prefix-Vergabe bei Core.Create (core.go:490-499). Nach Reload nach Teilausfall: (a) Short-ID-Lookups brechen für alle Beans (falscher Prefix), (b) neue Beans bekommen wieder oldPrefix → exakt der Mixed-Prefix-Zustand, den PlanRebrands B04-Guard beim nächsten Rebrand verweigert. Kein Test deckt diesen Pfad. ENTSCHEIDUNG PO: (a) SC/EARS bewusst eng lassen → nur Doku-Fix der Deviation-Begründung, oder (b) Hardening-Task für atomareren Config-Write (temp+rename) + Post-Reload-Prefix-Validierung. Verwandt mit D01 (stageAndSwap-Crash-Fenster) — beide sind Partial-Failure-Residualrisiken der Rename-Op. Nicht-blockierend für die Epos-Realisierung.

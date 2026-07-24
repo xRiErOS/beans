@@ -5,7 +5,7 @@ status: todo
 type: task
 priority: high
 created_at: 2026-07-24T10:10:14Z
-updated_at: 2026-07-24T10:11:50Z
+updated_at: 2026-07-24T12:18:41Z
 parent: beans-e040
 blocked_by:
     - beans-z1we
@@ -27,3 +27,7 @@ Als Nutzer will ich, dass ein Prefix-Rebrand verweigert wird, wenn ein Server l�
 
 ## Betroffene Pfade
 - `pkg/beancore/rename.go` (checkNoActiveWorktrees + checkServerNotRunning + Wiring in PlanRebrand; Imports `net`,`time`,`strings`), `pkg/beancore/rename_test.go`. Details: PLAN.md Task 7.
+
+## Prelude aus T06-Review (Supervisor, 2026-07-24)
+- D02 (PO-Decision offen, siehe Epos beans-e040): .beans.yml-Config-Write bei Prefix-Rebrand ist nicht-atomar (config.Save = os.WriteFile). Falls dein Guard-Scope (server/worktree-Guards VOR Rename) sinnvoll erweiterbar ist um einen Post-Reload-Prefix-Konsistenz-Check oder atomareren Config-Write, prüfe das — aber primär ist es PO-Entscheidung, NICHT ungefragt implementieren. Kontext für dich, damit die Guards diesen Failure-Mode kennen.
+- I01 (low): TestRebrand_samePrefixRejected pinnt den same-prefix-Fall nur indirekt (via len(idMap)==0-Guard), nicht den newPrefix==oldPrefix-Frühguard. Test-Präzision — kein Handlungszwang.
