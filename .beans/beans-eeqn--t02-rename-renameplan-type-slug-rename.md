@@ -1,11 +1,11 @@
 ---
 # beans-eeqn
 title: 'T02 rename: RenamePlan type + slug-rename'
-status: todo
+status: completed
 type: task
 priority: high
 created_at: 2026-07-24T10:10:14Z
-updated_at: 2026-07-24T10:11:16Z
+updated_at: 2026-07-24T11:42:48Z
 parent: beans-e040
 ---
 
@@ -25,3 +25,11 @@ Als Nutzer will ich den Slug einer bean nachträglich setzen/leeren/regenerieren
 
 ## Betroffene Pfade
 - `pkg/beancore/rename.go` (create: RenameChange/RenamePlan/newBeanPath/PlanRenameSlug/ApplyRename slug + applyRenameCascade-Stub), `pkg/beancore/rename_test.go`. Details: PLAN.md Task 2.
+
+## Summary of Changes
+- [x] `pkg/beancore/rename.go` neu: `RenameChange`, `RenamePlan`, `newBeanPath`, `repoRoot`, `PlanRenameSlug`, `ApplyRename` (dispatch), `applyRenameSlug`, `applyRenameCascade`-Stub (Fehler bis Task 5/6).
+- [x] `pkg/beancore/rename_test.go` neu: `newTestCore`-Harness + `TestApplyRenameSlug_setsSlug` (SC-001), `TestApplyRenameSlug_idAndRefsUnchanged` (SC-002: ID/`# id`-Kommentar/Cross-Ref unverändert), `TestPlanRenameSlug_noopWhenPathsIdentical` (EARS-Punkt 3, identische Pfade → keine Änderung).
+- [x] RED→GREEN verifiziert: Build-Fehler vor Implementierung (`undefined: PlanRenameSlug/ApplyRename`), danach `command go test ./pkg/beancore/ -run 'TestApplyRenameSlug|TestPlanRenameSlug' -v` GRÜN.
+- [x] Regressionsfrei: `command go test ./...` (gesamtes Repo) GRÜN, `command go vet ./...` sauber, `command go build -o /dev/null ./cmd/beans` erfolgreich.
+- Deviation: keine — Plan-Vorgabe (Task 2, Steps 1–5) 1:1 umgesetzt, zusätzlich zwei über das Minimal-Testbeispiel des Plans hinausgehende Tests ergänzt, um SC-002 und den No-op-Fall explizit als Test statt nur als Prosa-EARS abzudecken.
+- Commit: `65bbb61` — `feat(rename): RenamePlan type and slug-rename path`.
