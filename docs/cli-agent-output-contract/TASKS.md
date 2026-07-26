@@ -11,7 +11,7 @@ divergence, but nothing here is dispatched until the open D/Q are resolved.
 | T11 | normal | Decide the fate of the `rename --json` two-document emission and reconcile `beans-src/CLAUDE.md` with it. | D05, Q08 | 🟣 |
 | T03 | high | Rewrite `beans-13ae` body to the D01/D05 reframe: state that the payload already exists (cite M04–M06), name the envelope inconsistency as the actual defect, restate the acceptance around the bare shape, and record the falsified premise so nobody re-files it. | D05 | 🟣 |
 | T12 | high | Rewrite `beans-ra75` AC-2 and its success criteria to D07: `Run '<cmd> --help' for usage.` for every error class, SC-03 no longer expects a usage block on flag errors. | D07 | 🟣 |
-| T13 | normal | Version `docs/` — exclusion already lifted from `.git/info/exclude`; commit the pre-existing untracked contents (`SSTD.md`, `LESSONS-LEARNED.md`, `beans-rename-command/`, `roadmap-tty-output/`) alongside this collection. | D10 | 🔵 |
+| T13 | normal | **Done.** Version `docs/` — exclusion already lifted from `.git/info/exclude`; commit the pre-existing untracked contents (`SSTD.md`, `LESSONS-LEARNED.md`, `beans-rename-command/`, `roadmap-tty-output/`) alongside this collection. Commit `cfb5eeb`, 19 files. | D10 | 🟢 |
 | T04 | normal | Add the M03 double-emission finding to the record — as a scope widening of ra75 or as its own bean, per D06. | D06 | 🟣 |
 | T05 | normal | File the EARS-validator defect as a bean in this repo (D03), flagged as a foreign-repo defect with its path. | — | 🟣 |
 | T06 | normal | Re-type `beans-ra75` per D09. | D09 | 🟣 |
@@ -19,5 +19,5 @@ divergence, but nothing here is dispatched until the open D/Q are resolved.
 | T08 | normal | Reconstruct what actually broke the two updates in the okf-tools incident. | Q07 | 🟢 |
 | T14 | high | Correct the Origin section of `beans-ra75`: the incident it cites was a `PreToolUse` hook deny, not usage noise. Keep the bean — the 33-line manual per error stands on its own merits — but stop justifying it with an incident it did not cause. | Q07 | 🟣 |
 | T15 | high | Add the Q07 cause-2 evidence to `beans-13ae` — the envelope nesting demonstrably caused duplicate orphan beans. This upgrades D05 from ergonomics to a filed incident. | Q07, D05 | 🟣 |
-| T16 | high | File the hook-ergonomics defect (Q07 cause 1): a `PreToolUse` deny is all-or-nothing over a compound Bash call while its reason names one statement. Placement per Q12. | Q12 | 🟣 |
+| T16 | high | Hook-ergonomics defect (Q07 cause 1). **Done** — fixed directly in `~/.claude/hooks/git-enforce.py`, commit `fad35712`; `deny()` enumerates every statement and states none ran. Verified against the incident command, E1–E4 regressions green. | Q12 | 🟢 |
 | T09 | low | Establish a Go-only build/test path for CLI work so the failing frontend build does not gate it (Q06). | Q06 | 🟣 |
