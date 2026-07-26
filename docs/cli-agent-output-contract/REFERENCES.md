@@ -109,6 +109,78 @@ original D05 option set is not supported by evidence. Zero consumers break on a 
 to the bare form. The cost of unifying is close to nil; the cost of *not* unifying is
 already documented in CLAUDE.md as an agent-facing caveat.
 
+## The okf-tools incident, reconstructed (Q07)
+
+Both beans open with an Origin section blaming an incident on 2026-07-26 in
+`~/Obsidian/tools/okf-tools` (epic `okf-cli-5uog`). Forensics on the session
+transcript, the hook, and the git history show **two independent causes, and the one
+that lost the updates is not a beans defect at all.**
+
+### Cause 1 — the two lost updates never ran
+
+At `13:04:28Z` the agent issued **one compound Bash call**: four `beans update …`
+statements, each suffixed `>/dev/null`, followed by `git add && git commit -q -m
+"chore(beans): operationalize capability surface plan"` — a 52-character title.
+
+`~/.claude/hooks/git-enforce.py` is a `PreToolUse(Bash)` hook that returns
+`permissionDecision: "deny"`. **A deny rejects the entire tool call before a shell is
+spawned.** The four beans mutations never executed. The error the agent received was a
+single line:
+
+```
+E1: Commit-Title >50 Zeichen (52). Kuerzen.
+```
+
+Three seconds later the agent shortened the title and re-ran **only the git portion**.
+The four mutations were dropped permanently.
+
+| Ref | Artifact | Shows |
+|---|---|---|
+| I01 | session jsonl @ `13:04:28.045Z` | the compound call, 4× `beans update … >/dev/null` + `git commit` (52 chars) |
+| I02 | same @ `13:04:28.117Z`, `is_error=true` | the whole tool result is the one E1 line — the beans statements are not mentioned |
+| I03 | `~/.claude/hooks/git-enforce.py:2,25,30-34,89` | `PreToolUse(Bash)`, `TITLE_MAX = 50`, `permissionDecision: "deny"`; the reason string names only the violated rule. **Verified independently at source.** |
+| I04 | `~/.claude/settings.json` → `PreToolUse`, matcher `Bash` | wiring confirmed; nothing in the block ran |
+| I05 | same @ `13:04:31.648Z` | the retry is git-only; the four updates are never reissued |
+| I06 | `git show e61de25:.beans/okf-cli-a4as--….md` | committed with `updated_at: 13:04:17Z` and **no `parent:` key** — the file was never touched |
+| I07 | same @ `13:10:03.879Z` | the identical command later succeeds verbatim, rc=0 — the invocation was always valid |
+
+**This is a hook-ergonomics defect, not a CLI defect.** A `PreToolUse` deny is
+all-or-nothing over a compound command, but its reason describes a single statement,
+so the blast radius is invisible to the caller. Neither `beans-ra75` nor `beans-13ae`
+addresses it, and neither would have prevented it.
+
+### Cause 2 — the duplicate orphans, and this one *is* the envelope
+
+The same session produced three duplicate orphan beans (`wafj`, `ku01`, `6361`, later
+scrapped). Mechanism:
+
+```
+beans create --json … | python3 … json.load(sys.stdin).get('id','')
+```
+
+`id` is **not** at the top level — it is nested under `bean` (M04). The extractor
+printed an empty string, the agent concluded the creates had failed, and re-created
+them. The beans had in fact been created at `13:02:30Z`.
+
+| Ref | Artifact | Shows |
+|---|---|---|
+| I08 | session jsonl @ `13:02:30.115Z` | `Bash completed with no output` — the extractor returned empty while the creates succeeded |
+| I09 | disk: `wafj`/`ku01`/`6361` — `parent: -NONE-`, `scrapped`, commit `596d07f` | the duplicates, orphaned and later cleaned up |
+
+**Consequence for D05.** The envelope inconsistency is no longer an ergonomics
+argument. It has already caused an agent to misread a successful mutation as a failure
+and corrupt the tree in response. `frontend/e2e/fixtures.ts:111` reads
+`(json.bean?.id ?? json.id)` precisely because someone hit this before and defended
+against it locally instead of fixing the shape. D05 has an incident behind it.
+
+### Consequence for the two beans' Origin sections
+
+Both beans present the incident as evidence for the change they propose. For `ra75`
+that link is now false — the usage noise did not cause the loss; a hook deny did.
+`ra75` remains a legitimate improvement on its own merits (33 lines of manual per
+error, in a tool that calls itself AI-first), but its Origin narrative must be
+corrected or it will keep justifying itself with an incident it did not cause.
+
 ## Serialisation facts (D08)
 
 All commands serialise the **same** `bean.Bean` struct (`pkg/bean/bean.go:138-166`),

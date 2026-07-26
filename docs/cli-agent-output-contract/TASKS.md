@@ -16,5 +16,8 @@ divergence, but nothing here is dispatched until the open D/Q are resolved.
 | T05 | normal | File the EARS-validator defect as a bean in this repo (D03), flagged as a foreign-repo defect with its path. | — | 🟣 |
 | T06 | normal | Re-type `beans-ra75` per D09. | D09 | 🟣 |
 | T07 | low | Decide whether `beans query` and `beans create` join the contract (Q03/Q05) and record the boundary explicitly in the DESIGN. | D05, Q03, Q05 | 🟣 |
-| T08 | normal | Reconstruct what actually broke the two updates in the okf-tools incident, or record it as unexplained in both beans. | Q07 | 🟣 |
+| T08 | normal | Reconstruct what actually broke the two updates in the okf-tools incident. | Q07 | 🟢 |
+| T14 | high | Correct the Origin section of `beans-ra75`: the incident it cites was a `PreToolUse` hook deny, not usage noise. Keep the bean — the 33-line manual per error stands on its own merits — but stop justifying it with an incident it did not cause. | Q07 | 🟣 |
+| T15 | high | Add the Q07 cause-2 evidence to `beans-13ae` — the envelope nesting demonstrably caused duplicate orphan beans. This upgrades D05 from ergonomics to a filed incident. | Q07, D05 | 🟣 |
+| T16 | high | File the hook-ergonomics defect (Q07 cause 1): a `PreToolUse` deny is all-or-nothing over a compound Bash call while its reason names one statement. Placement per Q12. | Q12 | 🟣 |
 | T09 | low | Establish a Go-only build/test path for CLI work so the failing frontend build does not gate it (Q06). | Q06 | 🟣 |
