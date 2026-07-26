@@ -1,0 +1,23 @@
+# Decisions — cli-agent-output-contract
+
+Status icons: 🟣 open · 🔵 in progress · 🟢 decided · 🔴 rejected · 🟡 unclear
+
+## Settled
+
+| ID | Background | Decision | Rationale | Status |
+|---|---|---|---|---|
+| D01 | `beans-13ae` claims update gives back no state. M04–M06 show it gives back the full post-write bean. | Reframe 13ae: the defect is the **inconsistent JSON envelope across commands**, not a missing payload. | Left as written, an implementer would rebuild an existing function and ship an unnoticed contract break while doing it. | 🟢 |
+| D02 | Both beans are the two halves of one question — what the CLI hands an agent on failure and on success. | One shared workspace: `docs/cli-agent-output-contract/`. | Deciding the error shape without the success shape produces two half-contracts. | 🟢 |
+| D03 | The EARS-validator finding (prose "where" scored as a keyword, `~/.claude/skills/ce-beans-operationalize/scripts/ears-validator.js`) has no tracker of its own. | File it as a bean in this repo's `.beans/`. | PO call, pragmatism over repo purity: one tracker beats an unfiled defect. Noted as a foreign-repo defect in the bean body. | 🟢 |
+| D04 | Collection language. | English, like the beans and commits. | `DESIGN.md` lifts into bean bodies verbatim; German prose around an English EARS block is exactly the seam the artifact-language rule exists to prevent. | 🟢 |
+| D05 | Five JSON shapes across nine commands. Consumer inventory (T01) found **zero** consumers that break on unifying: `bnew` reads the already-bare `list`, and `frontend/e2e/fixtures.ts:111` is written `(json.bean?.id ?? json.id)` — shape-tolerant. `SuccessSingle`'s own comment (R08) already argues the bare form on jq-ergonomics grounds. | **Bare for single results, bare array for lists.** The envelope is reserved for genuinely multi-part payloads. `create`, `update`, `delete` change; `show`, `list` stay; `rename` collapses to one document. | The breaking-change objection that framed `beans-13ae` is unsupported by evidence, and a uniform shape is what makes `jq -r .parent` mean the same thing at every call site. | 🟢 |
+| D07 | `beans-ra75` wants runtime errors to drop the usage block while invocation errors keep it. R16 shows the mechanism the bean prescribes cannot deliver that. R17 shows cobra already ships a better shape for unknown commands. | **Adopt cobra's own idiom for every error class:** one error line plus `Run '<command path> --help' for usage.` No usage block, no per-invocation flag mutation. | Copies an idiom already running inside the same binary instead of inventing a policy; 33 lines collapse to 2 for both error classes; nothing fragile to maintain. Supersedes ra75's AC-2, which must be rewritten. | 🟢 |
+| D10 | `docs/` was excluded repo-locally via `.git/info/exclude:7` — a leftover from when the fork was still a PR candidate to hmans and its own docs would have polluted the diff. D14 (fork is the product) removed that reason. | Exclusion lifted; `docs/` is versioned. | An unversioned think collection cannot be handed to the next session or another machine — it would defeat the point of writing it. | 🟢 |
+
+## Open — must be resolved before convergence
+
+| ID | Background | Options | Leaning | Status |
+|---|---|---|---|---|
+| D06 | M03: with `--json`, an error is emitted **twice** — machine-readable on stdout, plus 33 lines of usage+error on stderr. The agent that uses the JSON path correctly still pays the full cost. | **A** treat as part of ra75 (widen its scope). **B** separate bean — different mechanism (R11: `output.Error` prints *and* returns non-nil), different fix. | B — different cause, and ra75's success criteria are already written and testable as they stand | 🟣 |
+| D08 | M08: `omitempty` drops empty `parent`/`tags`/`blocked_by` from every payload. 13ae AC-1 names those fields "at minimum". | **A** accept absence as the contract, fix the AC wording. **B** emit explicit `null`/`[]` so a consumer can distinguish "unset" from "not in this shape". | none yet — B is a wider frontmatter/serialisation change than it looks | 🟣 |
+| D09 | Is ra75 a bug or a feature? Filed as `feature`; the PO called both "bugs". | Type-hygiene call, cosmetic but it steers `beans list -t bug` triage. | ra75 → bug (the stated purpose at R02 is not honoured on the error path), 13ae → stays feature after the D01 reframe | 🟣 |
