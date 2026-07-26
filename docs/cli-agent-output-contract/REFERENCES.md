@@ -65,9 +65,19 @@ Every JSON-emitting command, by emitted shape. **Five shapes across nine command
 | Envelope, message only | `archive` | `archive.go:36,58` | `{success, message}` |
 | Envelope + path | `init` | `init.go:80` | `{success, message, path}` |
 | **Ad-hoc, two documents** | `rename` | `rename.go:77` and `rename.go:214` | bypasses `internal/output` entirely — raw `json.NewEncoder(…).Encode(map[string]any{…})`, emitting a plan document **and** a result document as two separate top-level JSON values on stdout |
+| **Own result struct** | `check` | `check.go:20-23` | `{success, config_errors, bean_issues, fixed}` — a locally declared type, also bypassing `internal/output` |
+| Raw GraphQL passthrough | `graphql` / `query` | `graphql.go:105` | the GraphQL response as-is; `--json` here means "no colors", not a shape |
 
 `delete.go` also constructs an `output.Response{…}` literal by hand for the
-multi-bean case — a sixth variant of the same envelope, assembled locally.
+multi-bean case — another variant of the envelope, assembled locally rather than
+through a helper.
+
+**Corrected count: ten commands emit JSON in seven distinct shapes.** The sub-agent
+inventory missed `rename`, `check` and `graphql`; those three were found by walking
+`internal/commands/` directly. Three of the ten (`rename`, `check`, `graphql`) do not
+route through `internal/output` at all — so `internal/output` is not currently the
+single construction point for the CLI's JSON, which is what makes the drift possible
+in the first place (see Q09).
 
 ### The `rename` case is already a known, unfiled wart
 
@@ -98,6 +108,32 @@ re-checked at source before being recorded here.
 original D05 option set is not supported by evidence. Zero consumers break on a move
 to the bare form. The cost of unifying is close to nil; the cost of *not* unifying is
 already documented in CLAUDE.md as an agent-facing caveat.
+
+## Serialisation facts (D08)
+
+All commands serialise the **same** `bean.Bean` struct (`pkg/bean/bean.go:138-166`),
+so `omitempty` is a global property of the type, not a per-command choice.
+
+| Field | JSON tag | Effect when empty |
+|---|---|---|
+| `id`, `path`, `title`, `status` | no `omitempty` | always present |
+| `type`, `priority`, `slug`, `body`, `order` | `omitempty` | key absent |
+| `parent`, `tags`, `blocked_by`, `blocking` | `omitempty` | key absent |
+
+Two consequences for D08:
+- The absent/present split is already **inconsistent** — `status` always appears,
+  `type` does not, for no stated reason.
+- Emitting `null` rather than omitting is not a tag change: `Parent` is a `string`, so
+  dropping `omitempty` yields `"parent": ""`, not `"parent": null`. Real nullability
+  needs `*string`, which touches YAML round-tripping of the frontmatter as well. D08-B
+  is a type change, not a serialisation tweak.
+
+## Build path (Q06)
+
+`go build -o /tmp/beans-cli ./cmd/beans` succeeds in ~2s, rc=0. The `//go:embed dist/*`
+lives in `internal/web/embed.go`, reached by `beans-serve`, and does not gate a CLI
+build. The failing `mise build` (frontend/pnpm) therefore does **not** block work on
+this contract — CLI changes can be built and tested Go-only.
 
 ## Cobra semantics (v1.10.2) — verified against source
 
