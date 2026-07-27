@@ -9,7 +9,7 @@ updated_at: 2026-07-26T13:19:49Z
 
 ## Origin
 
-Found while operationalizing a plan in `~/Obsidian/tools/okf-tools` on 2026-07-26 (epic `okf-cli-5uog`, ~30 `beans update` calls in one session). Two of those updates did not take effect and the failure went unnoticed until a verification agent caught the resulting tree defect two rounds later.
+Found while operationalizing a plan in `~/dev/okf-tools` on 2026-07-26 (epic `okf-cli-5uog`, ~30 `beans update` calls in one session). Two of those updates did not take effect and the failure went unnoticed until a verification agent caught the resulting tree defect two rounds later.
 
 **The first suspicion was wrong and is recorded here so nobody re-files it:** `beans update` does *not* fail silently. Probed directly — a bad parent, a missing bean and an unmatched `--body-replace-old` each print a clear error on stderr and exit 1. Multi-line `--body-append` via command substitution, bodies starting with `##`, and sequences with stdout suppressed all work correctly (verified on a throwaway bean, then removed). The CLI reports its errors properly.
 

@@ -44,7 +44,7 @@ Plan Task 6 Step 2 fordert `command gofmt -l internal/commands/roadmap.go intern
 
 **Repo-Gates:** `command go vet ./...` exit 0, keine Ausgabe. `command gofmt -l internal/commands/roadmap.go` leer (clean).
 
-**Real-Repo-Smoke** (Fix-Binary vs. Baseline aus `origin/main`, beide gegen `/Users/erik/Obsidian/tools/beans-tui/beans-tui-repository/.beans`, read-only): kein Crash/Panic auf beiden Seiten (exit 0/0). beans-tui hat aktuell keine tiefe Feature-Nesting unter E1-E8 (diese sind bereits `completed`/archiviert, nur E9/bt-tct9 ist offen) — die eigentliche Epic-Nesting-Fix-Wirkung zeigt sich hier NICHT (Nicht-Regress-Nachweis, kein Positiv-Nachweis).
+**Real-Repo-Smoke** (Fix-Binary vs. Baseline aus `origin/main`, beide gegen `/Users/erik/dev/beans-tui/beans-tui-repository/.beans`, read-only): kein Crash/Panic auf beiden Seiten (exit 0/0). beans-tui hat aktuell keine tiefe Feature-Nesting unter E1-E8 (diese sind bereits `completed`/archiviert, nur E9/bt-tct9 ist offen) — die eigentliche Epic-Nesting-Fix-Wirkung zeigt sich hier NICHT (Nicht-Regress-Nachweis, kein Positiv-Nachweis).
 
 **Diff (base → fix):**
 ```

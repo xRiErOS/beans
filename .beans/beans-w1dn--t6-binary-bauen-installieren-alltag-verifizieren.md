@@ -266,11 +266,11 @@ Roadmap
 **Cross-Repo (EARS-5):**
 
 ```
-$ cd /Users/erik/Obsidian/tools/beans-tui/beans-tui-repository && beans roadmap
+$ cd /Users/erik/dev/beans-tui/beans-tui-repository && beans roadmap
 # Roadmap
                                           # (leer — alle 149 dortigen beans completed/scrapped, EXIT=0, kein Fehler)
 
-$ cd /Users/erik/Obsidian/tools/lean-stack && beans roadmap   # via tmux pty
+$ cd /Users/erik/dev/lean-stack && beans roadmap   # via tmux pty
 Roadmap
 ════════════════════════════════════════════════════════════════════════════════════════════════════
 

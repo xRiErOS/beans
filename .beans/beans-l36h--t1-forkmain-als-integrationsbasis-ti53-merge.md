@@ -50,7 +50,7 @@ ohne diesen Merge wäre der TTY-Pfad ein Rückschritt gegenüber dem Alltag (D13
 ## Betroffene Pfade
 
 Keine Quelldatei wird editiert — reine Branch-Operation in
-`/Users/erik/Obsidian/tools/lean-stack/beans-src`.
+`/Users/erik/dev/lean-stack/beans-src`.
 
 ## Nachtrag 2026-07-23 (PO-Entscheid im Vorflug-Check) — D20 ersetzt EARS-3/SC-101/SC-102
 

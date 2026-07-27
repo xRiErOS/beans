@@ -62,7 +62,7 @@
 ## Task 1: `fork/main` als Integrationsbasis herstellen
 
 **Files:**
-- Modify: keine Quelldatei — reine Branch-Operation im Repo `/Users/erik/Obsidian/tools/lean-stack/beans-src`
+- Modify: keine Quelldatei — reine Branch-Operation im Repo `/Users/erik/dev/lean-stack/beans-src`
 
 **Interfaces:**
 - Consumes: nichts
@@ -98,7 +98,7 @@
 - [ ] **Step 1: Ausgangslage verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git branch --show-current
 git rev-list --left-right --count main...fix/beans-ti53-roadmap-nested-hierarchy
 ```
@@ -114,7 +114,7 @@ Steht links etwas anderes als `0`, ist `main` divergiert — dann **stoppen** un
 - [ ] **Step 2: Merge durchführen (Fast-Forward)**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git merge --ff-only fix/beans-ti53-roadmap-nested-hierarchy
 ```
 
@@ -123,7 +123,7 @@ Erwartet: `Fast-forward` und eine Diffstat-Zeile mit `internal/commands/roadmap.
 - [ ] **Step 3: Verifizieren, dass das Datenmodell da ist**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 grep -n 'type featureGroup' internal/commands/roadmap.go
 ```
 
@@ -132,7 +132,7 @@ Erwartet: eine Trefferzeile — `62:type featureGroup struct {`
 - [ ] **Step 4: Tests laufen lassen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/
 ```
 
@@ -143,7 +143,7 @@ Schlägt etwas fehl, ist das ein Blocker für alle Folge-Tasks — nicht weitera
 - [ ] **Step 5: `fork/main` aktualisieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git push fork main
 ```
 
@@ -262,7 +262,7 @@ for m in [b for b in beans if b['type'] == 'milestone']:
 - [ ] **Step 2: Prototyp gegen echte Daten laufen lassen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 echo "$PWD/.beans" > /tmp/roadmap_bp.txt
 python3 docs/roadmap-tty-output/render-prototype.py 80 | head -20
 python3 docs/roadmap-tty-output/render-prototype.py 110 | head -20
@@ -371,7 +371,7 @@ Sonst bleibt die Think-Sammlung nach Planausführung intern widersprüchlich.
 > `docs/` ist in diesem Repo per `.git/info/exclude` von git ausgeschlossen (bewusst: die Denk-Kette soll nicht in Upstream-PR-Diffs landen — dieselbe Praxis wie beim ti53-Plan). Ein `git add` schlägt hier fehl. Dieser Task hat daher **keinen** Commit; die Doku-Änderungen bleiben lokal. Prüfe stattdessen, dass die Dateien geschrieben sind:
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git status --short docs/ 2>/dev/null
 grep -c 'titleCol\|Spalte \*\*17\*\*' docs/roadmap-tty-output/DESIGN.md
 grep -c 'D13' docs/roadmap-tty-output/DECISIONS.md
@@ -483,7 +483,7 @@ func TestRoadmapRightBlock(t *testing.T) {
 - [ ] **Step 2: Test laufen lassen, Fehlschlag verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run 'TestRoadmapShortID|TestRoadmapRightBlock'
 ```
 
@@ -545,7 +545,7 @@ Der Import-Block enthält bewusst noch **kein** `"unicode/utf8"` — das wird er
 - [ ] **Step 4: Test laufen lassen, grün verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run 'TestRoadmapShortID|TestRoadmapRightBlock' -v
 ```
 
@@ -677,7 +677,7 @@ func TestRoadmapLineOverlongPrefix(t *testing.T) {
 - [ ] **Step 6: Test laufen lassen, Fehlschlag verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run 'TestRoadmapWrapTitle|TestRoadmapLine'
 ```
 
@@ -774,7 +774,7 @@ func roadmapLine(prefix string, b *bean.Bean, showPrio bool, width int) string {
 - [ ] **Step 8: Test laufen lassen, grün verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run 'TestRoadmap' -v
 ```
 
@@ -783,7 +783,7 @@ Erwartet: alle Subtests `PASS`, am Ende `ok`.
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git add internal/commands/roadmap_pretty.go internal/commands/roadmap_pretty_test.go
 git commit -m "feat(roadmap): layout primitives for tty output"
 ```
@@ -838,7 +838,7 @@ func TestRoadmapClampWidth(t *testing.T) {
 - [ ] **Step 2: Test laufen lassen, Fehlschlag verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run TestRoadmapClampWidth
 ```
 
@@ -866,7 +866,7 @@ func roadmapClampWidth(cols int) int {
 - [ ] **Step 4: Test laufen lassen, grün verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run TestRoadmapClampWidth -v
 ```
 
@@ -1012,7 +1012,7 @@ Der Import-Block (`"strings"`, `"testing"`, `"unicode/utf8"`, `pkg/bean`) deckt 
 - [ ] **Step 6: Test laufen lassen, Fehlschlag verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run TestRenderRoadmapPretty
 ```
 
@@ -1100,7 +1100,7 @@ func renderRoadmapPretty(data *roadmapData, width int) string {
 - [ ] **Step 8: Test laufen lassen, grün verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run TestRenderRoadmapPretty -v
 ```
 
@@ -1109,7 +1109,7 @@ Erwartet: vier `PASS`-Testfunktionen. Bei Whitespace-Abweichung in `TestRenderRo
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git add internal/commands/roadmap_pretty.go internal/commands/roadmap_pretty_test.go
 git commit -m "feat(roadmap): pretty tree walker for tty"
 ```
@@ -1205,7 +1205,7 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 - [ ] **Step 2: Test laufen lassen, Fehlschlag verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run 'TestRoadmapOutputSwitchesOnTTY|TestRoadmapMarkdownByteIdentical'
 ```
 
@@ -1231,7 +1231,7 @@ func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPref
 - [ ] **Step 4: Test laufen lassen, grün verifizieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -run 'TestRoadmapOutputSwitchesOnTTY|TestRoadmapMarkdownByteIdentical' -v
 ```
 
@@ -1276,7 +1276,7 @@ Ergänze im Import-Block von `internal/commands/roadmap.go` (Zeile 3-18, durch d
 - [ ] **Step 6: Bauen und formatieren**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command gofmt -l internal/commands/
 command go build ./internal/commands/
 ```
@@ -1286,7 +1286,7 @@ Erwartet: `gofmt -l` gibt **nichts** aus, `go build` ist still.
 - [ ] **Step 7: Volle Test-Suite des Pakets**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go test ./internal/commands/ -v 2>&1 | tail -30
 ```
 
@@ -1295,7 +1295,7 @@ Erwartet: `ok`, keine `FAIL`-Zeile. Insbesondere müssen die ti53-Bestandstests 
 - [ ] **Step 8: Manuelle Ende-zu-Ende-Probe (beide Pfade)**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 command go run ./cmd/beans roadmap | head -5          # gepiped -> Markdown
 command go run ./cmd/beans roadmap --json | head -3   # unverändert JSON
 ```
@@ -1305,7 +1305,7 @@ Erwartet: erster Aufruf beginnt mit `# Roadmap` und enthält `img.shields.io`; z
 - [ ] **Step 9: Commit**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git add internal/commands/roadmap.go internal/commands/roadmap_test.go
 git commit -m "feat(roadmap): render plain table on tty"
 ```
@@ -1326,7 +1326,7 @@ Ohne diesen Task wirkt nichts (D14). Die Prozedur ist aus dem abgeschlossenen Ep
 - [ ] **Step 1: Volle Test-Suite**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 mise test 2>&1 | tail -20
 ```
 
@@ -1335,7 +1335,7 @@ Erwartet: kein `FAIL`. Schlägt etwas außerhalb von `internal/commands` fehl, p
 - [ ] **Step 2: Version-gestempeltes Binary bauen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 SHA=$(git rev-parse --short HEAD)
 DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 command go build -ldflags "\
@@ -1353,7 +1353,7 @@ Erwartet: `beans 0.4.2-fork.tty (<sha>) built <datum>`.
 - [ ] **Step 3: TTY-Ausgabe am echten Terminal prüfen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 /tmp/beans-fork roadmap
 ```
 
@@ -1362,7 +1362,7 @@ Erwartet: gerenderte Tabelle mit `Roadmap`-Kopf, `═`-Linie, Glyphen `■ ▸ �
 Dann die Grenzbreite prüfen — bei 80 Spalten sitzt der Right-Block auf Kante:
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 tmux new-session -d -s roadmapsmoke -x 80 -y 40 \
   "/tmp/beans-fork roadmap | head -40 > /tmp/roadmap80.txt"
 sleep 2
@@ -1375,7 +1375,7 @@ Erwartet: kein Wert über `80`. Zeilen, die umbrechen würden, sind ein Blocker.
 - [ ] **Step 4: Pipe-Pfad gegen das alte Binary diffen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 beans roadmap > /tmp/roadmap-old.md          # aktuell installiertes 0.4.2-fork.ti53
 /tmp/beans-fork roadmap > /tmp/roadmap-new.md
 diff /tmp/roadmap-old.md /tmp/roadmap-new.md && echo "IDENTISCH"
@@ -1399,9 +1399,9 @@ Erwartet: `/opt/homebrew/bin/beans` und `beans 0.4.2-fork.tty (<sha>)`.
 - [ ] **Step 6: Cross-Repo-Wirksamkeit prüfen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/beans-tui/beans-tui-repository
+cd /Users/erik/dev/beans-tui/beans-tui-repository
 beans roadmap
-cd /Users/erik/Obsidian/tools/lean-stack
+cd /Users/erik/dev/lean-stack
 beans roadmap
 ```
 
@@ -1410,14 +1410,14 @@ Erwartet: in beiden fremden Repos die gerenderte Tabelle, kein Fehler, keine Mar
 - [ ] **Step 7: beans pflegen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 beans list --json | python3 -c "import json,sys; [print(b['id'], b['status'], b['title']) for b in json.load(sys.stdin) if b['id']=='bt-xy2i']"
 ```
 
 Setze das Duplikat-Epic `bt-xy2i` (I01 — inhaltsgleich mit dem completed Epic `beans-f1t4`) auf `scrapped`:
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 beans update bt-xy2i --status scrapped
 ```
 
@@ -1426,7 +1426,7 @@ Ergänze im Body die Begründung: `Duplikat von beans-f1t4 (completed 2026-07-21
 - [ ] **Step 8: Commit**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git status --short
 git add .beans/bt-xy2i--fork-beans-lokal-live-setzen-roadmap-feature-nesti.md
 git commit -m "chore(beans): bt-xy2i scrapped (dup of beans-f1t4)"
@@ -1437,7 +1437,7 @@ git commit -m "chore(beans): bt-xy2i scrapped (dup of beans-f1t4)"
 - [ ] **Step 9: Fork pushen**
 
 ```bash
-cd /Users/erik/Obsidian/tools/lean-stack/beans-src
+cd /Users/erik/dev/lean-stack/beans-src
 git push fork main
 ```
 

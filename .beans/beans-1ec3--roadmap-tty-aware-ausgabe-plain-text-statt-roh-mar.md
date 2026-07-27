@@ -20,7 +20,7 @@ Der Plan ist `ce-plan-reviewer`-grün (2 Runden) und PO-freigegeben (2026-07-23)
 
 ## Kontext für alle Kinder (DRY — nicht in den Blättern wiederholt)
 
-**Repo:** `/Users/erik/Obsidian/tools/lean-stack/beans-src` (Fork `xRiErOS/beans`, Upstream `hmans/beans`).
+**Repo:** `/Users/erik/dev/lean-stack/beans-src` (Fork `xRiErOS/beans`, Upstream `hmans/beans`).
 Remotes: `fork` = xRiErOS, `origin` = hmans. **Push nur nach `fork`, nie nach `origin`.**
 
 **Architektur:** `buildRoadmap()` bleibt unverändert und liefert `*roadmapData`. Neu daneben

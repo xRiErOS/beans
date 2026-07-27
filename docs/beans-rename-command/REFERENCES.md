@@ -36,4 +36,4 @@ Code-Grounding (file:line) und externe Bezüge.
 - `beans serve` = autoritativer Runtime-State, merged Worktree-Änderungen als "dirty".
 
 ## Referenz-Projekt (Motivation)
-- `~/Obsidian/tools/bew_BeWiki-Python-Download/` — Prefix `bew_BeWiki-Python-Download-`, 233 beans, 216 Cross-Refs. Motiviert Prefix-Kürzung → `bew-`.
+- `~/dev/bew_BeWiki-Python-Download/` — Prefix `bew_BeWiki-Python-Download-`, 233 beans, 216 Cross-Refs. Motiviert Prefix-Kürzung → `bew-`.

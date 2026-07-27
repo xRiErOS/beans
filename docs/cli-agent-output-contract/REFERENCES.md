@@ -112,7 +112,7 @@ already documented in CLAUDE.md as an agent-facing caveat.
 ## The okf-tools incident, reconstructed (Q07)
 
 Both beans open with an Origin section blaming an incident on 2026-07-26 in
-`~/Obsidian/tools/okf-tools` (epic `okf-cli-5uog`). Forensics on the session
+`~/dev/okf-tools` (epic `okf-cli-5uog`). Forensics on the session
 transcript, the hook, and the git history show **two independent causes, and the one
 that lost the updates is not a beans defect at all.**
 
