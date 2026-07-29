@@ -11,7 +11,7 @@ beans:
   # Length of the random ID suffix
   id_length: 4
   # Default status for new beans
-  default_status: todo
+  default_status: draft
   # Default type for new beans
   default_type: task
 worktree:
