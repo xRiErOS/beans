@@ -20,6 +20,10 @@ const (
 	LegacyConfigFile = "config.yaml"
 	// DefaultServerPort is the default port for the web server
 	DefaultServerPort = 8080
+	// AnchorRepoRoot anchors the beans directory at the main worktree's root
+	// instead of at the config file's directory. Secondary worktrees then share
+	// the main workdir's store rather than each carrying their own.
+	AnchorRepoRoot = "repo-root"
 )
 
 // DefaultStatuses defines the hardcoded status configuration.
@@ -173,7 +177,12 @@ type Config struct {
 // BeansConfig defines settings for bean creation.
 type BeansConfig struct {
 	// Path is the path to the beans directory (relative to config file location)
-	Path           string `yaml:"path,omitempty"`
+	Path string `yaml:"path,omitempty"`
+	// Anchor decides what Path is relative to. Empty (the default) keeps the
+	// config file's own directory, so a secondary worktree gets its own store.
+	// AnchorRepoRoot resolves against the main worktree's root instead, so every
+	// worktree of a repository shares one store.
+	Anchor         string `yaml:"anchor,omitempty"`
 	Prefix         string `yaml:"prefix"`
 	IDLength       int    `yaml:"id_length"`
 	DefaultStatus  string `yaml:"default_status,omitempty"`
@@ -288,7 +297,23 @@ func Load(configPath string) (*Config, error) {
 		cfg.Beans.DefaultType = DefaultTypes[0].Name
 	}
 
+	// A misspelt anchor must not degrade into the default: that would silently
+	// resolve a different store than the file asks for.
+	if err := ValidateAnchor(cfg.Beans.Anchor); err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	}
+
 	return &cfg, nil
+}
+
+// ValidateAnchor rejects any beans.anchor value the resolver cannot honour.
+func ValidateAnchor(anchor string) error {
+	switch anchor {
+	case "", AnchorRepoRoot:
+		return nil
+	default:
+		return fmt.Errorf("unknown beans.anchor %q (expected %q or an empty value)", anchor, AnchorRepoRoot)
+	}
 }
 
 // LoadFromDirectory finds and loads the config file by searching upward from the given directory.
@@ -390,6 +415,12 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		key := strNode("path")
 		key.HeadComment = "Directory where bean files are stored"
 		beansMapping.Content = append(beansMapping.Content, key, strNode(c.Beans.Path))
+	}
+
+	if c.Beans.Anchor != "" {
+		key := strNode("anchor")
+		key.HeadComment = "What `path` is relative to: \"repo-root\" makes every worktree share the main workdir's store"
+		beansMapping.Content = append(beansMapping.Content, key, strNode(c.Beans.Anchor))
 	}
 
 	prefixKey := strNode("prefix")

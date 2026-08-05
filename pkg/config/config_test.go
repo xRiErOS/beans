@@ -282,6 +282,47 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadAnchor(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		configPath := filepath.Join(t.TempDir(), ConfigFileName)
+		if err := os.WriteFile(configPath, []byte(body), 0644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+		return configPath
+	}
+
+	t.Run("repo-root is accepted", func(t *testing.T) {
+		cfg, err := Load(write(t, "beans:\n  prefix: \"my-\"\n  anchor: repo-root\n"))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.Beans.Anchor != AnchorRepoRoot {
+			t.Errorf("Anchor: got %q, want %q", cfg.Beans.Anchor, AnchorRepoRoot)
+		}
+	})
+
+	t.Run("absent anchor stays empty", func(t *testing.T) {
+		cfg, err := Load(write(t, "beans:\n  prefix: \"my-\"\n"))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.Beans.Anchor != "" {
+			t.Errorf("Anchor: got %q, want empty", cfg.Beans.Anchor)
+		}
+	})
+
+	t.Run("a misspelt anchor is an error, not a silent default", func(t *testing.T) {
+		_, err := Load(write(t, "beans:\n  prefix: \"my-\"\n  anchor: repo-rooot\n"))
+		if err == nil {
+			t.Fatal("expected error for unknown anchor value, got nil")
+		}
+		if !strings.Contains(err.Error(), "beans.anchor") {
+			t.Errorf("expected error to name beans.anchor, got %q", err.Error())
+		}
+	})
+}
+
 func TestStatusesAreHardcoded(t *testing.T) {
 	// Statuses are hardcoded and not configurable (like types)
 	// Verify that any config only uses hardcoded statuses
