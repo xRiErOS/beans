@@ -26,8 +26,13 @@ var (
 var showCmd = &cobra.Command{
 	Use:   "show <id> [id...]",
 	Short: "Show a bean's contents",
-	Long:  `Displays the full contents of one or more beans, including front matter and body.`,
-	Args:  cobra.MinimumNArgs(1),
+	Long: `Displays the full contents of one or more beans, including front matter and body.
+
+The representation follows stdout. On a terminal the output is styled and the
+body is rendered as markdown. When stdout is a pipe or a file, the output is the
+raw markdown of the source file — the same text --raw produces, unpadded and
+unwrapped, so it can be fed to a parser.`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resolver := &beangraph.CoreResolver{Core: core}
 
@@ -256,7 +261,7 @@ func formatRelationships(b *bean.Bean) string {
 
 func RegisterShowCmd(root *cobra.Command) {
 	showCmd.Flags().BoolVar(&showJSON, "json", false, "Output as JSON")
-	showCmd.Flags().BoolVar(&showRaw, "raw", false, "Output raw markdown without styling")
+	showCmd.Flags().BoolVar(&showRaw, "raw", false, "Force raw markdown output even on a terminal (already the default off a terminal)")
 	showCmd.Flags().BoolVar(&showBodyOnly, "body-only", false, "Output only the body content")
 	showCmd.Flags().BoolVar(&showETagOnly, "etag-only", false, "Output only the etag")
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only")

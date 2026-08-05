@@ -51,6 +51,11 @@ beans list --help                      # Full options
 # View beans (supports multiple IDs)
 beans show --json <id> [id...]
 
+# Without a flag, show follows stdout: styled on a terminal, raw markdown
+# (front matter + body, unpadded and unwrapped) into a pipe or a file.
+# The piped form is safe to parse — headings and long lines survive intact.
+beans show <id> [id...]
+
 # Create a bean (always specify -t type)
 beans create --json "Title" -t task -d "Description..." -s todo
 
