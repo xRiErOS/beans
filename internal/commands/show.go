@@ -3,15 +3,17 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
+	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/spf13/cobra"
+	"golang.org/x/term"
 )
 
 var (
@@ -93,22 +95,54 @@ var showCmd = &cobra.Command{
 			return nil
 		}
 
-		// Default: styled human-friendly output
-		for i, b := range beans {
-			if i > 0 {
-				fmt.Println()
-				fmt.Println(ui.Muted.Render(strings.Repeat("═", 60)))
-				fmt.Println()
-			}
-			showStyledBean(b)
+		// Default: styled for a terminal, raw markdown for a pipe or a file
+		out, err := showOutputAll(beans, term.IsTerminal(int(os.Stdout.Fd())))
+		if err != nil {
+			return err
 		}
+		fmt.Print(out)
 
 		return nil
 	},
 }
 
-// showStyledBean displays a single bean with styled output.
-func showStyledBean(b *bean.Bean) {
+// showOutput returns the text for a single bean, choosing the representation
+// from whether stdout is a terminal.
+func showOutput(b *bean.Bean, isTTY bool) (string, error) {
+	if !isTTY {
+		content, err := b.Render()
+		if err != nil {
+			return "", fmt.Errorf("failed to render bean: %w", err)
+		}
+		return string(content), nil
+	}
+	return styledBeanOutput(b)
+}
+
+// showOutputAll joins the output of several beans with the separator that
+// belongs to the chosen representation.
+func showOutputAll(beans []*bean.Bean, isTTY bool) (string, error) {
+	separator := "\n---\n\n"
+	if isTTY {
+		separator = "\n" + ui.Muted.Render(strings.Repeat("═", 60)) + "\n\n"
+	}
+
+	var out strings.Builder
+	for i, b := range beans {
+		if i > 0 {
+			out.WriteString(separator)
+		}
+		text, err := showOutput(b, isTTY)
+		if err != nil {
+			return "", err
+		}
+		out.WriteString(text)
+	}
+	return out.String(), nil
+}
+
+// styledBeanOutput builds the styled representation of a single bean.
+func styledBeanOutput(b *bean.Bean) (string, error) {
 	statusCfg := cfg.GetStatus(b.Status)
 	statusColor := "gray"
 	if statusCfg != nil {
@@ -151,11 +185,11 @@ func showStyledBean(b *bean.Bean) {
 	}
 	if b.CreatedAt != nil {
 		header.WriteString("  ")
-		header.WriteString(ui.Muted.Render("created "+b.CreatedAt.Format("2006-01-02 15:04 UTC")))
+		header.WriteString(ui.Muted.Render("created " + b.CreatedAt.Format("2006-01-02 15:04 UTC")))
 	}
 	if b.UpdatedAt != nil {
 		header.WriteString("  ")
-		header.WriteString(ui.Muted.Render("updated "+b.UpdatedAt.Format("2006-01-02 15:04 UTC")))
+		header.WriteString(ui.Muted.Render("updated " + b.UpdatedAt.Format("2006-01-02 15:04 UTC")))
 	}
 	header.WriteString("\n")
 	header.WriteString(ui.Title.Render(b.Title))
@@ -175,7 +209,9 @@ func showStyledBean(b *bean.Bean) {
 		MarginBottom(1).
 		Render(header.String())
 
-	fmt.Println(headerBox)
+	var out strings.Builder
+	out.WriteString(headerBox)
+	out.WriteString("\n")
 
 	// Render the body with Glamour
 	if b.Body != "" {
@@ -184,18 +220,18 @@ func showStyledBean(b *bean.Bean) {
 			glamour.WithWordWrap(80),
 		)
 		if err != nil {
-			fmt.Printf("failed to create renderer: %v\n", err)
-			return
+			return "", fmt.Errorf("failed to create renderer: %w", err)
 		}
 
 		rendered, err := renderer.Render(b.Body)
 		if err != nil {
-			fmt.Printf("failed to render markdown: %v\n", err)
-			return
+			return "", fmt.Errorf("failed to render markdown: %w", err)
 		}
 
-		fmt.Print(rendered)
+		out.WriteString(rendered)
 	}
+
+	return out.String(), nil
 }
 
 // formatRelationships formats parent and blocks for display.
