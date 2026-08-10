@@ -1,11 +1,11 @@
 ---
 # beans-18db
 title: beans milestones command
-status: todo
+status: completed
 type: task
 priority: normal
 created_at: 2025-12-27T21:44:05Z
-updated_at: 2026-03-07T23:17:35Z
+updated_at: 2026-08-10T14:30:28Z
 order: VVt
 parent: beans-mmyp
 ---
@@ -25,3 +25,7 @@ Add `beans milestones` command to list planned milestones.
 beans milestones
 # Lists active milestones with their progress
 ```
+
+## Summary of Changes
+
+Implemented beans milestones [--all] in internal/commands/milestones.go plus a shared internal/commands/childindex.go descendant-progress helper (also used by beans progress). One fix round: dropped an unused cfg parameter from descendantProgress per Erik's decision. Reviewed and approved.

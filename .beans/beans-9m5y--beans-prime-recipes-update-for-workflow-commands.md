@@ -1,11 +1,11 @@
 ---
 # beans-9m5y
 title: 'beans prime: recipes update for workflow commands'
-status: todo
+status: completed
 type: task
 priority: normal
 created_at: 2026-08-10T12:40:50Z
-updated_at: 2026-08-10T12:41:06Z
+updated_at: 2026-08-10T14:30:29Z
 parent: beans-mmyp
 blocked_by:
     - beans-0ajg
@@ -52,3 +52,7 @@ command per situation instead of derived list/update incantations.
 - [ ] GraphQLSchema field is either rendered in the template or removed
       from promptData/prime.go
 - [ ] prime_test.go has a substring assertion per new recipe command
+
+## Summary of Changes
+
+Rewrote internal/commands/prompt.tmpl into a single ## Recipes section documenting all six new commands plus existing list --ready/--is-blocked flags; removed the dead GraphQLSchema field from prime.go. Final whole-branch review found and fixed stale Relationships prose (bare 'ready' command reference, false claim that 'start' respects blocking) and added a concrete search command to the Starting-work recipe.
