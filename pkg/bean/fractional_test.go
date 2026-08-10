@@ -164,6 +164,10 @@ func TestIsValidOrderKey(t *testing.T) {
 		{"non-base62 character", "V!", false},
 		{"space is invalid", "V a", false},
 		{"unicode character is invalid", "Vé", false},
+		{"single zero digit is invalid", "0", false},
+		{"trailing zero digit is invalid", "10", false},
+		{"multiple trailing zero digits are invalid", "A00", false},
+		{"zero digit not at the end is valid", "A0Z", true},
 	}
 
 	for _, tt := range tests {

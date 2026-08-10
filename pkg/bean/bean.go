@@ -392,6 +392,16 @@ func (b *Bean) ETag() string {
 		// ensuring validation will fail rather than silently passing.
 		return "0000000000000000"
 	}
+	return ETagOf(content)
+}
+
+// ETagOf hashes raw content the same way ETag does. Callers that need to
+// compare against a bean's actual on-disk bytes -- rather than a re-rendered
+// in-memory bean, whose Render() output can diverge from a file written
+// before some in-memory-only default was applied to the bean (e.g. an
+// empty Priority defaulted to "normal" on load) -- should hash those bytes
+// with this instead of loading the bean and calling ETag().
+func ETagOf(content []byte) string {
 	h := fnv.New64a()
 	h.Write(content)
 	return hex.EncodeToString(h.Sum(nil))
