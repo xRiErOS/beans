@@ -1,20 +1,30 @@
 package commands
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"github.com/hmans/beans/internal/version"
 	"github.com/spf13/cobra"
 )
 
+var versionJSON bool
+
 var versionCmd = &cobra.Command{
 	Use:   "version",
 	Short: "Show version information",
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println(version.String())
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if versionJSON {
+			enc := json.NewEncoder(cmd.OutOrStdout())
+			enc.SetIndent("", "  ")
+			return enc.Encode(version.JSON())
+		}
+		fmt.Fprintln(cmd.OutOrStdout(), version.String())
+		return nil
 	},
 }
 
 func RegisterVersionCmd(root *cobra.Command) {
+	versionCmd.Flags().BoolVar(&versionJSON, "json", false, "Output as JSON")
 	root.AddCommand(versionCmd)
 }
