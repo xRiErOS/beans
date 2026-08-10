@@ -2015,3 +2015,48 @@ func TestReservedKeyFlag(t *testing.T) {
 		})
 	}
 }
+
+// TestKnownKeyMapsMatchFrontMatterTags guards against the three parallel
+// key lists (frontMatter's yaml tags, knownFrontMatterKeys, reservedKeyFlags)
+// drifting apart. A key present on the frontMatter struct but missing from
+// knownFrontMatterKeys would be written both to its own typed field AND
+// into Extra by Render -- silent duplicate-key file corruption that still
+// parses without error. Reflection over frontMatter's yaml tags is the
+// single source of truth here; both maps must match it exactly.
+func TestKnownKeyMapsMatchFrontMatterTags(t *testing.T) {
+	tagKeys := make(map[string]bool)
+	typ := reflect.TypeOf(frontMatter{})
+	for i := 0; i < typ.NumField(); i++ {
+		tag := typ.Field(i).Tag.Get("yaml")
+		if tag == "" || tag == "-" {
+			continue
+		}
+		key := strings.SplitN(tag, ",", 2)[0]
+		tagKeys[key] = true
+	}
+
+	if len(tagKeys) == 0 {
+		t.Fatal("no yaml tags found on frontMatter -- reflection is broken, test is meaningless")
+	}
+
+	for key := range tagKeys {
+		if !knownFrontMatterKeys[key] {
+			t.Errorf("frontMatter has yaml tag %q but knownFrontMatterKeys is missing it", key)
+		}
+		if _, ok := reservedKeyFlags[key]; !ok {
+			t.Errorf("frontMatter has yaml tag %q but reservedKeyFlags is missing it", key)
+		}
+	}
+
+	for key := range knownFrontMatterKeys {
+		if !tagKeys[key] {
+			t.Errorf("knownFrontMatterKeys has %q but frontMatter carries no such yaml tag", key)
+		}
+	}
+
+	for key := range reservedKeyFlags {
+		if !tagKeys[key] {
+			t.Errorf("reservedKeyFlags has %q but frontMatter carries no such yaml tag", key)
+		}
+	}
+}
