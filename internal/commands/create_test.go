@@ -5,9 +5,24 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
+	"github.com/spf13/cobra"
 )
+
+// createCmdWithOrderFlag returns a throwaway *cobra.Command carrying only an
+// --order flag bound to the package-level createOrder var. createCmd.RunE
+// reads flag state off whatever *cobra.Command it's called with (not off the
+// shared createCmd singleton), so tests can drive cmd.Flags().Changed("order")
+// without touching createCmd's own FlagSet — which RegisterCreateCmd/
+// RegisterCoreCommands populate exactly once elsewhere (see path_test.go);
+// registering "order" a second time there would panic with "flag redefined".
+func createCmdWithOrderFlag() *cobra.Command {
+	c := &cobra.Command{Use: "create"}
+	c.Flags().StringVar(&createOrder, "order", "", "Explicit fractional-index order value")
+	return c
+}
 
 // setupCreateTest installs a throwaway core and default config into the
 // package globals createCmd.RunE reads, and restores both afterwards.
@@ -35,11 +50,110 @@ func setupCreateTest(t *testing.T) {
 // sharing the createCmd package-level flag vars.
 func resetCreateFlags(t *testing.T) {
 	t.Helper()
-	oldType, oldSet, oldUnset := createType, createSet, createUnset
-	createType, createSet, createUnset = "", nil, nil
+	oldType, oldSet, oldUnset, oldOrder := createType, createSet, createUnset, createOrder
+	createType, createSet, createUnset, createOrder = "", nil, nil, ""
 	t.Cleanup(func() {
-		createType, createSet, createUnset = oldType, oldSet, oldUnset
+		createType, createSet, createUnset, createOrder = oldType, oldSet, oldUnset, oldOrder
 	})
+}
+
+// AC1: --order writes the given value to the new bean's order field.
+func TestCreateCmdOrderWritesValue(t *testing.T) {
+	setupCreateTest(t)
+	resetCreateFlags(t)
+
+	createType = "task"
+	cmd := createCmdWithOrderFlag()
+	if err := cmd.Flags().Set("order", "V"); err != nil {
+		t.Fatalf("failed to set --order flag: %v", err)
+	}
+
+	if err := createCmd.RunE(cmd, []string{"x"}); err != nil {
+		t.Fatalf("createCmd.RunE() error = %v", err)
+	}
+
+	list := core.All()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 bean, got %d", len(list))
+	}
+	if list[0].Order != "V" {
+		t.Errorf("Order = %q, want %q", list[0].Order, "V")
+	}
+}
+
+// AC2: without --order, the new bean's order field is left empty.
+func TestCreateCmdWithoutOrderLeavesEmpty(t *testing.T) {
+	setupCreateTest(t)
+	resetCreateFlags(t)
+
+	createType = "task"
+
+	if err := createCmd.RunE(createCmd, []string{"x"}); err != nil {
+		t.Fatalf("createCmd.RunE() error = %v", err)
+	}
+
+	list := core.All()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 bean, got %d", len(list))
+	}
+	if list[0].Order != "" {
+		t.Errorf("Order = %q, want empty", list[0].Order)
+	}
+}
+
+// AC3: an invalid fractional index passed via --order exits non-zero and
+// creates no bean.
+func TestCreateCmdOrderInvalidValueFails(t *testing.T) {
+	setupCreateTest(t)
+	resetCreateFlags(t)
+
+	createType = "task"
+	cmd := createCmdWithOrderFlag()
+	if err := cmd.Flags().Set("order", "not valid!"); err != nil {
+		t.Fatalf("failed to set --order flag: %v", err)
+	}
+
+	err := createCmd.RunE(cmd, []string{"x"})
+	if err == nil {
+		t.Fatal("expected error for invalid --order value")
+	}
+
+	list := core.All()
+	if len(list) != 0 {
+		t.Errorf("expected no bean to be created, got %d", len(list))
+	}
+}
+
+// SC-01: five beans created with ascending explicit order values come back
+// from a sort-by-order in exactly that sequence.
+func TestCreateCmdOrderAscendingSortOrder(t *testing.T) {
+	setupCreateTest(t)
+	resetCreateFlags(t)
+
+	orders := []string{"1", "3", "5", "7", "9"}
+	for _, o := range orders {
+		createType = "task"
+		cmd := createCmdWithOrderFlag()
+		if err := cmd.Flags().Set("order", o); err != nil {
+			t.Fatalf("failed to set --order flag: %v", err)
+		}
+		if err := createCmd.RunE(cmd, []string{o}); err != nil {
+			t.Fatalf("createCmd.RunE() error = %v", err)
+		}
+	}
+
+	list := core.All()
+	if len(list) != len(orders) {
+		t.Fatalf("expected %d beans, got %d", len(orders), len(list))
+	}
+
+	bean.SortByOrder(list)
+
+	for i, b := range list {
+		if b.Order != orders[i] {
+			t.Errorf("position %d: Order = %q, want %q", i, b.Order, orders[i])
+		}
+	}
 }
 
 // AC1/AC2/SC-01: --set writes extra front matter keys, and repeats accumulate.

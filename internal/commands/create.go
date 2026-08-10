@@ -5,11 +5,12 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/hmans/beans/pkg/config"
-	"github.com/hmans/beans/pkg/beangraph"
-	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
+	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/beangraph"
+	"github.com/hmans/beans/pkg/beangraph/model"
+	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
 )
 
@@ -26,6 +27,7 @@ var (
 	createPrefix    string
 	createSet       []string
 	createUnset     []string
+	createOrder     string
 	createJSON      bool
 )
 
@@ -52,6 +54,9 @@ var createCmd = &cobra.Command{
 		}
 		if err := validateExtraKeys(createSet, createUnset); err != nil {
 			return cmdError(createJSON, output.ErrValidation, "%s", err)
+		}
+		if cmd.Flags().Changed("order") && !bean.IsValidOrderKey(createOrder) {
+			return cmdError(createJSON, output.ErrValidation, "invalid order value: %q (must be a non-empty base62 fractional index)", createOrder)
 		}
 
 		body, err := resolveContent(createBody, createBodyFile)
@@ -110,11 +115,18 @@ var createCmd = &cobra.Command{
 			return cmdError(createJSON, output.ErrFileError, "failed to create bean: %v", err)
 		}
 
-		// Extra front matter keys aren't part of the generated CreateBeanInput
-		// type, so they're applied and persisted as a second write.
-		if len(createSet) > 0 || len(createUnset) > 0 {
-			if err := applyExtraOps(b, createSet, createUnset); err != nil {
-				return cmdError(createJSON, output.ErrValidation, "%s", err)
+		// Extra front matter keys and an explicit order aren't part of the
+		// generated CreateBeanInput type, so they're applied and persisted
+		// together as a second write.
+		needsSecondWrite := len(createSet) > 0 || len(createUnset) > 0 || cmd.Flags().Changed("order")
+		if needsSecondWrite {
+			if len(createSet) > 0 || len(createUnset) > 0 {
+				if err := applyExtraOps(b, createSet, createUnset); err != nil {
+					return cmdError(createJSON, output.ErrValidation, "%s", err)
+				}
+			}
+			if cmd.Flags().Changed("order") {
+				b.Order = createOrder
 			}
 			if err := core.Update(b, nil); err != nil {
 				return cmdError(createJSON, output.ErrFileError, "failed to set extra keys: %v", err)
@@ -157,6 +169,7 @@ func RegisterCreateCmd(root *cobra.Command) {
 	createCmd.Flags().StringVar(&createPrefix, "prefix", "", "Custom ID prefix (overrides config prefix)")
 	createCmd.Flags().StringArrayVar(&createSet, "set", nil, "Set an extra front matter key as key=value (can be repeated)")
 	createCmd.Flags().StringArrayVar(&createUnset, "unset", nil, "Remove an extra front matter key (can be repeated)")
+	createCmd.Flags().StringVar(&createOrder, "order", "", "Explicit fractional-index order value")
 	createCmd.Flags().BoolVar(&createJSON, "json", false, "Output as JSON")
 	createCmd.MarkFlagsMutuallyExclusive("body", "body-file")
 	root.AddCommand(createCmd)

@@ -1,5 +1,7 @@
 package bean
 
+import "strings"
+
 // Fractional indexing generates order keys that sort lexicographically.
 // Keys are strings of base-62 digits (0-9, A-Z, a-z).
 // Given any two keys, a new key can always be generated between them.
@@ -159,6 +161,20 @@ func fromIndices(indices []int) string {
 		result[i] = base62Digits[idx]
 	}
 	return string(result)
+}
+
+// IsValidOrderKey reports whether s is a valid fractional index: non-empty,
+// and composed entirely of characters from base62Digits.
+func IsValidOrderKey(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, ch := range s {
+		if !strings.ContainsRune(base62Digits, ch) {
+			return false
+		}
+	}
+	return true
 }
 
 func indexOf(ch byte) int {

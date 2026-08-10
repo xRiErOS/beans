@@ -150,6 +150,32 @@ func TestOrderBetween_ThousandInsertionsNarrowingTowardLo(t *testing.T) {
 	}
 }
 
+// AC3: IsValidOrderKey rejects anything that isn't a non-empty string built
+// entirely from base62Digits characters.
+func TestIsValidOrderKey(t *testing.T) {
+	tests := []struct {
+		name  string
+		key   string
+		valid bool
+	}{
+		{"single valid digit", "V", true},
+		{"multi-char valid key", "Va1z", true},
+		{"empty string is invalid", "", false},
+		{"non-base62 character", "V!", false},
+		{"space is invalid", "V a", false},
+		{"unicode character is invalid", "Vé", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsValidOrderKey(tt.key)
+			if got != tt.valid {
+				t.Errorf("IsValidOrderKey(%q) = %v, want %v", tt.key, got, tt.valid)
+			}
+		})
+	}
+}
+
 func TestOrderBetween_ManyInsertionsBetween(t *testing.T) {
 	// Repeatedly insert between two keys
 	a := "A"
