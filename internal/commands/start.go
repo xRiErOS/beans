@@ -3,9 +3,9 @@ package commands
 import (
 	"context"
 
+	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/internal/output"
 	"github.com/spf13/cobra"
 )
 

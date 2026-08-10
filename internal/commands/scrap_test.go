@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
-	"github.com/hmans/beans/internal/output"
 )
 
 // setupScrapTest installs a throwaway core and default config into the
