@@ -12,7 +12,7 @@ All commands support `--json` for machine-readable output. Use this flag to pars
 
 ## Recipes
 
-- **Starting work**: Check if there is already a bean for it. If not, create one with `beans create "Title" -t <type> -d "Description..." -s todo`. Then mark it in-progress and show it with `beans start <id>`.
+- **Starting work**: Check if there is already a bean for it (`beans list -S "<keywords>"`). If not, create one with `beans create "Title" -t <type> -d "Description..." -s todo`. Then mark it in-progress and show it with `beans start <id>`.
 - **Finding work**: `beans next` shows the single highest-priority bean that is ready to start (not blocked, excludes in-progress/completed/scrapped/draft). `beans list --ready` (or `beans list --json --ready`) lists all such beans instead of just one. `beans show --json <id> [id...]` shows full details for specific beans (supports multiple IDs).
 - **Handling blocked work**: `beans list --is-blocked` (or `beans list --json --is-blocked`) lists beans that are currently blocked (directly, or via a blocked ancestor).
 - **Completing work**: ONLY once a bean has no unchecked todo items left, run `beans complete <id> --summary "what was done"` — this sets status to completed and appends a `## Summary of Changes` section to the bean body.
@@ -71,8 +71,8 @@ Use `beans <command> --help` for full options. Use `--json` for machine-readable
 - **Parent**: Hierarchy (milestone → epic → feature → task/bug). Set with `--parent <id>`.
 - **Blocking**: Use `--blocking <id>` when THIS bean blocks another (the other bean can't proceed until this is done).
 - **Blocked-by**: Use `--blocked-by <id>` when THIS bean is blocked by another (this bean can't proceed until the other is done). **Prefer this when creating dependent work.**
-- **Implicit blocking**: A bean is also considered blocked if any of its ancestors (via parent chain) are blocked. Commands like `ready`, `next`, and `start` respect this automatically.
-- **Implicit status**: If a parent/ancestor has a terminal status (scrapped or completed), children inherit that status implicitly. `ready`/`next` exclude these beans.
+- **Implicit blocking**: A bean is also considered blocked if any of its ancestors (via parent chain) are blocked. Commands like `list --ready` and `next` respect this automatically.
+- **Implicit status**: If a parent/ancestor has a terminal status (scrapped or completed), children inherit that status implicitly. `list --ready`/`next` exclude these beans.
 
 ## Issue Types
 
