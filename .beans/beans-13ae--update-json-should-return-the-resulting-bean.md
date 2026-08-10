@@ -3,8 +3,10 @@
 title: update --json should return the resulting bean
 status: todo
 type: feature
+priority: normal
 created_at: 2026-07-26T13:20:13Z
-updated_at: 2026-07-26T13:20:13Z
+updated_at: 2026-08-10T10:05:30Z
+parent: beans-xej5
 ---
 
 ## Origin

@@ -5,8 +5,9 @@ status: todo
 type: epic
 priority: normal
 created_at: 2025-12-27T21:43:38Z
-updated_at: 2026-03-07T23:11:57Z
+updated_at: 2026-08-10T10:05:30Z
 order: w
+parent: beans-xej5
 ---
 
 Add explicit workflow-style CLI commands that provide intuitive shortcuts for common operations. These commands wrap existing functionality with cleaner, more memorable interfaces.

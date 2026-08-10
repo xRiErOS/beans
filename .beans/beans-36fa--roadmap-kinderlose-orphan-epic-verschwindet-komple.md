@@ -5,7 +5,8 @@ status: todo
 type: bug
 priority: normal
 created_at: 2026-07-23T21:50:30Z
-updated_at: 2026-07-23T21:50:30Z
+updated_at: 2026-08-10T10:05:30Z
+parent: beans-xej5
 ---
 
 Fund aus dem T4-Review des Epos `beans-1ec3` (ce-specs-reviewer, 2026-07-23), beim Lauf
