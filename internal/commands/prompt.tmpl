@@ -68,6 +68,13 @@ beans update --json <id> --body-replace-old "old" --body-replace-new "new"  # Re
 beans update --json <id> --body-append "## Notes"              # Append to body
 beans update --json <id> -s completed --body-replace-old "- [ ] Task" --body-replace-new "- [x] Task"  # Combined
 
+# Place a bean among its siblings (manual order, scoped per parent)
+beans order <id> --after <sibling-id>   # Place directly after a sibling that already has an order
+beans order <id> --before <sibling-id>  # Place directly before a sibling that already has an order
+beans order <id> --first                # Place before every sibling
+beans order <id> --last                 # Place after every sibling
+beans create --json "Title" -t task --order V   # Set an explicit order value at creation time
+
 # Archive completed/scrapped beans (only when user requests)
 beans archive
 ```
@@ -150,6 +157,48 @@ beans query 'mutation {
 - Append applied after all replacements
 - All operations atomic with single etag validation
 - Transactional: any failure = no changes saved
+
+## Custom Front Matter
+
+Beans preserve front matter keys outside the known schema (title, status, type, priority, tags, parent, blocking, blocked_by, order) instead of dropping them. Use this for project-specific metadata that doesn't need its own flag -- a release cut, a classification, anything the built-in fields don't cover.
+
+```bash
+# Set one or more extra keys (repeatable, works on create and update)
+beans create --json "Title" -t task --set release=0-5-0 --set klasse=bugfix
+beans update --json <id> --set release=0-6-0
+
+# Remove an extra key
+beans update --json <id> --unset release
+
+# Filter by an extra key (AND logic across repeats)
+beans list --json --where release=0-5-0
+```
+
+- A key that names a known field (e.g. `--set status=done`) is rejected -- use the native flag (`--status`) instead.
+- Extra keys appear in `list`/`show --json` under an `extra` object, and are queryable over GraphQL.
+- This is metadata, not a new hierarchy level: use it for cross-cutting groupings (like a release) that don't map onto the milestone → epic → task parent chain.
+
+## Manual Ordering
+
+Beans carry an optional `order` field (a fractional-index string) for manual sequencing among siblings under the same parent.
+
+```bash
+# Place a bean relative to its siblings
+beans order <id> --after <sibling-id>   # directly after a sibling that already has an order
+beans order <id> --before <sibling-id>  # directly before a sibling that already has an order
+beans order <id> --first                # before every sibling
+beans order <id> --last                 # after every sibling
+
+# List in manual order (siblings without an order sort last)
+beans list --json --sort order
+
+# Set an explicit order value at creation time
+beans create --json "Title" -t task --order V
+```
+
+- Ordering is scoped per parent: it only compares siblings that share the same `parent`.
+- Placing a bean relative to (`--after`/`--before`) a sibling that has no order value yet fails -- place that sibling first (e.g. with `--last`).
+- A move writes exactly one file: the bean being placed, never its neighbours.
 
 ## Concurrency Control
 
