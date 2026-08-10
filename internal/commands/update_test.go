@@ -4,6 +4,7 @@ package commands
 // since those functions now live in content.go
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
 	"testing"
@@ -197,5 +198,125 @@ func TestUpdateCmdSetAloneCountsAsChange(t *testing.T) {
 
 	if err := updateCmd.RunE(updateCmd, []string{b.ID}); err != nil {
 		t.Fatalf("updateCmd.RunE() error = %v", err)
+	}
+}
+
+// B01 regression: --set alone (no other update flags, so no field-update
+// write runs first) used to pass ifMatch=nil to the extra-key write,
+// silently ignoring a caller-supplied --if-match entirely -- a stale or
+// outright wrong etag was accepted just the same as a correct one. This is
+// the same optimistic-concurrency contract --priority/--status already
+// honor; --set must not be a silent side door around it.
+//
+// Asserts against the file on disk, not core.Get(): Core.Update takes b by
+// pointer and applyExtraOps mutates that same pointer before the etag check
+// runs, so c.beans[id] (and therefore core.Get) reflects the attempted
+// mutation regardless of whether the write to disk was accepted -- this is
+// documented in Core.Update's own comment and is exactly why it validates
+// ifMatch against the on-disk content instead of the in-memory bean. The
+// property this test protects is "the file was not overwritten," which only
+// a fresh read off disk can show.
+func TestUpdateCmdSetAloneRejectsStaleIfMatch(t *testing.T) {
+	b := setupUpdateTest(t)
+	resetUpdateFlags(t)
+
+	oldIfMatch := updateIfMatch
+	updateIfMatch = "deadbeefdeadbeef" // not b's real etag
+	t.Cleanup(func() { updateIfMatch = oldIfMatch })
+
+	updateSet = []string{"release=0-4-1"}
+
+	err := updateCmd.RunE(updateCmd, []string{b.ID})
+	if err == nil {
+		t.Fatal("expected an etag-mismatch error for a stale --if-match, got nil")
+	}
+
+	onDisk, readErr := readBeanFromDisk(t, b)
+	if readErr != nil {
+		t.Fatalf("reading bean from disk: %v", readErr)
+	}
+	if _, ok := onDisk.Extra["release"]; ok {
+		t.Errorf("file on disk should be unchanged after a rejected stale --if-match, got Extra = %#v", onDisk.Extra)
+	}
+}
+
+// readBeanFromDisk re-parses b's file directly off disk, bypassing Core's
+// in-memory cache entirely -- see TestUpdateCmdSetAloneRejectsStaleIfMatch
+// for why that distinction matters.
+func readBeanFromDisk(t *testing.T, b *bean.Bean) (*bean.Bean, error) {
+	t.Helper()
+	data, err := os.ReadFile(core.FullPath(b))
+	if err != nil {
+		return nil, err
+	}
+	return bean.Parse(bytes.NewReader(data))
+}
+
+// Sanity counterpart to the regression above: the correct current --if-match
+// still lets a --set-only update through.
+func TestUpdateCmdSetAloneAcceptsCorrectIfMatch(t *testing.T) {
+	b := setupUpdateTest(t)
+	resetUpdateFlags(t)
+
+	oldIfMatch := updateIfMatch
+	updateIfMatch = b.ETag()
+	t.Cleanup(func() { updateIfMatch = oldIfMatch })
+
+	updateSet = []string{"release=0-4-1"}
+
+	if err := updateCmd.RunE(updateCmd, []string{b.ID}); err != nil {
+		t.Fatalf("updateCmd.RunE() error = %v (correct --if-match should be accepted)", err)
+	}
+
+	got, err := core.Get(b.ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+	if got.Extra["release"] != "0-4-1" {
+		t.Errorf("Extra[release] = %v, want %q", got.Extra["release"], "0-4-1")
+	}
+}
+
+// B01 regression, require_if_match:true variant: the extra-key write used to
+// pass ifMatch=nil, which under require_if_match:true fails outright even
+// though the caller never asked for optimistic locking to be skipped.
+func TestUpdateCmdSetSucceedsUnderRequireIfMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	beansDir := tmpDir + "/.beans"
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+	testCfg := config.Default()
+	testCfg.Beans.RequireIfMatch = true
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	b := &bean.Bean{ID: "beans-test1", Slug: bean.Slugify("A test bean"), Title: "A test bean", Status: "todo", Type: "task"}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+
+	resetUpdateFlags(t)
+	oldIfMatch := updateIfMatch
+	updateIfMatch = b.ETag()
+	t.Cleanup(func() { updateIfMatch = oldIfMatch })
+
+	updateSet = []string{"release=0-4-1"}
+
+	if err := updateCmd.RunE(updateCmd, []string{b.ID}); err != nil {
+		t.Fatalf("updateCmd.RunE() error = %v (a correct --if-match should satisfy require_if_match:true)", err)
+	}
+
+	got, err := core.Get(b.ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+	if got.Extra["release"] != "0-4-1" {
+		t.Errorf("Extra[release] = %v, want %q", got.Extra["release"], "0-4-1")
 	}
 }

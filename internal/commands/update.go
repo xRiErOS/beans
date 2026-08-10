@@ -112,15 +112,29 @@ var updateCmd = &cobra.Command{
 		}
 
 		// Extra front matter keys aren't part of the generated UpdateBeanInput
-		// type, so they're applied and persisted as a second write. b already
-		// reflects the current state (from the lookup above or the field-update
-		// call), so no ifMatch is needed here.
+		// type, so they're applied and persisted as a second write.
 		if len(updateSet) > 0 || len(updateUnset) > 0 {
+			// ifMatch for this write: passing nil here would bypass
+			// optimistic concurrency control entirely -- silently ignored
+			// under a normal config, and under require_if_match:true it
+			// makes the write fail outright, leaving the bean on disk
+			// without the extra keys that were just requested.
+			extraIfMatch := ifMatch
+			if hasFieldUpdates(input) {
+				// The field-update write above already validated the
+				// caller's --if-match; b now reflects that freshly
+				// persisted state. Use its own current etag (captured
+				// before applyExtraOps mutates it) so this second write
+				// still asserts "nothing else touched the bean between the
+				// two writes," without re-demanding a second --if-match.
+				etag := b.ETag()
+				extraIfMatch = &etag
+			}
 			if err := applyExtraOps(b, updateSet, updateUnset); err != nil {
 				return cmdError(updateJSON, output.ErrValidation, "%s", err)
 			}
-			if err := core.Update(b, nil); err != nil {
-				return cmdError(updateJSON, output.ErrFileError, "failed to set extra keys: %v", err)
+			if err := core.Update(b, extraIfMatch); err != nil {
+				return mutationError(updateJSON, err)
 			}
 		}
 

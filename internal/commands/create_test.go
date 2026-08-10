@@ -239,3 +239,42 @@ func TestCreateCmdSetAndUnsetSameKey(t *testing.T) {
 		t.Errorf("expected release to be unset, Extra = %#v", list[0].Extra)
 	}
 }
+
+// B01 regression: the second write that persists --set/--unset used to pass
+// ifMatch=nil to core.Update, which under require_if_match:true makes the
+// write fail outright -- leaving the bean created on disk WITHOUT the extra
+// keys the caller just asked for (a half-written state, not just an error).
+// Passing the bean's own freshly-computed etag instead satisfies
+// require_if_match and lets the write through.
+func TestCreateCmdSetSucceedsUnderRequireIfMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	beansDir := tmpDir + "/.beans"
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+	testCfg := config.Default()
+	testCfg.Beans.RequireIfMatch = true
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	resetCreateFlags(t)
+	createType = "task"
+	createSet = []string{"release=0-4-1"}
+
+	if err := createCmd.RunE(createCmd, []string{"x"}); err != nil {
+		t.Fatalf("createCmd.RunE() error = %v (extra-key write should succeed under require_if_match:true, not fail)", err)
+	}
+
+	list := core.All()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 bean, got %d", len(list))
+	}
+	if list[0].Extra["release"] != "0-4-1" {
+		t.Errorf("Extra[release] = %v, want %q (bean must not be left half-written without its extra keys)", list[0].Extra["release"], "0-4-1")
+	}
+}

@@ -120,6 +120,15 @@ var createCmd = &cobra.Command{
 		// together as a second write.
 		needsSecondWrite := len(createSet) > 0 || len(createUnset) > 0 || cmd.Flags().Changed("order")
 		if needsSecondWrite {
+			// Capture the freshly-created bean's own etag before mutating it,
+			// and pass it as ifMatch below instead of nil: nil bypasses
+			// optimistic concurrency control -- silently ignored under a
+			// normal config, and under require_if_match:true it makes the
+			// write fail outright, leaving the bean on disk without the
+			// extra keys/order that were just requested. The bean's own
+			// current etag satisfies require_if_match and still catches a
+			// genuine concurrent external write between the two writes.
+			etag := b.ETag()
 			if len(createSet) > 0 || len(createUnset) > 0 {
 				if err := applyExtraOps(b, createSet, createUnset); err != nil {
 					return cmdError(createJSON, output.ErrValidation, "%s", err)
@@ -128,8 +137,8 @@ var createCmd = &cobra.Command{
 			if cmd.Flags().Changed("order") {
 				b.Order = createOrder
 			}
-			if err := core.Update(b, nil); err != nil {
-				return cmdError(createJSON, output.ErrFileError, "failed to set extra keys: %v", err)
+			if err := core.Update(b, &etag); err != nil {
+				return mutationError(createJSON, err)
 			}
 		}
 
