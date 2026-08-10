@@ -7,7 +7,7 @@ priority: normal
 tags:
     - to-review
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T11:43:53Z
+updated_at: 2026-08-10T12:13:52Z
 parent: beans-xej5
 ---
 
@@ -31,3 +31,9 @@ Second Opus review pass verified all four leaves against their acceptance criter
 All four fixed via TDD (RED/GREEN + reverse-mutation proof per repo CLAUDE.md), verified against the real built binary across separate process invocations (not just in-process `go test` fixtures), `go build`/`go vet`/`go test ./...` green. Commits: `dbafaa0` (B03/B04), `7acf6b7` (B01/B02/B05).
 
 I01-I03/Q01 (test blind-spot fixture gap, `OrderBetween` precondition contract, default-sort/Order divergence, missing `--if-match` on `order`) intentionally left open per PO — improvement/question class, not bugs.
+
+## Review 2026-08-10 (PO-Review)
+
+US-07 · `beans order --after/--before/--first/--last` places a bean relative to its siblings, one file written, rejects an unordered reference bean with a clear error · a
+US-08 · `beans list --sort order` shows beans in the manually assigned sequence, unordered siblings last · a
+US-09 · `beans create --order <value>` sets an explicit order at creation time, invalid/trailing-zero values rejected · a
