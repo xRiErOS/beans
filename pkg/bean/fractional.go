@@ -55,18 +55,14 @@ func midpoint(a, b string) string {
 		if digitsA[i] == digitsB[i] {
 			continue
 		}
-		// digitsA[i] == digitsB[i]-1: need to go deeper
-		// Take a's prefix up to i, then find midpoint between a's suffix and max
-		result := make([]int, i+1)
-		copy(result, digitsA[:i+1])
-		// Append a digit halfway between a's next digit (or 0) and max (61)
-		nextA := 0
-		if i+1 < len(digitsA) {
-			nextA = digitsA[i+1]
-		}
-		mid := (nextA + 62) / 2
-		result = append(result, mid)
-		return fromIndices(result)
+		// digitsA[i] == digitsB[i]-1: need to go deeper.
+		// The result must share a's prefix through i, then carry a suffix
+		// strictly greater than a's own suffix (unbounded above, since b
+		// offers no constraint below this depth). incrementKey already
+		// solves exactly that, including the case where a's suffix is
+		// already at the maximum digit and needs another level.
+		suffix := incrementKey(fromIndices(digitsA[i+1:]))
+		return fromIndices(digitsA[:i+1]) + suffix
 	}
 
 	// a and b are equal up to maxLen; extend with midpoint

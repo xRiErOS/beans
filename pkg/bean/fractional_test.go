@@ -56,6 +56,16 @@ func TestOrderBetween_AdjacentDigits(t *testing.T) {
 	}
 }
 
+func TestOrderBetween_DeepAdjacentPrefixAtMaxDigit(t *testing.T) {
+	// Regression: midpoint("yz", "z") used to return "yz" itself (equal to
+	// the lower bound) because the "go deeper" branch didn't check whether
+	// a's next digit was already at the maximum (61, 'z').
+	result := OrderBetween("yz", "z")
+	if result <= "yz" || result >= "z" {
+		t.Errorf("OrderBetween(\"yz\", \"z\") = %q, should be strictly between", result)
+	}
+}
+
 func TestOrderBetween_ManyInsertions(t *testing.T) {
 	// Simulate inserting many items at the end
 	keys := []string{"V"}
@@ -90,6 +100,53 @@ func TestOrderBetween_ManyInsertionsAtStart(t *testing.T) {
 		if keys[i] <= keys[i-1] {
 			t.Errorf("keys not in order at %d: %q <= %q", i, keys[i], keys[i-1])
 		}
+	}
+}
+
+func TestOrderBetween_ThousandInsertionsStayDistinctAndOrdered(t *testing.T) {
+	// SC-01: repeatedly inserting into the same conceptual gap between two
+	// fixed neighbours (narrowing toward one side each time) must yield
+	// 1000 distinct values, each strictly between its own immediate
+	// neighbours under plain lexicographic comparison.
+	lo, hi := "A", "z"
+	seen := make(map[string]bool, 1000)
+
+	for i := 0; i < 1000; i++ {
+		mid := OrderBetween(lo, hi)
+		if mid <= lo || mid >= hi {
+			t.Fatalf("insertion %d: %q not strictly between %q and %q", i, mid, lo, hi)
+		}
+		if seen[mid] {
+			t.Fatalf("insertion %d: %q was already generated", i, mid)
+		}
+		seen[mid] = true
+		lo = mid // narrow toward hi each time, worst case for key growth
+	}
+
+	if len(seen) != 1000 {
+		t.Errorf("len(seen) = %d, want 1000", len(seen))
+	}
+}
+
+func TestOrderBetween_ThousandInsertionsNarrowingTowardLo(t *testing.T) {
+	// Symmetric to the above, narrowing toward the lower bound instead.
+	lo, hi := "A", "z"
+	seen := make(map[string]bool, 1000)
+
+	for i := 0; i < 1000; i++ {
+		mid := OrderBetween(lo, hi)
+		if mid <= lo || mid >= hi {
+			t.Fatalf("insertion %d: %q not strictly between %q and %q", i, mid, lo, hi)
+		}
+		if seen[mid] {
+			t.Fatalf("insertion %d: %q was already generated", i, mid)
+		}
+		seen[mid] = true
+		hi = mid
+	}
+
+	if len(seen) != 1000 {
+		t.Errorf("len(seen) = %d, want 1000", len(seen))
 	}
 }
 
