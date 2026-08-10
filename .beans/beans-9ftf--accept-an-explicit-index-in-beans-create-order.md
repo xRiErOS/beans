@@ -54,4 +54,4 @@ go test ./...   -> ok (all packages)
 
 Manual CLI smoke test (SC-01): five beans created with `--order 1/3/5/7/9`, `beans list --sort order` returned them in exactly that ascending sequence. `--order 'bad key!'` exited non-zero with "invalid order value"; no bean created. `create` without `--order` left the field empty.
 
-Commits: <to be filled after commit>
+Commits: d68dd5069c599cf7f0bf31a122ba6354536008b6 — feat(cli): accept --order at bean creation
