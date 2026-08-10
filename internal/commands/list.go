@@ -37,6 +37,7 @@ var (
 	listQuiet      bool
 	listSort       string
 	listFull       bool
+	listWhere      []string
 )
 
 var listCmd = &cobra.Command{
@@ -59,6 +60,12 @@ Search Syntax (--search/-S):
   title:login    Search only in title field
   body:auth      Search only in body field`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Validate --where up front (usage errors, reserved keys) before
+		// running the query, analogous to validateExtraKeys in create.go/update.go.
+		if err := validateWhereKeys(listWhere); err != nil {
+			return err
+		}
+
 		// Build GraphQL filter from CLI flags
 		filter := &model.BeanFilter{
 			Status:          listStatus,
@@ -117,6 +124,10 @@ Search Syntax (--search/-S):
 		if err != nil {
 			return fmt.Errorf("querying beans: %w", err)
 		}
+
+		// --where filters on extra front matter keys after the graph query,
+		// since BeanFilter (a generated GraphQL type) does not carry them (AC1/AC2).
+		beans = filterByWhere(beans, listWhere)
 
 		// Sort beans
 		sortBeans(beans, listSort, cfg)
@@ -283,6 +294,59 @@ func sortBeans(beans []*bean.Bean, sortBy string, cfg *config.Config) {
 	}
 }
 
+// validateWhereKeys checks every --where argument up front: each entry must
+// carry "=" (a usage error otherwise, same shape as --set) and must not name
+// a reserved schema field (AC3).
+func validateWhereKeys(wheres []string) error {
+	for _, w := range wheres {
+		key, _, err := parseSetPair(w)
+		if err != nil {
+			return err
+		}
+		if err := checkReservedKey(key); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// filterByWhere returns the subset of beans whose Extra map satisfies every
+// key=value pair in wheres (AND semantics, AC1/AC2). A key carried by no bean
+// simply yields an empty result (AC4). Callers must run validateWhereKeys
+// first; a malformed pair here is skipped rather than erroring, since
+// filtering runs after the query and has no error path back to the caller.
+func filterByWhere(beans []*bean.Bean, wheres []string) []*bean.Bean {
+	if len(wheres) == 0 {
+		return beans
+	}
+
+	type pair struct{ key, value string }
+	pairs := make([]pair, 0, len(wheres))
+	for _, w := range wheres {
+		key, value, err := parseSetPair(w)
+		if err != nil {
+			continue
+		}
+		pairs = append(pairs, pair{key, value})
+	}
+
+	result := make([]*bean.Bean, 0, len(beans))
+	for _, b := range beans {
+		matches := true
+		for _, p := range pairs {
+			v, ok := b.Extra[p.key]
+			if !ok || fmt.Sprintf("%v", v) != p.value {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			result = append(result, b)
+		}
+	}
+	return result
+}
+
 func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
@@ -311,5 +375,6 @@ func RegisterListCmd(root *cobra.Command) {
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id (default: status, priority, type, title)")
 	listCmd.Flags().BoolVar(&listFull, "full", false, "Include bean body in JSON output")
+	listCmd.Flags().StringArrayVar(&listWhere, "where", nil, "Filter by extra front matter key=value (can be repeated, AND logic)")
 	root.AddCommand(listCmd)
 }
