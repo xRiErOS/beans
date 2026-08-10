@@ -157,8 +157,8 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		milestones = append(milestones, b)
 	}
 
-	// Sort milestones by status order, then by created date
-	sortByStatusThenCreated(milestones, cfg)
+	// Sort milestones by status, then dependency, then manual order, then priority, then created date
+	bean.SortRoadmapContainers(milestones, cfg.StatusNames(), cfg.PriorityNames())
 
 	// Build milestone groups
 	var milestoneGroups []milestoneGroup
@@ -201,10 +201,8 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		}
 	}
 
-	// Sort unscheduled epics by title
-	sort.Slice(unscheduledEpics, func(i, j int) bool {
-		return unscheduledEpics[i].Epic.Title < unscheduledEpics[j].Epic.Title
-	})
+	// Sort unscheduled epics
+	sortEpicGroups(unscheduledEpics, cfg.StatusNames(), cfg.PriorityNames())
 
 	// Find unscheduled features: feature-typed beans that are not under a
 	// milestone or epic (orphan features, e.g. created without --parent).
@@ -232,9 +230,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 			unscheduledFeatures = append(unscheduledFeatures, fg)
 		}
 	}
-	sort.Slice(unscheduledFeatures, func(i, j int) bool {
-		return unscheduledFeatures[i].Feature.Title < unscheduledFeatures[j].Feature.Title
-	})
+	sortFeatureGroups(unscheduledFeatures, cfg.StatusNames(), cfg.PriorityNames())
 
 	// Find orphan items (not milestone, not epic, no parent or parent is not milestone/epic)
 	var orphanItems []*bean.Bean
@@ -269,7 +265,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	}
 
 	// Sort orphan items
-	sortByTypeThenStatus(orphanItems, cfg)
+	bean.SortRoadmapLeaves(orphanItems, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 
 	// Build unscheduled group if there's content
 	var unscheduled *unscheduledGroup
@@ -337,16 +333,12 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 		}
 	}
 
-	// Sort epics and features by their title
-	sort.Slice(group.Epics, func(i, j int) bool {
-		return group.Epics[i].Epic.Title < group.Epics[j].Epic.Title
-	})
-	sort.Slice(group.Features, func(i, j int) bool {
-		return group.Features[i].Feature.Title < group.Features[j].Feature.Title
-	})
+	// Sort epics and features
+	sortEpicGroups(group.Epics, cfg.StatusNames(), cfg.PriorityNames())
+	sortFeatureGroups(group.Features, cfg.StatusNames(), cfg.PriorityNames())
 
 	// Sort other items
-	sortByTypeThenStatus(filteredOther, cfg)
+	bean.SortRoadmapLeaves(filteredOther, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 	group.Other = filteredOther
 
 	return group
@@ -371,12 +363,10 @@ func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDo
 	}
 
 	leafItems := filterChildren(leafs, includeDone)
-	sortByTypeThenStatus(leafItems, cfg)
+	bean.SortRoadmapLeaves(leafItems, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 	eg.Items = leafItems
 
-	sort.Slice(eg.Features, func(i, j int) bool {
-		return eg.Features[i].Feature.Title < eg.Features[j].Feature.Title
-	})
+	sortFeatureGroups(eg.Features, cfg.StatusNames(), cfg.PriorityNames())
 	return eg
 }
 
@@ -400,7 +390,7 @@ func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, 
 // anywhere beneath the feature, flattened and sorted.
 func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) featureGroup {
 	items := collectLeafDescendants(feature.ID, children, includeDone)
-	sortByTypeThenStatus(items, cfg)
+	bean.SortRoadmapLeaves(items, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 	return featureGroup{Feature: feature, Items: items}
 }
 
@@ -472,53 +462,36 @@ func containsStatus(statuses []string, status string) bool {
 	return slices.Contains(statuses, status)
 }
 
-// sortByStatusThenCreated sorts beans by status order, then by created date.
-func sortByStatusThenCreated(beans []*bean.Bean, cfg interface{ StatusNames() []string }) {
-	statusOrder := make(map[string]int)
-	for i, s := range cfg.StatusNames() {
-		statusOrder[s] = i
+// sortEpicGroups sorts epicGroups by their Epic bean, following the same
+// status → dependency → order → priority → created_at chain as
+// bean.SortRoadmapContainers.
+func sortEpicGroups(groups []epicGroup, statusNames, priorityNames []string) {
+	items := make([]*bean.Bean, len(groups))
+	for i, g := range groups {
+		items[i] = g.Epic
 	}
-
-	sort.Slice(beans, func(i, j int) bool {
-		oi, oj := statusOrder[beans[i].Status], statusOrder[beans[j].Status]
-		if oi != oj {
-			return oi < oj
-		}
-		// Then by created date (oldest first for milestones)
-		if beans[i].CreatedAt != nil && beans[j].CreatedAt != nil {
-			return beans[i].CreatedAt.Before(*beans[j].CreatedAt)
-		}
-		return beans[i].ID < beans[j].ID
-	})
+	bean.SortRoadmapContainers(items, statusNames, priorityNames)
+	rank := make(map[string]int, len(items))
+	for i, b := range items {
+		rank[b.ID] = i
+	}
+	sort.SliceStable(groups, func(i, j int) bool { return rank[groups[i].Epic.ID] < rank[groups[j].Epic.ID] })
 }
 
-// sortByTypeThenStatus sorts beans by type order, then status order, then by ID.
-func sortByTypeThenStatus(beans []*bean.Bean, cfg interface {
-	StatusNames() []string
-	TypeNames() []string
-}) {
-	statusOrder := make(map[string]int)
-	for i, s := range cfg.StatusNames() {
-		statusOrder[s] = i
+// sortFeatureGroups sorts featureGroups by their Feature bean, following the
+// same status → dependency → order → priority → created_at chain as
+// bean.SortRoadmapContainers.
+func sortFeatureGroups(groups []featureGroup, statusNames, priorityNames []string) {
+	items := make([]*bean.Bean, len(groups))
+	for i, g := range groups {
+		items[i] = g.Feature
 	}
-	typeOrder := make(map[string]int)
-	for i, t := range cfg.TypeNames() {
-		typeOrder[t] = i
+	bean.SortRoadmapContainers(items, statusNames, priorityNames)
+	rank := make(map[string]int, len(items))
+	for i, b := range items {
+		rank[b.ID] = i
 	}
-
-	sort.Slice(beans, func(i, j int) bool {
-		// First by type
-		ti, tj := typeOrder[beans[i].Type], typeOrder[beans[j].Type]
-		if ti != tj {
-			return ti < tj
-		}
-		// Then by status
-		si, sj := statusOrder[beans[i].Status], statusOrder[beans[j].Status]
-		if si != sj {
-			return si < sj
-		}
-		return beans[i].ID < beans[j].ID
-	})
+	sort.SliceStable(groups, func(i, j int) bool { return rank[groups[i].Feature.ID] < rank[groups[j].Feature.ID] })
 }
 
 // renderRoadmapMarkdown renders the roadmap as Markdown using the template.

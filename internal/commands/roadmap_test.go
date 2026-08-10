@@ -276,6 +276,60 @@ func TestStatusFiltering(t *testing.T) {
 	})
 }
 
+func TestMilestoneOrderRespectsManualOrderKey(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+
+	cfg = config.Default()
+
+	older := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	newer := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	beans := []*bean.Bean{
+		// Created later but manually ordered first via the "order" key.
+		{ID: "m2", Type: "milestone", Title: "v2.0", Status: "todo", Order: "a", CreatedAt: &newer},
+		{ID: "t2", Type: "task", Title: "Task 2", Status: "todo", Parent: "m2"},
+		{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", Order: "z", CreatedAt: &older},
+		{ID: "t1", Type: "task", Title: "Task 1", Status: "todo", Parent: "m1"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Milestones) != 2 {
+		t.Fatalf("expected 2 milestones, got %d", len(result.Milestones))
+	}
+	if result.Milestones[0].Milestone.ID != "m2" || result.Milestones[1].Milestone.ID != "m1" {
+		t.Errorf("milestone order = [%q, %q], want [m2, m1] (manual order overrides created_at)",
+			result.Milestones[0].Milestone.ID, result.Milestones[1].Milestone.ID)
+	}
+}
+
+func TestMilestoneOrderRespectsBlockingDependency(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+
+	cfg = config.Default()
+
+	// IDs deliberately sort the "wrong" way (aa- before zz-) so the ID
+	// fallback alone cannot make this test pass -- only Blocking/BlockedBy
+	// awareness can put the blocker first.
+	beans := []*bean.Bean{
+		{ID: "aa-blocked", Type: "milestone", Title: "Blocked", Status: "todo", BlockedBy: []string{"zz-blocker"}},
+		{ID: "t2", Type: "task", Title: "Task 2", Status: "todo", Parent: "aa-blocked"},
+		{ID: "zz-blocker", Type: "milestone", Title: "Blocker", Status: "todo", Blocking: []string{"aa-blocked"}},
+		{ID: "t1", Type: "task", Title: "Task 1", Status: "todo", Parent: "zz-blocker"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if len(result.Milestones) != 2 {
+		t.Fatalf("expected 2 milestones, got %d", len(result.Milestones))
+	}
+	if result.Milestones[0].Milestone.ID != "zz-blocker" || result.Milestones[1].Milestone.ID != "aa-blocked" {
+		t.Errorf("milestone order = [%q, %q], want [zz-blocker, aa-blocked] (blocker sorts first)",
+			result.Milestones[0].Milestone.ID, result.Milestones[1].Milestone.ID)
+	}
+}
+
 func TestSplitByContainerType(t *testing.T) {
 	beans := []*bean.Bean{
 		{ID: "f1", Type: "feature", Title: "F1"},
