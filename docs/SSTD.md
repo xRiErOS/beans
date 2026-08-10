@@ -26,24 +26,10 @@ Das lokal installierte `/opt/homebrew/bin/beans` ist ein Build aus diesem Fork, 
 | Thema | Ort | Stand |
 |---|---|---|
 | beans rename command | `docs/beans-rename-command/` | **PO-REVIEW abgeschlossen 2026-07-24 — Epos `beans-e040` Tag `accepted`, 10/10 US accepted, 0 Rejects.** Binary `0.4.3-fork.rename` global installiert. Follow-up-Epic `beans-a29l` (Hardening): `beans-6ap8` D01 stageAndSwap-Crash-Recovery, `beans-pmu1` D02 atomarer .beans.yml-Write. **Offen: Q01** (Co-Authored-By-Layer-Konflikt — noch keine PO-Entscheidung), formaler Version-Tag. (Historie:) **Realisierung war abgeschlossen — Epos war auf `to-review`.** 9/9 In-Scope-Leaves (T01–T08, T10) `completed` + je `ce-specs-reviewer`-GRÜN (alle erste Runde, kein CHANGES_REQUIRED). **T09 `beans-lok4` (renameBean GraphQL/UI) bewusst deferred/todo** — außerhalb dieses Runs (Direct-Core-Architektur, GraphQL optional). Voll-Gate grün (`command go test ./...` alle Pakete, vet clean, Binary `rename --help` OK). Feature-Doku in `beans-src/CLAUDE.md` §`# Renaming Beans`. **Offene PO-Punkte am Gate** (im Epic-bean verankert): D01 (stageAndSwap-Crash-Fenster, keine `.beans.bak-*`-Waisen-Recovery), D02 (`.beans.yml`-Config-Write nicht-atomar → Mixed-Prefix nach Teilausfall), Q01 (Co-Authored-By-Layer-Konflikt, Historie inkonsistent T01-06 mit / T07+ ohne). Lessons: LL-20…LL-23. |
-| roadmap TTY-Output | `docs/roadmap-tty-output/` | Realisierung abgeschlossen, Epos `beans-1ec3` auf Tag `to-review` |
-| beans planning primitives | `docs/beans-planning-primitives/BRIEFING.md` | Milestone `beans-xej5`, Epics `beans-2ark` + `beans-zb0r`, beide `completed`/Tag `to-review`. Fortschritt und Review-Stand: siehe Epic-Bodies. |
+| roadmap TTY-Output | `docs/roadmap-tty-output/` | **PO-Review abgeschlossen 2026-08-10 — Epos `beans-1ec3` Tag `accepted`, 2/2 US accepted, 0 Rejects.** R01 (Glyphen-Rendering) live per tmux-PTY verifiziert, siehe Epic-Body. |
+| beans planning primitives | `docs/beans-planning-primitives/BRIEFING.md` | **PO-Review abgeschlossen 2026-08-10 — Milestone `beans-xej5`, Epics `beans-2ark` + `beans-zb0r` je Tag `accepted`, 9/9 US accepted, 0 Rejects.** Binary `0.4.4-fork` global installiert. Milestone selbst bleibt `in-progress` — weitere Kinder außerhalb dieses Scopes offen: `beans-mmyp`, `beans-3dvs`, `beans-a29l`, `beans-36fa`, `beans-13ae`. |
 
-- **Denk-Kette:** `docs/roadmap-tty-output/{DESIGN,DECISIONS,QUESTIONS,TASKS,REFERENCES}.md`
-- **Plan:** `docs/roadmap-tty-output/PLAN.md` — `ce-plan-reviewer` grün (2 Runden),
-  PO-freigegeben 2026-07-23, Gate-B-verifiziert
-- **Layout-Referenz:** `docs/roadmap-tty-output/render-prototype.py` (ausführbar).
-  **Nicht** der Quelltext-Block in `PLAN.md` Task 2 Step 1 — der ist lückenhaft (LL-12).
-- **Arbeit:** Epos `beans-1ec3`, T1–T6 alle `completed` und `ce-specs-reviewer`-grün
-  (T3/T4/T5 je in Runde 2, siehe LL-15/LL-16).
-
-**Nächster Schritt:** `/ce-po-review` fortsetzen — läuft über alle `to-review`-Epics (`beans-2ark`, `beans-zb0r`, `beans-1ec3`), Stand jeweils im Epic-Body unter `## Review <datum>`. R01 (Glyphen-Rendering bei `beans-1ec3`) ist nur am echten Terminal abnehmbar, nicht agentisch.
-
-Zusätzlich offen: `beans-bxwl` (Milestone `beans-xej5`) — siehe Bean-Body.
-
-**Offen aus diesem Epos:** bug `beans-36fa` (kinderlose Orphan-Epic fehlt in **beiden**
-Ausgabepfaden, Ursache in `buildRoadmap`; ein Fix ändert den Markdown-Output und braucht
-PO-Entscheid).
+**Nächster Schritt:** Milestone `beans-xej5` hat nach den drei abgeschlossenen Epics noch offene Kinder (`beans-mmyp`, `beans-3dvs`, `beans-a29l`, `beans-36fa`, `beans-13ae`, alle `todo`) — `beans list --ready --parent beans-xej5` für den Einstieg. `beans-36fa` (Orphan-Epic verschwindet aus `buildRoadmap`-Output) braucht vor einem Fix einen PO-Entscheid, da er den Markdown-Output ändert.
 
 ## Nicht-Ableitbarkeiten
 
