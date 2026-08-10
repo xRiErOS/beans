@@ -7,7 +7,7 @@ priority: high
 tags:
     - to-review
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T10:55:15Z
+updated_at: 2026-08-10T11:16:59Z
 parent: beans-xej5
 ---
 
@@ -32,3 +32,18 @@ All seven leaves completed:
 Every leaf independently verified (go build/go test rerun outside the implementer's own report) before being accepted here. Full `go build ./...` clean at HEAD of this epic's work; `go test ./...` (excluding pkg/bean transiently, see beans-y2a2's in-flight note if still open at review time) green across all touched packages.
 
 Ready for PO review.
+
+
+## Review Round 1 (Opus, independent verification)
+
+Opus subagent review of all seven leaves against their acceptance criteria, running its own tests/smoke checks (not trusting bean self-reports): six passed independently; `beans-re1p` failed on B01 (ETag concurrency bypassed by the extra-key second write, two reproduced failure modes) plus I01 (no drift-guard between the three parallel known-key lists in `pkg/bean/bean.go`).
+
+Both fixed:
+- B01: `internal/commands/create.go`/`update.go` now pass a correct `ifMatch` (the bean's own etag, or the caller's `--if-match`) to the second write instead of `nil`. RED→GREEN reproduced independently, see `beans-re1p`'s Fix Round 1 section.
+- I01: `TestKnownKeyMapsMatchFrontMatterTags` (`pkg/bean/bean_test.go`) reflects over `frontMatter`'s yaml tags and asserts both `knownFrontMatterKeys` and `reservedKeyFlags` match exactly. Reverse-mutation verified (removing an entry turns it red).
+
+Non-blocking findings deferred per the reviewer's own verdict (not re-litigated here, not fixed in this epic): B02 (--where's error names --set instead of --where), B03 (empty --set key silently accepted), I02/I03 (two tests assert on Go structs rather than the file/wire — the properties they guard hold, verified manually by the reviewer, but the automated coverage is weaker than the SC wording).
+
+`go build ./...` clean, `go test ./...` all green at HEAD (46b113a).
+
+Still to-review — ready for the PO now.
