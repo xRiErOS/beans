@@ -3,6 +3,7 @@
 /beans-tui
 /.vscode/settings.json
 /.worktrees/
+/.superpowers/
 # Added by goreleaser init:
 dist/
 /.docs.local
