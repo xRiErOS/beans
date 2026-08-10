@@ -164,6 +164,9 @@ type Bean struct {
 
 	// BlockedBy is a list of bean IDs that are blocking this bean.
 	BlockedBy []string `yaml:"blocked_by,omitempty" json:"blocked_by,omitempty"`
+
+	// Extra holds front matter keys not covered by any typed field above.
+	Extra map[string]any `yaml:"-" json:"extra,omitempty"`
 }
 
 // frontMatter is the subset of Bean that gets serialized to YAML front matter.
@@ -181,12 +184,69 @@ type frontMatter struct {
 	BlockedBy []string   `yaml:"blocked_by,omitempty"`
 }
 
+// knownFrontMatterKeys are the YAML keys owned by a typed field on frontMatter.
+var knownFrontMatterKeys = map[string]bool{
+	"title":      true,
+	"status":     true,
+	"type":       true,
+	"priority":   true,
+	"tags":       true,
+	"created_at": true,
+	"updated_at": true,
+	"order":      true,
+	"parent":     true,
+	"blocking":   true,
+	"blocked_by": true,
+}
+
+// normalizeYAMLValue converts the map[interface{}]interface{} produced by the
+// yaml.v2 decoder (used internally by the frontmatter library) into
+// map[string]any, recursively, so Extra stays JSON-marshalable.
+func normalizeYAMLValue(v any) any {
+	switch typed := v.(type) {
+	case map[interface{}]interface{}:
+		result := make(map[string]any, len(typed))
+		for k, val := range typed {
+			result[fmt.Sprintf("%v", k)] = normalizeYAMLValue(val)
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(typed))
+		for i, val := range typed {
+			result[i] = normalizeYAMLValue(val)
+		}
+		return result
+	default:
+		return v
+	}
+}
+
 // Parse reads a bean from a reader (markdown with YAML front matter).
 func Parse(r io.Reader) (*Bean, error) {
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("reading bean: %w", err)
+	}
+
 	var fm frontMatter
-	body, err := frontmatter.Parse(r, &fm)
+	body, err := frontmatter.Parse(bytes.NewReader(data), &fm)
 	if err != nil {
 		return nil, fmt.Errorf("parsing front matter: %w", err)
+	}
+
+	raw := map[string]any{}
+	if _, err := frontmatter.Parse(bytes.NewReader(data), &raw); err != nil {
+		return nil, fmt.Errorf("parsing front matter: %w", err)
+	}
+	var extra map[string]any
+	for key, value := range raw {
+		if knownFrontMatterKeys[key] {
+			continue
+		}
+		if extra == nil {
+			extra = make(map[string]any, len(raw))
+		}
+		extra[key] = normalizeYAMLValue(value)
 	}
 
 	// Trim trailing newline from body (POSIX files end with newline, but it's not part of content)
@@ -205,6 +265,7 @@ func Parse(r io.Reader) (*Bean, error) {
 		Parent:    fm.Parent,
 		Blocking:  fm.Blocking,
 		BlockedBy: fm.BlockedBy,
+		Extra:     extra,
 	}, nil
 }
 

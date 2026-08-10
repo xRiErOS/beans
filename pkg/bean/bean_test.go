@@ -2,6 +2,7 @@ package bean
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1707,5 +1708,97 @@ func TestETagChangesAfterModification(t *testing.T) {
 
 	if result1["etag"] == result2["etag"] {
 		t.Error("JSON etag should differ after modification")
+	}
+}
+
+func TestParseExtraFrontMatter(t *testing.T) {
+	input := `---
+title: Test Bean
+status: todo
+type: task
+priority: high
+custom_field: hello
+another_field: 42
+flag_field: true
+list_field:
+  - a
+  - b
+map_field:
+  key1: value1
+  key2: value2
+---
+
+Body text.`
+
+	b, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if b.Title != "Test Bean" {
+		t.Errorf("Title = %q, want %q", b.Title, "Test Bean")
+	}
+	if b.Status != "todo" {
+		t.Errorf("Status = %q, want %q", b.Status, "todo")
+	}
+	if b.Type != "task" {
+		t.Errorf("Type = %q, want %q", b.Type, "task")
+	}
+	if b.Priority != "high" {
+		t.Errorf("Priority = %q, want %q", b.Priority, "high")
+	}
+
+	if len(b.Extra) != 5 {
+		t.Fatalf("len(Extra) = %d, want 5; Extra = %#v", len(b.Extra), b.Extra)
+	}
+
+	for _, known := range []string{"title", "status", "type", "priority"} {
+		if _, ok := b.Extra[known]; ok {
+			t.Errorf("Extra should not contain known key %q", known)
+		}
+	}
+
+	if b.Extra["custom_field"] != "hello" {
+		t.Errorf("Extra[custom_field] = %v, want %q", b.Extra["custom_field"], "hello")
+	}
+	if b.Extra["another_field"] != 42 {
+		t.Errorf("Extra[another_field] = %v, want %d", b.Extra["another_field"], 42)
+	}
+	if b.Extra["flag_field"] != true {
+		t.Errorf("Extra[flag_field] = %v, want true", b.Extra["flag_field"])
+	}
+
+	list, ok := b.Extra["list_field"].([]interface{})
+	if !ok {
+		t.Fatalf("Extra[list_field] type = %T, want []interface{}", b.Extra["list_field"])
+	}
+	if !reflect.DeepEqual(list, []interface{}{"a", "b"}) {
+		t.Errorf("Extra[list_field] = %v, want [a b]", list)
+	}
+
+	m, ok := b.Extra["map_field"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("Extra[map_field] type = %T, want map[string]interface{}", b.Extra["map_field"])
+	}
+	wantMap := map[string]interface{}{"key1": "value1", "key2": "value2"}
+	if !reflect.DeepEqual(m, wantMap) {
+		t.Errorf("Extra[map_field] = %v, want %v", m, wantMap)
+	}
+}
+
+func TestParseNoExtraFrontMatter(t *testing.T) {
+	input := `---
+title: Test Bean
+status: todo
+---
+
+Body.`
+
+	b, err := Parse(strings.NewReader(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(b.Extra) != 0 {
+		t.Errorf("Extra = %#v, want empty", b.Extra)
 	}
 }
