@@ -1,11 +1,11 @@
 ---
 # beans-omoy
 title: cut new beans binary release for workflow commands + prime
-status: todo
+status: completed
 type: task
 priority: normal
 created_at: 2026-08-10T12:40:50Z
-updated_at: 2026-08-10T12:41:06Z
+updated_at: 2026-08-10T16:18:05Z
 parent: beans-mmyp
 blocked_by:
     - beans-0ajg
@@ -36,3 +36,7 @@ reach users.
 
 - Any code changes -- this is purely the release/tag step
 - Deciding whether push happens automatically -- always ask first
+
+## Summary of Changes
+
+Ran mise run release:minor (tag v0.5.0) and mise run build; verified beans version reports v0.5.0 (4396f34). Pushed to fork remote (xRiErOS/beans) with Erik's explicit go-ahead — origin (hmans/beans) denied write access as expected.
