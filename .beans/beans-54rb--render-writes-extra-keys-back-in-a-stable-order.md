@@ -1,11 +1,11 @@
 ---
 # beans-54rb
 title: Render writes extra keys back in a stable order
-status: todo
+status: completed
 type: task
 priority: high
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T10:05:30Z
+updated_at: 2026-08-10T10:22:45Z
 parent: beans-2ark
 blocked_by:
     - beans-n3hl
@@ -36,3 +36,39 @@ _Requirements: R-01, R-02_
 ## Recommended Skills
 
 - `tdd`
+
+
+## Summary of Changes
+
+`Render` (`pkg/bean/bean.go:288`) now builds the front matter via `yaml.Node` instead of marshaling `renderFrontMatter` directly: `node.Encode(&fm)` produces the known-field mapping in struct order, then extra keys (sorted via `sort.Strings`) are appended as key/value node pairs to `node.Content` before the whole node is marshaled. This gives a stable, deterministic key order without introducing a hand-rolled ordered-map type.
+
+## Test-Output
+
+RED (guard-branch removed, AC-4 test fails — SC-02 reverse mutation, verified inline then reverted, not committed):
+```
+=== RUN   TestRenderPreservesExtraKeysAfterKnownFieldUpdate
+    bean_test.go:1930: len(Extra) = 0, want 2; Extra = map[string]interface {}(nil)
+--- FAIL: TestRenderPreservesExtraKeysAfterKnownFieldUpdate (0.00s)
+```
+
+GREEN (full package):
+```
+=== RUN   TestRenderWritesExtraKeysSortedAfterKnownFields
+--- PASS: TestRenderWritesExtraKeysSortedAfterKnownFields (0.00s)
+=== RUN   TestRenderTwiceProducesIdenticalOutput
+--- PASS: TestRenderTwiceProducesIdenticalOutput (0.00s)
+=== RUN   TestParseRenderRoundtripWithExtraKeys
+--- PASS: TestParseRenderRoundtripWithExtraKeys (0.00s)
+=== RUN   TestRenderPreservesExtraKeysAfterKnownFieldUpdate
+--- PASS: TestRenderPreservesExtraKeysAfterKnownFieldUpdate (0.00s)
+PASS
+ok  	github.com/hmans/beans/pkg/bean	0.302s
+```
+
+## Smoke
+
+`go build ./...` clean. `go test ./...` — all packages `ok` (ran directly, not via `mise test`; see beans-n3hl for the pre-existing frontend/codegen environment issue unrelated to this task).
+
+## Notes for T(n+1)
+
+Epic 1's data format (`beans-n3hl` + `beans-54rb`) is now closed: `Bean.Extra` parses and round-trips through `Render`/`Parse` with a stable, JSON-safe, sorted key order. The fanned-out leaves (`re1p`, `7ohz`, `usk9`, `slvx`, `k9cc`) can build on this without touching `pkg/bean`.

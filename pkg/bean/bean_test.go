@@ -1,6 +1,7 @@
 package bean
 
 import (
+	"bytes"
 	"encoding/json"
 	"reflect"
 	"strings"
@@ -1800,5 +1801,138 @@ Body.`
 	}
 	if len(b.Extra) != 0 {
 		t.Errorf("Extra = %#v, want empty", b.Extra)
+	}
+}
+
+func TestRenderWritesExtraKeysSortedAfterKnownFields(t *testing.T) {
+	b := &Bean{
+		Title:  "Extra Bean",
+		Status: "todo",
+		Extra: map[string]any{
+			"z_field": "last",
+			"a_field": "first",
+			"m_field": "middle",
+		},
+	}
+
+	rendered, err := b.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+	out := string(rendered)
+
+	statusIdx := strings.Index(out, "status:")
+	aIdx := strings.Index(out, "a_field:")
+	mIdx := strings.Index(out, "m_field:")
+	zIdx := strings.Index(out, "z_field:")
+
+	if statusIdx == -1 || aIdx == -1 || mIdx == -1 || zIdx == -1 {
+		t.Fatalf("expected all fields present in output, got:\n%s", out)
+	}
+	if !(statusIdx < aIdx && aIdx < mIdx && mIdx < zIdx) {
+		t.Errorf("expected order status < a_field < m_field < z_field, got indices %d, %d, %d, %d:\n%s", statusIdx, aIdx, mIdx, zIdx, out)
+	}
+}
+
+func TestRenderTwiceProducesIdenticalOutput(t *testing.T) {
+	b := &Bean{
+		Title:  "Stable Bean",
+		Status: "todo",
+		Extra: map[string]any{
+			"z_field": "last",
+			"a_field": "first",
+		},
+	}
+
+	first, err := b.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+	second, err := b.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+
+	if !bytes.Equal(first, second) {
+		t.Errorf("two renders differ:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestParseRenderRoundtripWithExtraKeys(t *testing.T) {
+	b := &Bean{
+		Title:  "Roundtrip Bean",
+		Status: "in-progress",
+		Type:   "task",
+		Extra: map[string]any{
+			"custom_a": "alpha",
+			"custom_b": "beta",
+			"custom_c": "gamma",
+		},
+	}
+
+	first, err := b.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+
+	parsed, err := Parse(bytes.NewReader(first))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	second, err := parsed.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+
+	if !bytes.Equal(first, second) {
+		t.Errorf("roundtrip not byte-identical:\nfirst:\n%s\nsecond:\n%s", first, second)
+	}
+}
+
+func TestRenderPreservesExtraKeysAfterKnownFieldUpdate(t *testing.T) {
+	b := &Bean{
+		Title:  "Original Title",
+		Status: "todo",
+		Extra: map[string]any{
+			"custom_a": "alpha",
+			"custom_b": "beta",
+		},
+	}
+
+	rendered, err := b.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+
+	parsed, err := Parse(bytes.NewReader(rendered))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	// Simulate a command updating a known field.
+	parsed.Status = "completed"
+
+	rerendered, err := parsed.Render()
+	if err != nil {
+		t.Fatalf("Render error: %v", err)
+	}
+
+	reparsed, err := Parse(bytes.NewReader(rerendered))
+	if err != nil {
+		t.Fatalf("Parse error: %v", err)
+	}
+
+	if reparsed.Status != "completed" {
+		t.Errorf("Status = %q, want %q", reparsed.Status, "completed")
+	}
+	if len(reparsed.Extra) != 2 {
+		t.Fatalf("len(Extra) = %d, want 2; Extra = %#v", len(reparsed.Extra), reparsed.Extra)
+	}
+	if reparsed.Extra["custom_a"] != "alpha" {
+		t.Errorf("Extra[custom_a] = %v, want %q", reparsed.Extra["custom_a"], "alpha")
+	}
+	if reparsed.Extra["custom_b"] != "beta" {
+		t.Errorf("Extra[custom_b] = %v, want %q", reparsed.Extra["custom_b"], "beta")
 	}
 }

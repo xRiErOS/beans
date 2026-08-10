@@ -8,6 +8,7 @@ import (
 	"hash/fnv"
 	"io"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -300,7 +301,30 @@ func (b *Bean) Render() ([]byte, error) {
 		BlockedBy: b.BlockedBy,
 	}
 
-	fmBytes, err := yaml.Marshal(&fm)
+	var node yaml.Node
+	if err := node.Encode(&fm); err != nil {
+		return nil, fmt.Errorf("encoding front matter: %w", err)
+	}
+
+	if len(b.Extra) > 0 {
+		keys := make([]string, 0, len(b.Extra))
+		for k := range b.Extra {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			var keyNode, valueNode yaml.Node
+			if err := keyNode.Encode(k); err != nil {
+				return nil, fmt.Errorf("encoding extra key %q: %w", k, err)
+			}
+			if err := valueNode.Encode(b.Extra[k]); err != nil {
+				return nil, fmt.Errorf("encoding extra value for key %q: %w", k, err)
+			}
+			node.Content = append(node.Content, &keyNode, &valueNode)
+		}
+	}
+
+	fmBytes, err := yaml.Marshal(&node)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling front matter: %w", err)
 	}
