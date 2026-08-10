@@ -11,6 +11,7 @@ import (
 func RegisterCoreCommands(root *cobra.Command) {
 	RegisterArchiveCmd(root)
 	RegisterCheckCmd(root)
+	RegisterCompleteCmd(root)
 	RegisterCreateCmd(root)
 	RegisterDeleteCmd(root)
 	RegisterGraphqlCmd(root)
