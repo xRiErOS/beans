@@ -1,11 +1,11 @@
 ---
 # beans-2ark
 title: Preserve and expose custom front matter
-status: todo
+status: in-progress
 type: epic
 priority: high
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T10:05:30Z
+updated_at: 2026-08-10T10:39:28Z
 parent: beans-xej5
 ---
 

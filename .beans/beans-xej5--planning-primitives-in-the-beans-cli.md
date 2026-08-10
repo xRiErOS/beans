@@ -1,11 +1,11 @@
 ---
 # beans-xej5
 title: Planning primitives in the beans CLI
-status: todo
+status: in-progress
 type: milestone
 priority: high
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T10:05:30Z
+updated_at: 2026-08-10T10:39:28Z
 ---
 
 beans should be able to carry a planning model that goes beyond title, status, type and priority. Today it silently drops every front matter key it does not know, and the one field it already declares for manual ordering is wired to no command at all.
