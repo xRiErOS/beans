@@ -6,38 +6,38 @@ import (
 	"os"
 	"sort"
 
+	"github.com/hmans/beans/internal/output"
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/hmans/beans/pkg/config"
-	"github.com/hmans/beans/internal/output"
-	"github.com/hmans/beans/internal/ui"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
 var (
-	listJSON       bool
-	listSearch     string
-	listStatus     []string
-	listNoStatus   []string
-	listType       []string
-	listNoType     []string
-	listPriority   []string
-	listNoPriority []string
-	listTag        []string
-	listNoTag      []string
+	listJSON        bool
+	listSearch      string
+	listStatus      []string
+	listNoStatus    []string
+	listType        []string
+	listNoType      []string
+	listPriority    []string
+	listNoPriority  []string
+	listTag         []string
+	listNoTag       []string
 	listHasParent   bool
 	listNoParent    bool
 	listParentID    string
 	listHasBlocking bool
 	listNoBlocking  bool
 	listIsBlocked   bool
-	listReady      bool
-	listQuiet      bool
-	listSort       string
-	listFull       bool
-	listWhere      []string
+	listReady       bool
+	listQuiet       bool
+	listSort        string
+	listFull        bool
+	listWhere       []string
 )
 
 var listCmd = &cobra.Command{
@@ -288,6 +288,30 @@ func sortBeans(beans []*bean.Bean, sortBy string, cfg *config.Config) {
 		sort.Slice(beans, func(i, j int) bool {
 			return beans[i].ID < beans[j].ID
 		})
+	case "order":
+		// Order is a fractional index scoped per parent (R-12): two
+		// siblings under different parents can carry the same Order value,
+		// so sorting the flat list by Order alone would interleave
+		// unrelated groups. Group beans by Parent first — groups keep the
+		// order in which their first member appears in the input, for
+		// determinism — then sort each group with bean.SortByOrder, which
+		// places beans without an Order value after every sibling that has
+		// one (AC1/AC2).
+		groupOrder := make([]string, 0)
+		groups := make(map[string][]*bean.Bean)
+		for _, b := range beans {
+			if _, ok := groups[b.Parent]; !ok {
+				groupOrder = append(groupOrder, b.Parent)
+			}
+			groups[b.Parent] = append(groups[b.Parent], b)
+		}
+		result := make([]*bean.Bean, 0, len(beans))
+		for _, p := range groupOrder {
+			group := groups[p]
+			bean.SortByOrder(group)
+			result = append(result, group...)
+		}
+		copy(beans, result)
 	default:
 		// Default: sort by status order, then priority, then type order, then title (same as TUI)
 		bean.SortByStatusPriorityAndType(beans, statusNames, priorityNames, typeNames)
@@ -373,7 +397,7 @@ func RegisterListCmd(root *cobra.Command) {
 	listCmd.Flags().BoolVar(&listIsBlocked, "is-blocked", false, "Filter beans that are blocked by others")
 	listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft)")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
-	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id (default: status, priority, type, title)")
+	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent) (default: status, priority, type, title)")
 	listCmd.Flags().BoolVar(&listFull, "full", false, "Include bean body in JSON output")
 	listCmd.Flags().StringArrayVar(&listWhere, "where", nil, "Filter by extra front matter key=value (can be repeated, AND logic)")
 	root.AddCommand(listCmd)

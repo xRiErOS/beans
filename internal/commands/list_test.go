@@ -98,6 +98,36 @@ func TestSortBeans(t *testing.T) {
 		}
 	})
 
+	t.Run("sort by order, scoped per parent", func(t *testing.T) {
+		beans := []*bean.Bean{
+			// Four siblings under "p1" whose order values were assigned out
+			// of creation sequence, plus a fifth sibling without an order
+			// value that must come last (SC-01).
+			{ID: "p1-c", Title: "c", Parent: "p1", Order: "m"},
+			{ID: "p1-a", Title: "a", Parent: "p1", Order: "a"},
+			{ID: "p1-e", Title: "e", Parent: "p1"},
+			{ID: "p1-d", Title: "d", Parent: "p1", Order: "t"},
+			{ID: "p1-b", Title: "b", Parent: "p1", Order: "g"},
+			// A sibling under a different parent shares an Order value with
+			// one of p1's beans, which must not interleave the groups —
+			// Order is a fractional index scoped per parent (R-12).
+			{ID: "p2-x", Title: "x", Parent: "p2", Order: "a"},
+		}
+		sortBeans(beans, "order", testCfg)
+
+		expected := []string{"p1-a", "p1-b", "p1-c", "p1-d", "p1-e", "p2-x"}
+		got := make([]string, len(beans))
+		for i, b := range beans {
+			got[i] = b.ID
+		}
+		for i, want := range expected {
+			if got[i] != want {
+				t.Errorf("sort by order[%d]: got %v, want %v", i, got, expected)
+				break
+			}
+		}
+	})
+
 	t.Run("default sort (archive status then type)", func(t *testing.T) {
 		beans := []*bean.Bean{
 			{ID: "completed-bug", Status: "completed", Type: "bug"},
@@ -357,4 +387,3 @@ func TestTruncate(t *testing.T) {
 		})
 	}
 }
-
