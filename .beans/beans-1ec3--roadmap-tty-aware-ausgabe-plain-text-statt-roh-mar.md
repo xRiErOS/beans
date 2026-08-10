@@ -1,13 +1,13 @@
 ---
 # beans-1ec3
 title: 'roadmap: TTY-aware Ausgabe (Plain-Text statt Roh-Markdown)'
-status: todo
+status: completed
 type: epic
 priority: normal
 tags:
-    - to-review
+    - accepted
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-08-10T12:20:41Z
+updated_at: 2026-08-10T12:21:48Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -231,3 +231,8 @@ Auf PO-Anweisung per tmux-PTY live getestet (`tmux new-session -x 80 -y 50`, `se
 R01 bleibt nicht vollständig geschlossen: tmux hat eine eigene Ambiguous-Width-Einstellung, die vom tatsächlichen Terminal-Emulator abweichen kann — starke, aber keine abschließende Evidenz für Eriks reales Terminal.
 
 Wissen vermerkt: dev-wiki/tui-architecture-design/tmux-tui-harness (Knowledge-Catalogue) um die Ein-Schuss-CLI-isatty-Variante ergänzt.
+
+## Review 2026-08-10 (PO-Review)
+
+US-10 · Terminal rendering: pretty tree at a real TTY, four levels, no badges/links, no wrap at 80 columns, R01 verified live via tmux (real PTY, not conclusive for the user's actual terminal emulator) · a
+US-11 · Piped/redirected output stays byte-identical raw markdown · a

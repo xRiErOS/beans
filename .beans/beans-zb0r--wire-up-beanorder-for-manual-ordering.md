@@ -1,13 +1,13 @@
 ---
 # beans-zb0r
 title: Wire up Bean.Order for manual ordering
-status: in-progress
+status: completed
 type: epic
 priority: normal
 tags:
-    - to-review
+    - accepted
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T12:13:52Z
+updated_at: 2026-08-10T12:21:48Z
 parent: beans-xej5
 ---
 
