@@ -290,6 +290,122 @@ func TestResolveAppendContent(t *testing.T) {
 	}
 }
 
+func TestParseSetPair(t *testing.T) {
+	tests := []struct {
+		name      string
+		arg       string
+		wantKey   string
+		wantValue string
+		wantErr   bool
+	}{
+		{"simple", "release=0-4-1", "release", "0-4-1", false},
+		{"value contains equals", "url=https://example.com?a=b", "url", "https://example.com?a=b", false},
+		{"empty value", "flag=", "flag", "", false},
+		{"no equals sign", "release", "", "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key, value, err := parseSetPair(tt.arg)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("parseSetPair(%q) error = %v, wantErr %v", tt.arg, err, tt.wantErr)
+			}
+			if err != nil {
+				return
+			}
+			if key != tt.wantKey || value != tt.wantValue {
+				t.Errorf("parseSetPair(%q) = (%q, %q), want (%q, %q)", tt.arg, key, value, tt.wantKey, tt.wantValue)
+			}
+		})
+	}
+}
+
+func TestValidateExtraKeys(t *testing.T) {
+	t.Run("unknown keys pass", func(t *testing.T) {
+		if err := validateExtraKeys([]string{"release=0-4-1", "klasse=bugfix"}, []string{"other"}); err != nil {
+			t.Errorf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("reserved set key names its flag", func(t *testing.T) {
+		err := validateExtraKeys([]string{"status=done"}, nil)
+		if err == nil {
+			t.Fatal("expected error for reserved key")
+		}
+		if !contains(err.Error(), "--status") {
+			t.Errorf("expected error to name --status, got %q", err.Error())
+		}
+	})
+
+	t.Run("reserved unset key names its flag", func(t *testing.T) {
+		err := validateExtraKeys(nil, []string{"title"})
+		if err == nil {
+			t.Fatal("expected error for reserved key")
+		}
+		if !contains(err.Error(), "--title") {
+			t.Errorf("expected error to name --title, got %q", err.Error())
+		}
+	})
+
+	t.Run("managed field without native flag", func(t *testing.T) {
+		err := validateExtraKeys([]string{"order=1"}, nil)
+		if err == nil {
+			t.Fatal("expected error for managed field")
+		}
+		if !contains(err.Error(), "managed field") {
+			t.Errorf("expected error to mention managed field, got %q", err.Error())
+		}
+	})
+
+	t.Run("set without equals sign is a usage error", func(t *testing.T) {
+		err := validateExtraKeys([]string{"release"}, nil)
+		if err == nil {
+			t.Fatal("expected error for missing equals sign")
+		}
+	})
+}
+
+func TestApplyExtraOps(t *testing.T) {
+	t.Run("sets keys", func(t *testing.T) {
+		b := &bean.Bean{}
+		if err := applyExtraOps(b, []string{"release=0-4-1", "klasse=bugfix"}, nil); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if b.Extra["release"] != "0-4-1" || b.Extra["klasse"] != "bugfix" {
+			t.Errorf("Extra = %#v, want release=0-4-1, klasse=bugfix", b.Extra)
+		}
+	})
+
+	t.Run("unsets keys", func(t *testing.T) {
+		b := &bean.Bean{Extra: map[string]any{"release": "0-4-1"}}
+		if err := applyExtraOps(b, nil, []string{"release"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := b.Extra["release"]; ok {
+			t.Errorf("expected release to be removed, Extra = %#v", b.Extra)
+		}
+	})
+
+	t.Run("unset of absent key is a no-op", func(t *testing.T) {
+		b := &bean.Bean{}
+		if err := applyExtraOps(b, nil, []string{"nope"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if len(b.Extra) != 0 {
+			t.Errorf("expected no Extra keys, got %#v", b.Extra)
+		}
+	})
+
+	t.Run("same key set and unset: unset wins", func(t *testing.T) {
+		b := &bean.Bean{}
+		if err := applyExtraOps(b, []string{"release=0-4-1"}, []string{"release"}); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if _, ok := b.Extra["release"]; ok {
+			t.Errorf("expected release to be unset, Extra = %#v", b.Extra)
+		}
+	})
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || indexOfSubstring(s, substr) >= 0)

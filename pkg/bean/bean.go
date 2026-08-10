@@ -200,6 +200,32 @@ var knownFrontMatterKeys = map[string]bool{
 	"blocked_by": true,
 }
 
+// reservedKeyFlags maps a known front matter key to the native CLI flag that
+// writes it. Keys with no direct write flag (created_at, updated_at, order)
+// map to "" and get a generic "managed field" error instead of a flag name.
+var reservedKeyFlags = map[string]string{
+	"title":      "--title",
+	"status":     "--status",
+	"type":       "--type",
+	"priority":   "--priority",
+	"tags":       "--tag",
+	"created_at": "",
+	"updated_at": "",
+	"order":      "",
+	"parent":     "--parent",
+	"blocking":   "--blocking",
+	"blocked_by": "--blocked-by",
+}
+
+// ReservedKeyFlag reports whether key is a known front matter field and, if
+// so, the native CLI flag that writes it. A known key with no direct write
+// flag (e.g. "order") returns known=true and flag="" -- callers should fall
+// back to a "managed field" message rather than inventing a flag name.
+func ReservedKeyFlag(key string) (flag string, known bool) {
+	flag, known = reservedKeyFlags[key]
+	return flag, known
+}
+
 // normalizeYAMLValue converts the map[interface{}]interface{} produced by the
 // yaml.v2 decoder (used internally by the frontmatter library) into
 // map[string]any, recursively, so Extra stays JSON-marshalable.

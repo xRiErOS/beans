@@ -24,6 +24,8 @@ var (
 	createBlocking  []string
 	createBlockedBy []string
 	createPrefix    string
+	createSet       []string
+	createUnset     []string
 	createJSON      bool
 )
 
@@ -47,6 +49,9 @@ var createCmd = &cobra.Command{
 		}
 		if createPriority != "" && !cfg.IsValidPriority(createPriority) {
 			return cmdError(createJSON, output.ErrValidation, "invalid priority: %s (must be %s)", createPriority, cfg.PriorityList())
+		}
+		if err := validateExtraKeys(createSet, createUnset); err != nil {
+			return cmdError(createJSON, output.ErrValidation, "%s", err)
 		}
 
 		body, err := resolveContent(createBody, createBodyFile)
@@ -105,6 +110,17 @@ var createCmd = &cobra.Command{
 			return cmdError(createJSON, output.ErrFileError, "failed to create bean: %v", err)
 		}
 
+		// Extra front matter keys aren't part of the generated CreateBeanInput
+		// type, so they're applied and persisted as a second write.
+		if len(createSet) > 0 || len(createUnset) > 0 {
+			if err := applyExtraOps(b, createSet, createUnset); err != nil {
+				return cmdError(createJSON, output.ErrValidation, "%s", err)
+			}
+			if err := core.Update(b, nil); err != nil {
+				return cmdError(createJSON, output.ErrFileError, "failed to set extra keys: %v", err)
+			}
+		}
+
 		if createJSON {
 			return output.Success(b, "Bean created")
 		}
@@ -139,6 +155,8 @@ func RegisterCreateCmd(root *cobra.Command) {
 	createCmd.Flags().StringArrayVar(&createBlocking, "blocking", nil, "ID of bean this blocks (can be repeated)")
 	createCmd.Flags().StringArrayVar(&createBlockedBy, "blocked-by", nil, "ID of bean that blocks this one (can be repeated)")
 	createCmd.Flags().StringVar(&createPrefix, "prefix", "", "Custom ID prefix (overrides config prefix)")
+	createCmd.Flags().StringArrayVar(&createSet, "set", nil, "Set an extra front matter key as key=value (can be repeated)")
+	createCmd.Flags().StringArrayVar(&createUnset, "unset", nil, "Remove an extra front matter key (can be repeated)")
 	createCmd.Flags().BoolVar(&createJSON, "json", false, "Output as JSON")
 	createCmd.MarkFlagsMutuallyExclusive("body", "body-file")
 	root.AddCommand(createCmd)

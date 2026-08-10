@@ -34,6 +34,8 @@ var (
 	updateRemoveBlockedBy []string
 	updateTag             []string
 	updateRemoveTag       []string
+	updateSet             []string
+	updateUnset           []string
 	updateIfMatch         string
 	updateJSON            bool
 )
@@ -47,6 +49,10 @@ var updateCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		resolver := &beangraph.CoreResolver{Core: core}
+
+		if err := validateExtraKeys(updateSet, updateUnset); err != nil {
+			return cmdError(updateJSON, output.ErrValidation, "%s", err)
+		}
 
 		// Find the bean
 		b, err := resolver.Bean(ctx, args[0])
@@ -85,6 +91,12 @@ var updateCmd = &cobra.Command{
 		}
 		changes = append(changes, fieldChanges...)
 
+		// Extra front matter keys aren't part of buildUpdateInput's generated
+		// UpdateBeanInput, but they still count as a change.
+		if len(updateSet) > 0 || len(updateUnset) > 0 {
+			changes = append(changes, "extra")
+		}
+
 		// Add ifMatch to input if provided
 		if ifMatch != nil {
 			input.IfMatch = ifMatch
@@ -96,6 +108,19 @@ var updateCmd = &cobra.Command{
 			b, err = resolver.UpdateBean(ctx, b.ID, input)
 			if err != nil {
 				return mutationError(updateJSON, err)
+			}
+		}
+
+		// Extra front matter keys aren't part of the generated UpdateBeanInput
+		// type, so they're applied and persisted as a second write. b already
+		// reflects the current state (from the lookup above or the field-update
+		// call), so no ifMatch is needed here.
+		if len(updateSet) > 0 || len(updateUnset) > 0 {
+			if err := applyExtraOps(b, updateSet, updateUnset); err != nil {
+				return cmdError(updateJSON, output.ErrValidation, "%s", err)
+			}
+			if err := core.Update(b, nil); err != nil {
+				return cmdError(updateJSON, output.ErrFileError, "failed to set extra keys: %v", err)
 			}
 		}
 
@@ -291,6 +316,8 @@ func RegisterUpdateCmd(root *cobra.Command) {
 	updateCmd.Flags().StringArrayVar(&updateRemoveBlockedBy, "remove-blocked-by", nil, "ID of blocker bean to remove (can be repeated)")
 	updateCmd.Flags().StringArrayVar(&updateTag, "tag", nil, "Add tag (can be repeated)")
 	updateCmd.Flags().StringArrayVar(&updateRemoveTag, "remove-tag", nil, "Remove tag (can be repeated)")
+	updateCmd.Flags().StringArrayVar(&updateSet, "set", nil, "Set an extra front matter key as key=value (can be repeated)")
+	updateCmd.Flags().StringArrayVar(&updateUnset, "unset", nil, "Remove an extra front matter key (can be repeated)")
 	updateCmd.Flags().StringVar(&updateIfMatch, "if-match", "", "Only update if etag matches (optimistic locking)")
 	updateCmd.MarkFlagsMutuallyExclusive("parent", "remove-parent")
 	updateCmd.Flags().BoolVar(&updateJSON, "json", false, "Output as JSON")

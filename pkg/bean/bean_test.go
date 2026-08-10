@@ -1936,3 +1936,37 @@ func TestRenderPreservesExtraKeysAfterKnownFieldUpdate(t *testing.T) {
 		t.Errorf("Extra[custom_b] = %v, want %q", reparsed.Extra["custom_b"], "beta")
 	}
 }
+
+func TestReservedKeyFlag(t *testing.T) {
+	tests := []struct {
+		key       string
+		wantFlag  string
+		wantKnown bool
+	}{
+		{"title", "--title", true},
+		{"status", "--status", true},
+		{"type", "--type", true},
+		{"priority", "--priority", true},
+		{"tags", "--tag", true},
+		{"parent", "--parent", true},
+		{"blocking", "--blocking", true},
+		{"blocked_by", "--blocked-by", true},
+		{"created_at", "", true},
+		{"updated_at", "", true},
+		{"order", "", true},
+		{"release", "", false},
+		{"klasse", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.key, func(t *testing.T) {
+			flag, known := ReservedKeyFlag(tt.key)
+			if known != tt.wantKnown {
+				t.Errorf("ReservedKeyFlag(%q) known = %v, want %v", tt.key, known, tt.wantKnown)
+			}
+			if tt.wantKnown && tt.wantFlag != "" && flag != tt.wantFlag {
+				t.Errorf("ReservedKeyFlag(%q) flag = %q, want %q", tt.key, flag, tt.wantFlag)
+			}
+		})
+	}
+}
