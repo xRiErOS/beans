@@ -57,7 +57,7 @@ var milestonesCmd = &cobra.Command{
 
 		entries := make([]milestoneEntry, 0, len(milestones))
 		for _, m := range milestones {
-			completed, total := descendantProgress(m.ID, idx, cfg)
+			completed, total := descendantProgress(m.ID, idx)
 			entries = append(entries, milestoneEntry{Bean: m, Completed: completed, Total: total})
 		}
 

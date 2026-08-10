@@ -4,7 +4,6 @@ import (
 	"testing"
 
 	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
 )
 
 // TestBuildChildrenIndexEmptyTree verifies that an empty input yields an
@@ -90,8 +89,6 @@ func TestDescendantsEmptyTree(t *testing.T) {
 // complete convention: scrapped beans are excluded from both completed and
 // total, matching the plan's Global Constraints formula.
 func TestDescendantProgressCountsCompletedAndScrapped(t *testing.T) {
-	cfg := config.Default()
-
 	milestone := &bean.Bean{ID: "beans-m1"}
 	done := &bean.Bean{ID: "beans-t1", Parent: "beans-m1", Status: "completed"}
 	todo := &bean.Bean{ID: "beans-t2", Parent: "beans-m1", Status: "todo"}
@@ -100,7 +97,7 @@ func TestDescendantProgressCountsCompletedAndScrapped(t *testing.T) {
 
 	idx := buildChildrenIndex([]*bean.Bean{milestone, done, todo, inProgress, scrapped})
 
-	completed, total := descendantProgress("beans-m1", idx, cfg)
+	completed, total := descendantProgress("beans-m1", idx)
 	if completed != 1 {
 		t.Errorf("completed = %d, want 1", completed)
 	}
@@ -113,15 +110,13 @@ func TestDescendantProgressCountsCompletedAndScrapped(t *testing.T) {
 // a subtree that is entirely scrapped reports 0 completed of 0 total,
 // rather than a division artifact.
 func TestDescendantProgressAllScrappedIsZeroZero(t *testing.T) {
-	cfg := config.Default()
-
 	milestone := &bean.Bean{ID: "beans-m1"}
 	scrapped1 := &bean.Bean{ID: "beans-t1", Parent: "beans-m1", Status: "scrapped"}
 	scrapped2 := &bean.Bean{ID: "beans-t2", Parent: "beans-m1", Status: "scrapped"}
 
 	idx := buildChildrenIndex([]*bean.Bean{milestone, scrapped1, scrapped2})
 
-	completed, total := descendantProgress("beans-m1", idx, cfg)
+	completed, total := descendantProgress("beans-m1", idx)
 	if completed != 0 || total != 0 {
 		t.Errorf("descendantProgress() = (%d, %d), want (0, 0)", completed, total)
 	}
@@ -130,12 +125,10 @@ func TestDescendantProgressAllScrappedIsZeroZero(t *testing.T) {
 // TestDescendantProgressChildlessIsZeroZero verifies that a milestone with
 // no descendants at all also reports 0/0.
 func TestDescendantProgressChildlessIsZeroZero(t *testing.T) {
-	cfg := config.Default()
-
 	milestone := &bean.Bean{ID: "beans-m1"}
 	idx := buildChildrenIndex([]*bean.Bean{milestone})
 
-	completed, total := descendantProgress("beans-m1", idx, cfg)
+	completed, total := descendantProgress("beans-m1", idx)
 	if completed != 0 || total != 0 {
 		t.Errorf("descendantProgress() = (%d, %d), want (0, 0)", completed, total)
 	}

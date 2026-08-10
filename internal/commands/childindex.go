@@ -2,7 +2,6 @@ package commands
 
 import (
 	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
 )
 
 // buildChildrenIndex maps each bean ID to its direct children.
@@ -32,7 +31,7 @@ func descendants(id string, idx map[string][]*bean.Bean) []*bean.Bean {
 // descendantProgress returns (completed, total) descendants per the
 // project's percent-complete convention: scrapped beans are excluded
 // from both completed and total.
-func descendantProgress(id string, idx map[string][]*bean.Bean, cfg *config.Config) (completed, total int) {
+func descendantProgress(id string, idx map[string][]*bean.Bean) (completed, total int) {
 	for _, d := range descendants(id, idx) {
 		if d.Status == "scrapped" {
 			continue
