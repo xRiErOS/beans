@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
@@ -53,9 +54,27 @@ bean file being placed, never the neighbours around it.`,
 			return cmdError(orderJSON, output.ErrValidation, "%s", err)
 		}
 
+		// Capture the bean's actual on-disk etag before mutating it, and
+		// pass it as ifMatch instead of nil: nil bypasses optimistic
+		// concurrency control entirely -- silently ignored under a normal
+		// config, and under require_if_match:true it makes the write fail
+		// outright. b.ETag() is deliberately not used here: every `beans
+		// order` invocation is its own process, so b was just loaded via
+		// Core.Load, which defaults an empty Priority/Type in memory --
+		// fields an ordinary on-disk file (created without -p/-t) never
+		// contains. Render()-ing that defaulted bean would produce bytes
+		// core.Update's own on-disk check never sees, rejecting the write
+		// with a false mismatch on essentially every bean. Hashing the
+		// actual on-disk bytes matches what core.Update itself validates
+		// against.
+		content, err := os.ReadFile(core.FullPath(b))
+		if err != nil {
+			return cmdError(orderJSON, output.ErrFileError, "failed to read current bean state: %v", err)
+		}
+		etag := bean.ETagOf(content)
 		b.Order = newOrder
-		if err := core.Update(b, nil); err != nil {
-			return cmdError(orderJSON, output.ErrFileError, "failed to set order: %v", err)
+		if err := core.Update(b, &etag); err != nil {
+			return mutationError(orderJSON, err)
 		}
 
 		if orderJSON {
@@ -101,10 +120,7 @@ func computeOrderPlacement(resolver *beangraph.CoreResolver, ctx context.Context
 		return bean.OrderBetween("", siblings[0].Order), nil
 
 	case orderLast:
-		if len(siblings) == 0 {
-			return bean.OrderBetween("", ""), nil
-		}
-		return bean.OrderBetween(siblings[len(siblings)-1].Order, ""), nil
+		return bean.OrderBetween(lastOrderedSibling(siblings), ""), nil
 
 	case orderAfter != "":
 		return orderRelativeTo(resolver, ctx, b, siblings, orderAfter, true)
@@ -114,6 +130,24 @@ func computeOrderPlacement(resolver *beangraph.CoreResolver, ctx context.Context
 	}
 
 	return "", fmt.Errorf("one of --after, --before, --first, or --last is required")
+}
+
+// lastOrderedSibling returns the Order of the last sibling (in siblings'
+// SortByOrder order) that actually carries one, or "" if none do.
+// SortByOrder sorts Order-having siblings before Order-less ones, so
+// siblings[len(siblings)-1] is only a safe stand-in for "the sibling with
+// the greatest Order" when every sibling happens to have one -- on a store
+// where some don't (the normal starting state, since nothing wrote Order
+// before this feature existed), it silently picks an Order-less sibling and
+// yields "" as if there were no ordered siblings at all yet, which is wrong
+// once at least one actually has an Order.
+func lastOrderedSibling(siblings []*bean.Bean) string {
+	for i := len(siblings) - 1; i >= 0; i-- {
+		if siblings[i].Order != "" {
+			return siblings[i].Order
+		}
+	}
+	return ""
 }
 
 // orderRelativeTo resolves --after/--before: it looks up the named sibling,
@@ -133,6 +167,9 @@ func orderRelativeTo(resolver *beangraph.CoreResolver, ctx context.Context, b *b
 	}
 	if ref.Parent != b.Parent {
 		return "", fmt.Errorf("order is scoped per parent: %s has a different parent than %s", ref.ID, b.ID)
+	}
+	if ref.Order == "" {
+		return "", fmt.Errorf("bean %s has no explicit order yet; place it first (e.g. `beans order %s --last`) before placing another bean relative to it", ref.ID, ref.ID)
 	}
 
 	idx := -1

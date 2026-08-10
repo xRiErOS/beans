@@ -307,6 +307,224 @@ func TestOrderCmdRequiresAPlacementFlag(t *testing.T) {
 	}
 }
 
+// setupOrderTestUnordered is setupOrderTest, but the children carry no Order
+// at all — the state every real store starts in, since nothing before this
+// epic ever wrote to Bean.Order. setupOrderTest's fixture (every child
+// pre-seeded with a letter) can't see B01: SortByOrder always puts
+// Order-having siblings first, so picking siblings[0]/siblings[len-1]
+// happens to be correct whenever every sibling already has an Order.
+func setupOrderTestUnordered(t *testing.T, n int) (parent *bean.Bean, children []*bean.Bean) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	testCfg := config.Default()
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	parent = &bean.Bean{
+		ID:     "beans-parent",
+		Slug:   bean.Slugify("Parent"),
+		Title:  "Parent",
+		Status: "todo",
+		Type:   "epic",
+	}
+	if err := core.Create(parent); err != nil {
+		t.Fatalf("core.Create(parent) error = %v", err)
+	}
+
+	letters := "abcdefghij"
+	for i := 0; i < n; i++ {
+		c := &bean.Bean{
+			ID:     "beans-child" + string(letters[i]),
+			Slug:   bean.Slugify("Child " + string(letters[i])),
+			Title:  "Child " + string(letters[i]),
+			Status: "todo",
+			Type:   "task",
+			Parent: parent.ID,
+		}
+		if err := core.Create(c); err != nil {
+			t.Fatalf("core.Create(child) error = %v", err)
+		}
+		children = append(children, c)
+	}
+
+	return parent, children
+}
+
+// B01 regression: on a fresh store where no sibling has an Order yet (the
+// normal starting state), --last used to read siblings[len(siblings)-1].Order
+// — always "" here, since SortByOrder sorts Order-less beans to the end by
+// title, not to the front — so every --last call computed
+// OrderBetween("", "") and got the same constant "V" back, regardless of how
+// many beans had already been placed last.
+func TestOrderCmdLastOnUnorderedSiblingsProducesDistinctKeys(t *testing.T) {
+	_, children := setupOrderTestUnordered(t, 3)
+	resetOrderFlags(t)
+
+	orderLast = true
+	if err := orderCmd.RunE(orderCmd, []string{children[0].ID}); err != nil {
+		t.Fatalf("orderCmd.RunE() (1st --last) error = %v", err)
+	}
+	first, err := core.Get(children[0].ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+
+	resetOrderFlags(t)
+	orderLast = true
+	if err := orderCmd.RunE(orderCmd, []string{children[1].ID}); err != nil {
+		t.Fatalf("orderCmd.RunE() (2nd --last) error = %v", err)
+	}
+	second, err := core.Get(children[1].ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+
+	if first.Order == second.Order {
+		t.Fatalf("both --last calls produced the same Order %q — second bean did not sort after the first", first.Order)
+	}
+	if !(second.Order > first.Order) {
+		t.Errorf("second.Order = %q, want strictly after first.Order = %q", second.Order, first.Order)
+	}
+}
+
+// B01 regression: --after/--before naming a reference sibling that has no
+// Order itself used to compute OrderBetween(ref.Order="", next="") = "V"
+// unconditionally, ignoring the reference entirely — "aaa --after ddd" could
+// place aaa before ddd instead of after it. Placing relative to an unordered
+// reference should fail clearly instead of silently producing a wrong key.
+func TestOrderCmdAfterUnorderedRefFails(t *testing.T) {
+	_, children := setupOrderTestUnordered(t, 2)
+	resetOrderFlags(t)
+
+	orderAfter = children[0].ID
+
+	err := orderCmd.RunE(orderCmd, []string{children[1].ID})
+	if err == nil {
+		t.Fatal("expected error placing relative to a sibling with no explicit order")
+	}
+	if !contains(err.Error(), "no explicit order") {
+		t.Errorf("expected error to mention the missing order, got %q", err.Error())
+	}
+
+	got, err := core.Get(children[1].ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+	if got.Order != "" {
+		t.Errorf("expected moved bean's Order to be unchanged (empty), got %q", got.Order)
+	}
+}
+
+// B02 regression: order.go's core.Update(b, nil) bypassed ETag concurrency
+// control the same way create.go's did before its own B01 fix — under
+// require_if_match:true this makes `beans order` fail outright on every
+// call, since nil never satisfies a required if-match.
+func TestOrderCmdSucceedsUnderRequireIfMatch(t *testing.T) {
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+	testCfg := config.Default()
+	testCfg.Beans.RequireIfMatch = true
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	parent := &bean.Bean{ID: "beans-parent", Slug: bean.Slugify("Parent"), Title: "Parent", Status: "todo", Type: "epic"}
+	if err := core.Create(parent); err != nil {
+		t.Fatalf("core.Create(parent) error = %v", err)
+	}
+	a := &bean.Bean{ID: "beans-childA", Slug: bean.Slugify("Child A"), Title: "Child A", Status: "todo", Type: "task", Parent: parent.ID, Order: "A"}
+	if err := core.Create(a); err != nil {
+		t.Fatalf("core.Create(a) error = %v", err)
+	}
+	b := &bean.Bean{ID: "beans-childB", Slug: bean.Slugify("Child B"), Title: "Child B", Status: "todo", Type: "task", Parent: parent.ID}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create(b) error = %v", err)
+	}
+
+	resetOrderFlags(t)
+	orderLast = true
+
+	if err := orderCmd.RunE(orderCmd, []string{b.ID}); err != nil {
+		t.Fatalf("orderCmd.RunE() error = %v (order should succeed under require_if_match:true, not fail on a nil ifMatch)", err)
+	}
+}
+
+// B05 regression: every real `beans order` invocation is its own OS process,
+// so the bean it operates on was loaded fresh via Core.Load() -- which
+// defaults empty Priority to "normal" and empty Type to "task" in memory
+// (core.go: "Apply defaults for GraphQL non-nullable fields"). A bean
+// created without -p/-t (the common case) has neither field on disk, so
+// Render()-ing the freshly loaded, now-defaulted bean produces bytes that
+// differ from the file Core.Update reads and hashes for its own etag check.
+// Using bean.ETag() as the auto-captured ifMatch (mirroring create.go's
+// pattern) therefore makes `beans order` fail with a false etag mismatch on
+// essentially every ordinary bean. setupOrderTest/setupOrderTestUnordered
+// can't see this: they create beans and operate on them in the same process
+// with the same Core, so the in-memory bean IS the exact object Render()
+// already wrote to disk -- no reload, no defaulting, no discrepancy.
+func TestOrderCmdSucceedsOnBeanLoadedFreshFromDisk(t *testing.T) {
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+	testCfg := config.Default()
+
+	// First "process": write parent + two children with no priority/type
+	// set, exactly as `beans create` without -p/-t leaves them.
+	writerCore := beancore.New(beansDir, testCfg)
+	if err := writerCore.Load(); err != nil {
+		t.Fatalf("failed to load writer core: %v", err)
+	}
+	parent := &bean.Bean{ID: "beans-parent", Slug: bean.Slugify("Parent"), Title: "Parent", Status: "todo", Type: "epic"}
+	if err := writerCore.Create(parent); err != nil {
+		t.Fatalf("core.Create(parent) error = %v", err)
+	}
+	a := &bean.Bean{ID: "beans-childA", Slug: bean.Slugify("Child A"), Title: "Child A", Status: "todo", Parent: parent.ID}
+	if err := writerCore.Create(a); err != nil {
+		t.Fatalf("core.Create(a) error = %v", err)
+	}
+	c2 := &bean.Bean{ID: "beans-childB", Slug: bean.Slugify("Child B"), Title: "Child B", Status: "todo", Parent: parent.ID}
+	if err := writerCore.Create(c2); err != nil {
+		t.Fatalf("core.Create(c2) error = %v", err)
+	}
+
+	// Second "process": a fresh Core reloads the same directory from disk --
+	// what every real `beans order` invocation does.
+	freshCore := beancore.New(beansDir, testCfg)
+	if err := freshCore.Load(); err != nil {
+		t.Fatalf("failed to load fresh core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = freshCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	resetOrderFlags(t)
+	orderLast = true
+	if err := orderCmd.RunE(orderCmd, []string{a.ID}); err != nil {
+		t.Fatalf("orderCmd.RunE() error = %v (order should succeed on a freshly loaded bean, not report a false etag mismatch)", err)
+	}
+}
+
 type nopWriter struct{}
 
 func (nopWriter) Write(p []byte) (int, error) { return len(p), nil }
