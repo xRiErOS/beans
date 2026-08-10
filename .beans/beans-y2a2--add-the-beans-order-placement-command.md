@@ -1,11 +1,11 @@
 ---
 # beans-y2a2
 title: Add the beans order placement command
-status: todo
+status: in-progress
 type: task
 priority: normal
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T10:05:30Z
+updated_at: 2026-08-10T10:51:47Z
 parent: beans-zb0r
 blocked_by:
     - beans-nda7
