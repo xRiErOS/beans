@@ -14,6 +14,7 @@ export type Scalars = {
   Boolean: { input: boolean; output: boolean; }
   Int: { input: number; output: number; }
   Float: { input: number; output: number; }
+  Map: { input: any; output: any; }
   Time: { input: string; output: string; }
 };
 
@@ -144,6 +145,8 @@ export type Bean = {
   createdAt: Scalars['Time']['output'];
   /** Content hash for optimistic concurrency control */
   etag: Scalars['String']['output'];
+  /** Custom front matter keys not covered by the known schema (null if none) */
+  extra?: Maybe<Scalars['Map']['output']>;
   /** Unique identifier (NanoID) */
   id: Scalars['ID']['output'];
   /** Terminal status (scrapped or completed) inherited from the nearest terminal ancestor, if any */

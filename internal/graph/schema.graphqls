@@ -1,6 +1,7 @@
 # Beans GraphQL Schema
 
 scalar Time
+scalar Map
 
 type Query {
   """
@@ -474,6 +475,8 @@ type Bean {
   body: String!
   "Fractional index for manual ordering within status groups"
   order: String!
+  "Custom front matter keys not covered by the known schema (null if none)"
+  extra: Map
   "Content hash for optimistic concurrency control"
   etag: String!
   "Whether this bean has unsaved runtime changes (not yet persisted to disk)"

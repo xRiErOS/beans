@@ -25,6 +25,9 @@ models:
   # Use existing Bean type from bean package
   Bean:
     model: github.com/hmans/beans/pkg/bean.Bean
+  # Map the custom Map scalar to gqlgen's built-in map type
+  Map:
+    model: github.com/99designs/gqlgen/graphql.Map
   # Map ID scalar to string
   ID:
     model:

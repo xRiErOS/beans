@@ -114,6 +114,7 @@ type ComplexityRoot struct {
 		Children           func(childComplexity int, filter *model.BeanFilter) int
 		CreatedAt          func(childComplexity int) int
 		ETag               func(childComplexity int) int
+		Extra              func(childComplexity int) int
 		ID                 func(childComplexity int) int
 		ImplicitStatus     func(childComplexity int) int
 		ImplicitStatusFrom func(childComplexity int) int
@@ -621,6 +622,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.complexity.Bean.ETag(childComplexity), true
+	case "Bean.extra":
+		if e.complexity.Bean.Extra == nil {
+			break
+		}
+
+		return e.complexity.Bean.Extra(childComplexity), true
 	case "Bean.id":
 		if e.complexity.Bean.ID == nil {
 			break
@@ -3654,6 +3661,35 @@ func (ec *executionContext) fieldContext_Bean_order(_ context.Context, field gra
 	return fc, nil
 }
 
+func (ec *executionContext) _Bean_extra(ctx context.Context, field graphql.CollectedField, obj *bean.Bean) (ret graphql.Marshaler) {
+	return graphql.ResolveField(
+		ctx,
+		ec.OperationContext,
+		field,
+		ec.fieldContext_Bean_extra,
+		func(ctx context.Context) (any, error) {
+			return obj.Extra, nil
+		},
+		nil,
+		ec.marshalOMap2map,
+		true,
+		false,
+	)
+}
+
+func (ec *executionContext) fieldContext_Bean_extra(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Bean",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type Map does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Bean_etag(ctx context.Context, field graphql.CollectedField, obj *bean.Bean) (ret graphql.Marshaler) {
 	return graphql.ResolveField(
 		ctx,
@@ -3877,6 +3913,8 @@ func (ec *executionContext) fieldContext_Bean_blockedBy(ctx context.Context, fie
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -3968,6 +4006,8 @@ func (ec *executionContext) fieldContext_Bean_blocking(ctx context.Context, fiel
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4058,6 +4098,8 @@ func (ec *executionContext) fieldContext_Bean_parent(_ context.Context, field gr
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4138,6 +4180,8 @@ func (ec *executionContext) fieldContext_Bean_children(ctx context.Context, fiel
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4315,6 +4359,8 @@ func (ec *executionContext) fieldContext_BeanChangeEvent_bean(_ context.Context,
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4394,6 +4440,8 @@ func (ec *executionContext) fieldContext_BeanChangeEvent_beans(_ context.Context
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4735,6 +4783,8 @@ func (ec *executionContext) fieldContext_Mutation_createBean(ctx context.Context
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4826,6 +4876,8 @@ func (ec *executionContext) fieldContext_Mutation_updateBean(ctx context.Context
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -4958,6 +5010,8 @@ func (ec *executionContext) fieldContext_Mutation_setParent(ctx context.Context,
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -5049,6 +5103,8 @@ func (ec *executionContext) fieldContext_Mutation_addBlocking(ctx context.Contex
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -5140,6 +5196,8 @@ func (ec *executionContext) fieldContext_Mutation_removeBlocking(ctx context.Con
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -5231,6 +5289,8 @@ func (ec *executionContext) fieldContext_Mutation_addBlockedBy(ctx context.Conte
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -5322,6 +5382,8 @@ func (ec *executionContext) fieldContext_Mutation_removeBlockedBy(ctx context.Co
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -6496,6 +6558,8 @@ func (ec *executionContext) fieldContext_Query_bean(ctx context.Context, field g
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -6587,6 +6651,8 @@ func (ec *executionContext) fieldContext_Query_beans(ctx context.Context, field 
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -8126,6 +8192,8 @@ func (ec *executionContext) fieldContext_Worktree_beans(_ context.Context, field
 				return ec.fieldContext_Bean_body(ctx, field)
 			case "order":
 				return ec.fieldContext_Bean_order(ctx, field)
+			case "extra":
+				return ec.fieldContext_Bean_extra(ctx, field)
 			case "etag":
 				return ec.fieldContext_Bean_etag(ctx, field)
 			case "isDirty":
@@ -10804,6 +10872,8 @@ func (ec *executionContext) _Bean(ctx context.Context, sel ast.SelectionSet, obj
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "extra":
+			out.Values[i] = ec._Bean_extra(ctx, field, obj)
 		case "etag":
 			out.Values[i] = ec._Bean_etag(ctx, field, obj)
 			if out.Values[i] == graphql.Null {
@@ -14089,6 +14159,24 @@ func (ec *executionContext) marshalOInt2ᚖint(ctx context.Context, sel ast.Sele
 	_ = sel
 	_ = ctx
 	res := graphql.MarshalInt(*v)
+	return res
+}
+
+func (ec *executionContext) unmarshalOMap2map(ctx context.Context, v any) (map[string]any, error) {
+	if v == nil {
+		return nil, nil
+	}
+	res, err := graphql.UnmarshalMap(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOMap2map(ctx context.Context, sel ast.SelectionSet, v map[string]any) graphql.Marshaler {
+	if v == nil {
+		return graphql.Null
+	}
+	_ = sel
+	_ = ctx
+	res := graphql.MarshalMap(v)
 	return res
 }
 

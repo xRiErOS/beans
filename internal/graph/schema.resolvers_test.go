@@ -3252,3 +3252,62 @@ func TestListFiles(t *testing.T) {
 	})
 }
 
+func TestQueryBeanExtra(t *testing.T) {
+	resolver, core := setupTestResolver(t)
+	ctx := context.Background()
+
+	b := &bean.Bean{
+		ID:     "extra-test",
+		Title:  "Bean With Extra",
+		Status: "todo",
+		Extra:  map[string]any{"release": "0-4-1"},
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("failed to create test bean: %v", err)
+	}
+
+	qr := resolver.Query()
+	got, err := qr.Bean(ctx, "extra-test")
+	if err != nil {
+		t.Fatalf("Bean() error = %v", err)
+	}
+	if got == nil {
+		t.Fatal("Bean() returned nil")
+	}
+	if got.Extra["release"] != "0-4-1" {
+		t.Errorf("Bean().Extra[release] = %v, want %q", got.Extra["release"], "0-4-1")
+	}
+}
+
+func TestMutationUpdateBeanPreservesExtra(t *testing.T) {
+	resolver, core := setupTestResolver(t)
+	ctx := context.Background()
+
+	b := &bean.Bean{
+		ID:       "extra-update-test",
+		Title:    "Original Title",
+		Status:   "todo",
+		Priority: "normal",
+		Extra:    map[string]any{"release": "0-4-1"},
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("failed to create test bean: %v", err)
+	}
+
+	mr := resolver.Mutation()
+	newPriority := "high"
+	input := model.UpdateBeanInput{
+		Priority: &newPriority,
+	}
+	got, err := mr.UpdateBean(ctx, "extra-update-test", input)
+	if err != nil {
+		t.Fatalf("UpdateBean() error = %v", err)
+	}
+	if got.Priority != "high" {
+		t.Errorf("UpdateBean().Priority = %q, want %q", got.Priority, "high")
+	}
+	if got.Extra["release"] != "0-4-1" {
+		t.Errorf("UpdateBean().Extra[release] = %v, want %q (extra keys must survive a mutation of unrelated fields)", got.Extra["release"], "0-4-1")
+	}
+}
+
