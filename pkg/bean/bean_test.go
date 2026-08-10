@@ -518,6 +518,51 @@ func TestBeanJSONSerialization(t *testing.T) {
 			t.Errorf("JSON should contain 'body' field with content, got: %s", jsonStr)
 		}
 	})
+
+	t.Run("extra omitted when empty", func(t *testing.T) {
+		bean := &Bean{
+			ID:     "test-123",
+			Title:  "Test Bean",
+			Status: "todo",
+		}
+
+		data, err := json.Marshal(bean)
+		if err != nil {
+			t.Fatalf("failed to marshal: %v", err)
+		}
+
+		jsonStr := string(data)
+		if strings.Contains(jsonStr, `"extra"`) {
+			t.Errorf("JSON should not contain 'extra' field when empty, got: %s", jsonStr)
+		}
+	})
+
+	t.Run("extra included when non-empty", func(t *testing.T) {
+		bean := &Bean{
+			ID:     "test-123",
+			Title:  "Test Bean",
+			Status: "todo",
+			Extra:  map[string]any{"release": "0-4-1"},
+		}
+
+		data, err := json.Marshal(bean)
+		if err != nil {
+			t.Fatalf("failed to marshal: %v", err)
+		}
+
+		var result map[string]interface{}
+		if err := json.Unmarshal(data, &result); err != nil {
+			t.Fatalf("failed to unmarshal: %v", err)
+		}
+
+		extra, ok := result["extra"].(map[string]interface{})
+		if !ok {
+			t.Fatalf("JSON should contain object 'extra' field, got: %s", data)
+		}
+		if extra["release"] != "0-4-1" {
+			t.Errorf("extra.release = %v, want %q", extra["release"], "0-4-1")
+		}
+	})
 }
 
 func TestParseWithParentAndBlocking(t *testing.T) {
