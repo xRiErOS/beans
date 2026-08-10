@@ -1,11 +1,11 @@
 ---
 # beans-gkgc
 title: Allow attaching images to chat messages
-status: todo
+status: scrapped
 type: feature
 priority: normal
 created_at: 2026-03-09T17:12:08Z
-updated_at: 2026-03-09T17:35:58Z
+updated_at: 2026-08-10T11:31:47Z
 order: z
 ---
 

@@ -1,11 +1,11 @@
 ---
 # beans-lok4
 title: 'T09 rename: renameBean GraphQL mutation (optional)'
-status: todo
+status: scrapped
 type: task
 priority: deferred
 created_at: 2026-07-24T10:10:14Z
-updated_at: 2026-07-24T10:12:08Z
+updated_at: 2026-08-10T11:29:44Z
 parent: beans-e040
 blocked_by:
     - beans-z1we

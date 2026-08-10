@@ -1,11 +1,11 @@
 ---
 # beans-ntus
 title: Archive button on completed beans
-status: todo
+status: scrapped
 type: feature
 priority: normal
 created_at: 2026-03-09T17:10:53Z
-updated_at: 2026-03-09T17:35:58Z
+updated_at: 2026-08-10T11:31:48Z
 order: zV
 ---
 

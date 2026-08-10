@@ -12,6 +12,14 @@ order: V
 Improvements identified during comprehensive code review of both backend and frontend.
 
 
-## Summary of Changes
+## Identified Improvements
 
-- Added AskUserQuestion tool instructions to both central and workspace agent system prompts, ensuring agents use the structured question UI instead of plain text questions.
+- Avoid disk I/O while holding write lock in Core.Update() (beans-rren)
+- Replace findMainBeanFile directory scan with in-memory lookup (beans-fydu)
+- Build incoming link index to replace O(n) FindIncomingLinks scan (beans-omee)
+- Consolidate duplicate ETag error types (beans-541b)
+- Improve subscription backpressure handling (beans-r7oc)
+- Improve test coverage for agent manager and GraphQL subscriptions (beans-7u0s)
+- Fix suppressed a11y warnings in frontend components (beans-4mua)
+- Extract duplicate GraphQL mutation definitions to shared modules (beans-1edn)
+- Fix navigator.platform access at module scope in FilterInput (beans-p2pw)

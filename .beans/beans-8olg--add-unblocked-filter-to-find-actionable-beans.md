@@ -2,14 +2,15 @@
 # beans-8olg
 title: Add --unblocked filter to find actionable beans
 status: draft
-type: feature
+type: task
 priority: normal
 tags:
     - cli
     - filtering
 created_at: 2025-12-07T11:29:37Z
-updated_at: 2026-03-10T08:10:33Z
+updated_at: 2026-08-10T11:31:48Z
 order: V
+parent: beans-oyic
 ---
 
 

@@ -1,13 +1,13 @@
 ---
 # beans-e040
 title: beans rename command
-status: todo
+status: scrapped
 type: epic
 priority: normal
 tags:
     - accepted
 created_at: 2026-07-24T10:09:33Z
-updated_at: 2026-07-24T13:21:02Z
+updated_at: 2026-08-10T11:29:44Z
 ---
 
 Slug-, Einzel-ID- und Prefix-Rebrand-Rename fuer beans (heute unmoeglich). Direct-Core-Architektur, 10 TDD-Tasks. Plan: docs/beans-rename-command/PLAN.md (ce-plan-reviewer GRUEN R3, PO-accepted).
