@@ -56,7 +56,7 @@ var progressCmd = &cobra.Command{
 				return cmdError(progressJSON, output.ErrNotFound, "bean not found: %s", progressParent)
 			}
 			idx := buildChildrenIndex(allBeans)
-			scope = descendants(progressParent, idx)
+			scope = descendants(parent.ID, idx)
 		}
 
 		statusNames := cfg.StatusNames()

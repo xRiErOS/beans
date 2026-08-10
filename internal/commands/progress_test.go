@@ -176,6 +176,65 @@ func TestProgressParentFlagScopesToDescendants(t *testing.T) {
 	}
 }
 
+// TestProgressParentFlagScopesToDescendantsWithPrefix is a regression test
+// for a bug where --parent passed the raw (possibly short) flag value into
+// descendants() instead of the resolved bean's full ID. buildChildrenIndex
+// keys its map by full bean IDs (b.Parent is always a full ID), so looking
+// up a short ID there missed and silently produced 0/0 -- with no error.
+// setupProgressTest uses config.Default(), whose prefix is "" (short IDs ==
+// full IDs there), so that helper alone can't catch this; this test installs
+// a config with a real prefix and resolves a short --parent ID against it.
+func TestProgressParentFlagScopesToDescendantsWithPrefix(t *testing.T) {
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	testCfg := config.DefaultWithPrefix("beans-")
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	resetProgressFlags(t)
+
+	milestone := &bean.Bean{ID: "beans-mile1", Slug: bean.Slugify("Milestone"), Title: "Milestone", Status: "todo", Type: "milestone"}
+	inScope := &bean.Bean{ID: "beans-task1", Slug: bean.Slugify("In scope"), Title: "In scope", Status: "completed", Type: "task", Parent: "beans-mile1"}
+	outOfScope := &bean.Bean{ID: "beans-task2", Slug: bean.Slugify("Out of scope"), Title: "Out of scope", Status: "completed", Type: "task"}
+	for _, b := range []*bean.Bean{milestone, inScope, outOfScope} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	// "mile1" is a short ID that requires prefix-normalization ("beans-"
+	// prepended) to resolve to the full "beans-mile1" bean ID.
+	progressParent = "mile1"
+	progressJSON = true
+
+	out := captureProgressStdout(t, func() {
+		if err := progressCmd.RunE(progressCmd, nil); err != nil {
+			t.Fatalf("progressCmd.RunE() error = %v", err)
+		}
+	})
+
+	var result progressResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+	}
+	if result.Total != 1 {
+		t.Errorf("expected total=1 (scoped to descendants via short --parent ID), got %d", result.Total)
+	}
+	if result.Completed != 1 {
+		t.Errorf("expected completed=1, got %d", result.Completed)
+	}
+}
+
 // TestProgressParentFlagErrorsOnUnknownID verifies that --parent with an
 // ID that does not resolve to any bean returns an error instead of
 // silently reporting 0/0 progress (resolver.Bean returns (nil, nil) for
