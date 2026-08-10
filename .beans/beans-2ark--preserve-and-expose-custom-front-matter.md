@@ -7,7 +7,7 @@ priority: high
 tags:
     - to-review
 created_at: 2026-08-10T10:05:30Z
-updated_at: 2026-08-10T11:16:59Z
+updated_at: 2026-08-10T11:51:22Z
 parent: beans-xej5
 ---
 
@@ -47,3 +47,13 @@ Non-blocking findings deferred per the reviewer's own verdict (not re-litigated 
 `go build ./...` clean, `go test ./...` all green at HEAD (46b113a).
 
 Still to-review — ready for the PO now.
+
+## Review 2026-08-10
+
+US-01 · Custom front matter keys survive a `beans update` round-trip instead of being silently dropped · a
+US-02 · `beans create/update --set/--unset` lets you write and remove custom front matter keys from the CLI, reserved keys rejected with the native flag named · a
+
+US-03 · \`list\`/\`show --json\` expose custom front matter keys under an \`extra\` field, omitted when empty · a
+US-04 · GraphQL exposes \`extra\` on query and preserves it across mutations (API-only, no frontend UI yet) · a
+US-05 · \`beans list --where key=value\` filters on custom front matter keys · a
+US-06 · \`beans version --json\` reports the custom-front-matter capability · a
