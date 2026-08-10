@@ -5,7 +5,7 @@ status: todo
 type: epic
 priority: normal
 created_at: 2025-12-27T21:43:38Z
-updated_at: 2026-08-10T10:05:30Z
+updated_at: 2026-08-10T12:40:58Z
 order: w
 parent: beans-xej5
 ---
@@ -26,3 +26,13 @@ Currently, users need to use `beans update <id> -s completed` to complete a bean
 - `beans milestones` - List planned milestones
 - `beans blocked` - Show blocked beans
 - `beans progress` - Show work progress summary
+
+
+## Scope Update (2026-08-10)
+
+Two tasks added to close the loop from command to documentation to shipped
+binary: `beans-9m5y` (rewrite `beans prime` to reference the new commands
+authoritatively instead of derived list/update incantations) and
+`beans-omoy` (cut the release). Both are blocked by all six command tasks;
+the prime task additionally blocks the release task, so the sequence is
+commands -> prime docs -> release.
