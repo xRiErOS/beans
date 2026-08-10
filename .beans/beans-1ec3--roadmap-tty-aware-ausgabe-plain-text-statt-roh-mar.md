@@ -7,7 +7,7 @@ priority: normal
 tags:
     - to-review
 created_at: 2026-07-23T20:26:08Z
-updated_at: 2026-07-23T22:32:11Z
+updated_at: 2026-08-10T12:20:41Z
 ---
 
 `beans roadmap` ist ein Markdown-Artefakt-Generator für GitHub/Files: shields.io-Image-Badges
@@ -223,3 +223,11 @@ komplett gruener Suite.
   `CLAUDE.md`, das ist eine Upstream-Datei und vergroessert das Fork-Delta.
 - **Aufgeraeumt:** stale git-worktree `beans-src-worktrees/fix-ti53` entfernt (clean, Branch
   vollstaendig in main, keine unique Commits; der Branch selbst bleibt bestehen).
+
+## Nachtrag 2026-08-10 (PO-Review, tmux-Live-Test)
+
+Auf PO-Anweisung per tmux-PTY live getestet (`tmux new-session -x 80 -y 50`, `send-keys "beans roadmap"`, `capture-pane -S -200`): Pretty-Tree schaltet unter echtem TTY korrekt an, vier Ebenen sichtbar, `▸`×5/`■`×1 einzeln zählbar (Python-Rune-Zählung, nicht `awk` — D22), alle Zeilen exakt ≤80 Zeichen, kein Umbruch. Gepiped bleibt weiterhin rohes Markdown mit Badges/Links (US-11 bestätigt).
+
+R01 bleibt nicht vollständig geschlossen: tmux hat eine eigene Ambiguous-Width-Einstellung, die vom tatsächlichen Terminal-Emulator abweichen kann — starke, aber keine abschließende Evidenz für Eriks reales Terminal.
+
+Wissen vermerkt: dev-wiki/tui-architecture-design/tmux-tui-harness (Knowledge-Catalogue) um die Ein-Schuss-CLI-isatty-Variante ergänzt.
