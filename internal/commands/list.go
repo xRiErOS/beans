@@ -111,11 +111,7 @@ Search Syntax (--search/-S):
 		// --ready: beans available to start (not blocked, excludes in-progress/completed/scrapped/draft,
 		// and excludes beans with implicit terminal status from a scrapped/completed ancestor)
 		if listReady {
-			isBlocked := false
-			excludeImplicitTerminal := true
-			filter.IsBlocked = &isBlocked
-			filter.ExcludeStatus = append(filter.ExcludeStatus, "in-progress", "completed", "scrapped", "draft")
-			filter.ExcludeImplicitTerminal = &excludeImplicitTerminal
+			applyReadyFilter(filter)
 		}
 
 		// Execute query via core resolver
@@ -205,6 +201,20 @@ Search Syntax (--search/-S):
 		fmt.Print(ui.RenderTree(tree, cfg, maxIDWidth, hasTags, termWidth))
 		return nil
 	},
+}
+
+// applyReadyFilter mutates filter in place to express "--ready": not
+// blocked, excludes in-progress/completed/scrapped/draft, and excludes
+// beans with implicit terminal status from a scrapped/completed ancestor.
+// It mutates an already partially-built *model.BeanFilter (e.g. one that
+// already carries --type/--status flags) rather than constructing a fresh
+// one, so callers keep whatever filters they set beforehand.
+func applyReadyFilter(filter *model.BeanFilter) {
+	isBlocked := false
+	excludeImplicitTerminal := true
+	filter.IsBlocked = &isBlocked
+	filter.ExcludeStatus = append(filter.ExcludeStatus, "in-progress", "completed", "scrapped", "draft")
+	filter.ExcludeImplicitTerminal = &excludeImplicitTerminal
 }
 
 func sortBeans(beans []*bean.Bean, sortBy string, cfg *config.Config) {

@@ -364,6 +364,91 @@ func TestListCmdWhereEndToEnd(t *testing.T) {
 	}
 }
 
+// TestListCmdReadyEndToEnd is a regression test for the applyReadyFilter
+// extraction (Task 4): `list --ready` must still exclude blocked/terminal
+// beans AND continue to combine with other flags already applied to the
+// same filter object (here --type), since applyReadyFilter mutates the
+// filter list.go already built rather than constructing a separate one.
+func TestListCmdReadyEndToEnd(t *testing.T) {
+	setupListTest(t)
+
+	oldJSON, oldFull, oldReady, oldType := listJSON, listFull, listReady, listType
+	listJSON, listFull, listReady = true, false, true
+	t.Cleanup(func() { listJSON, listFull, listReady, listType = oldJSON, oldFull, oldReady, oldType })
+
+	readyTask := &bean.Bean{
+		ID:     "beans-rdy1",
+		Slug:   bean.Slugify("ready task"),
+		Title:  "ready task",
+		Status: "todo",
+		Type:   "task",
+	}
+	readyEpic := &bean.Bean{
+		ID:     "beans-rdy2",
+		Slug:   bean.Slugify("ready epic"),
+		Title:  "ready epic",
+		Status: "todo",
+		Type:   "epic",
+	}
+	blockedTask := &bean.Bean{
+		ID:        "beans-rdy3",
+		Slug:      bean.Slugify("blocked task"),
+		Title:     "blocked task",
+		Status:    "todo",
+		Type:      "task",
+		BlockedBy: []string{readyTask.ID},
+	}
+	completedTask := &bean.Bean{
+		ID:     "beans-rdy4",
+		Slug:   bean.Slugify("completed task"),
+		Title:  "completed task",
+		Status: "completed",
+		Type:   "task",
+	}
+	for _, b := range []*bean.Bean{readyTask, readyEpic, blockedTask, completedTask} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	// --ready alone: excludes blocked and completed, keeps both types.
+	out := captureListStdout(t, func() {
+		if err := listCmd.RunE(listCmd, nil); err != nil {
+			t.Fatalf("listCmd.RunE() error = %v", err)
+		}
+	})
+	var got []*bean.Bean
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+	}
+	gotIDs := make(map[string]bool, len(got))
+	for _, b := range got {
+		gotIDs[b.ID] = true
+	}
+	if !gotIDs[readyTask.ID] || !gotIDs[readyEpic.ID] {
+		t.Errorf("expected both ready beans in result, got IDs = %v", gotIDs)
+	}
+	if gotIDs[blockedTask.ID] || gotIDs[completedTask.ID] {
+		t.Errorf("expected blocked/completed beans excluded, got IDs = %v", gotIDs)
+	}
+
+	// --ready combined with --type task: must still apply --ready's
+	// exclusions AND the --type filter on the same filter object.
+	listType = []string{"task"}
+	out = captureListStdout(t, func() {
+		if err := listCmd.RunE(listCmd, nil); err != nil {
+			t.Fatalf("listCmd.RunE() error = %v", err)
+		}
+	})
+	got = nil
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+	}
+	if len(got) != 1 || got[0].ID != readyTask.ID {
+		t.Fatalf("expected only [%s] for --ready --type task, got %v", readyTask.ID, got)
+	}
+}
+
 func TestTruncate(t *testing.T) {
 	tests := []struct {
 		name   string
