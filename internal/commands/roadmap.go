@@ -78,8 +78,9 @@ type featureGroup struct {
 }
 
 var roadmapCmd = &cobra.Command{
-	Use:   "roadmap",
+	Use:   "roadmap [id]",
 	Short: "Generate a Markdown roadmap from milestones and epics",
+	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Query all beans via GraphQL resolver
 		resolver := &beangraph.CoreResolver{Core: core}
@@ -89,7 +90,22 @@ var roadmapCmd = &cobra.Command{
 		}
 
 		// Build the roadmap
-		data := buildRoadmap(allBeans, roadmapIncludeDone, roadmapStatus, roadmapNoStatus)
+		var data *roadmapData
+		if len(args) == 1 {
+			if len(roadmapStatus) > 0 || len(roadmapNoStatus) > 0 {
+				return fmt.Errorf("--status/--no-status cannot be combined with a roadmap root ID")
+			}
+			root, err := core.Get(args[0])
+			if err != nil {
+				return fmt.Errorf("unknown bean: %s", args[0])
+			}
+			if err := validateRoadmapRootType(root); err != nil {
+				return err
+			}
+			data = buildScopedRoadmap(allBeans, roadmapIncludeDone, root)
+		} else {
+			data = buildRoadmap(allBeans, roadmapIncludeDone, roadmapStatus, roadmapNoStatus)
+		}
 
 		// JSON output
 		if roadmapJSON {
