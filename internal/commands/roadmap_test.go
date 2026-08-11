@@ -787,3 +787,178 @@ func TestRoadmapOutputZeroColsFallsBackTo80(t *testing.T) {
 		t.Errorf("separator width = %d, want 80 (roadmapClampWidth(0) floor, D08)", sepWidth)
 	}
 }
+
+func TestBuildScopedRoadmapMilestoneRoot(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	now := time.Now()
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now},
+		{ID: "e1", Type: "epic", Title: "Auth", Status: "todo", Parent: "m1"},
+		{ID: "t1", Type: "task", Title: "Login", Status: "todo", Parent: "e1"},
+		{ID: "m2", Type: "milestone", Title: "v2.0", Status: "todo", CreatedAt: &now},
+		{ID: "t2", Type: "task", Title: "Other milestone task", Status: "todo", Parent: "m2"},
+		{ID: "e3", Type: "epic", Title: "Unscheduled", Status: "todo"},
+	}
+
+	root := beans[0] // m1
+	result := buildScopedRoadmap(beans, false, root)
+
+	if len(result.Milestones) != 1 {
+		t.Fatalf("got %d milestones, want 1", len(result.Milestones))
+	}
+	if result.Milestones[0].Milestone.ID != "m1" {
+		t.Errorf("got milestone %s, want m1", result.Milestones[0].Milestone.ID)
+	}
+	if result.Unscheduled != nil {
+		t.Errorf("expected Unscheduled to be nil when scoped to a milestone, got %+v", result.Unscheduled)
+	}
+	if result.Root != nil {
+		t.Errorf("expected Root to be nil for milestone scope, got %+v", result.Root)
+	}
+}
+
+func TestBuildScopedRoadmapMilestoneRootWithNoVisibleChildren(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	now := time.Now()
+	root := &bean.Bean{ID: "m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now}
+	beans := []*bean.Bean{root}
+
+	result := buildScopedRoadmap(beans, false, root)
+
+	if len(result.Milestones) != 1 {
+		t.Fatalf("got %d milestones, want 1 (empty container still rendered)", len(result.Milestones))
+	}
+	if result.Milestones[0].Milestone.ID != "m1" {
+		t.Errorf("got milestone %s, want m1", result.Milestones[0].Milestone.ID)
+	}
+	if len(result.Milestones[0].Epics) != 0 || len(result.Milestones[0].Features) != 0 || len(result.Milestones[0].Other) != 0 {
+		t.Errorf("expected empty milestone group, got %+v", result.Milestones[0])
+	}
+}
+
+func TestBuildScopedRoadmapEpicRoot(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	root := &bean.Bean{ID: "e1", Type: "epic", Title: "Auth", Status: "todo"}
+	beans := []*bean.Bean{
+		root,
+		{ID: "t1", Type: "task", Title: "Login", Status: "todo", Parent: "e1"},
+		{ID: "f1", Type: "feature", Title: "SSO", Status: "todo", Parent: "e1"},
+		{ID: "t2", Type: "task", Title: "OIDC", Status: "todo", Parent: "f1"},
+		{ID: "m1", Type: "milestone", Title: "Other", Status: "todo"},
+	}
+
+	result := buildScopedRoadmap(beans, false, root)
+
+	if result.Root == nil || result.Root.Epic == nil {
+		t.Fatalf("expected Root.Epic to be set, got %+v", result.Root)
+	}
+	if result.Root.Epic.Epic.ID != "e1" {
+		t.Errorf("got epic %s, want e1", result.Root.Epic.Epic.ID)
+	}
+	if len(result.Root.Epic.Items) != 1 || result.Root.Epic.Items[0].ID != "t1" {
+		t.Errorf("Root.Epic.Items = %v, want [t1]", result.Root.Epic.Items)
+	}
+	if len(result.Root.Epic.Features) != 1 || result.Root.Epic.Features[0].Feature.ID != "f1" {
+		t.Fatalf("Root.Epic.Features = %+v, want feature f1", result.Root.Epic.Features)
+	}
+	if len(result.Milestones) != 0 {
+		t.Errorf("expected no Milestones for epic scope, got %d", len(result.Milestones))
+	}
+}
+
+func TestBuildScopedRoadmapFeatureRoot(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	root := &bean.Bean{ID: "f1", Type: "feature", Title: "SSO", Status: "todo"}
+	beans := []*bean.Bean{
+		root,
+		{ID: "t1", Type: "task", Title: "OIDC", Status: "todo", Parent: "f1"},
+	}
+
+	result := buildScopedRoadmap(beans, false, root)
+
+	if result.Root == nil || result.Root.Feature == nil {
+		t.Fatalf("expected Root.Feature to be set, got %+v", result.Root)
+	}
+	if result.Root.Feature.Feature.ID != "f1" {
+		t.Errorf("got feature %s, want f1", result.Root.Feature.Feature.ID)
+	}
+	if len(result.Root.Feature.Items) != 1 || result.Root.Feature.Items[0].ID != "t1" {
+		t.Errorf("Root.Feature.Items = %v, want [t1]", result.Root.Feature.Items)
+	}
+}
+
+func TestBuildScopedRoadmapEpicRootWithNoVisibleChildren(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	root := &bean.Bean{ID: "e1", Type: "epic", Title: "Empty epic", Status: "todo"}
+	beans := []*bean.Bean{root}
+
+	result := buildScopedRoadmap(beans, false, root)
+
+	if result.Root == nil || result.Root.Epic == nil {
+		t.Fatalf("expected Root.Epic to still be set for an empty epic, got %+v", result.Root)
+	}
+	if result.Root.Epic.Epic.ID != "e1" {
+		t.Errorf("got epic %s, want e1", result.Root.Epic.Epic.ID)
+	}
+	if len(result.Root.Epic.Items) != 0 || len(result.Root.Epic.Features) != 0 {
+		t.Errorf("expected an empty epic group, got %+v", result.Root.Epic)
+	}
+}
+
+func TestBuildScopedRoadmapFeatureRootWithNoVisibleChildren(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	root := &bean.Bean{ID: "f1", Type: "feature", Title: "Empty feature", Status: "todo"}
+	beans := []*bean.Bean{root}
+
+	result := buildScopedRoadmap(beans, false, root)
+
+	if result.Root == nil || result.Root.Feature == nil {
+		t.Fatalf("expected Root.Feature to still be set for an empty feature, got %+v", result.Root)
+	}
+	if result.Root.Feature.Feature.ID != "f1" {
+		t.Errorf("got feature %s, want f1", result.Root.Feature.Feature.ID)
+	}
+	if len(result.Root.Feature.Items) != 0 {
+		t.Errorf("expected an empty feature group, got %+v", result.Root.Feature)
+	}
+}
+
+func TestValidateRoadmapRootType(t *testing.T) {
+	tests := []struct {
+		beanType string
+		wantErr  bool
+	}{
+		{"milestone", false},
+		{"epic", false},
+		{"feature", false},
+		{"task", true},
+		{"bug", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.beanType, func(t *testing.T) {
+			b := &bean.Bean{ID: "x1", Type: tt.beanType}
+			err := validateRoadmapRootType(b)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateRoadmapRootType(%s) error = %v, wantErr %v", tt.beanType, err, tt.wantErr)
+			}
+		})
+	}
+}

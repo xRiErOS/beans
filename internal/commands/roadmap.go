@@ -32,8 +32,20 @@ var (
 
 // roadmapData holds the structured roadmap for JSON output.
 type roadmapData struct {
+	// Root is set instead of Milestones/Unscheduled when the roadmap is
+	// scoped to a single epic or feature (buildScopedRoadmap). A
+	// milestone-scoped roadmap reuses Milestones with a single entry
+	// instead, since that requires no new rendering path.
+	Root        *rootGroup        `json:"root,omitempty"`
 	Milestones  []milestoneGroup  `json:"milestones"`
 	Unscheduled *unscheduledGroup `json:"unscheduled,omitempty"`
+}
+
+// rootGroup holds the scoped roadmap when rooted at an epic or feature.
+// Exactly one of Epic/Feature is set.
+type rootGroup struct {
+	Epic    *epicGroup    `json:"epic,omitempty"`
+	Feature *featureGroup `json:"feature,omitempty"`
 }
 
 // unscheduledGroup represents items not assigned to any milestone.
@@ -132,14 +144,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		byID[b.ID] = b
 	}
 
-	// Build children index: parent ID -> children
-	// This maps each bean ID to the beans that have it as a parent
-	children := make(map[string][]*bean.Bean)
-	for _, b := range allBeans {
-		if b.Parent != "" {
-			children[b.Parent] = append(children[b.Parent], b)
-		}
-	}
+	children := childrenIndex(allBeans)
 
 	// Find milestones, applying status filters
 	var milestones []*bean.Bean
@@ -280,6 +285,56 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	return &roadmapData{
 		Milestones:  milestoneGroups,
 		Unscheduled: unscheduled,
+	}
+}
+
+// childrenIndex maps each bean ID to the beans that have it as a parent.
+func childrenIndex(allBeans []*bean.Bean) map[string][]*bean.Bean {
+	children := make(map[string][]*bean.Bean)
+	for _, b := range allBeans {
+		if b.Parent != "" {
+			children[b.Parent] = append(children[b.Parent], b)
+		}
+	}
+	return children
+}
+
+// buildScopedRoadmap builds a roadmapData scoped to a single milestone,
+// epic, or feature root. Callers must have already validated root's type
+// via validateRoadmapRootType; any other type panics, since that would be a
+// caller bug, not user input.
+func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData {
+	switch root.Type {
+	case "milestone":
+		data := buildRoadmap(allBeans, includeDone, nil, nil)
+		for _, mg := range data.Milestones {
+			if mg.Milestone.ID == root.ID {
+				return &roadmapData{Milestones: []milestoneGroup{mg}}
+			}
+		}
+		// buildRoadmap drops milestones with zero visible children -- the
+		// root was still found and matched by type/ID, so render it as an
+		// empty container rather than silently returning nothing.
+		return &roadmapData{Milestones: []milestoneGroup{{Milestone: root}}}
+	case "epic":
+		eg := buildEpicGroup(root, childrenIndex(allBeans), includeDone)
+		return &roadmapData{Root: &rootGroup{Epic: &eg}}
+	case "feature":
+		fg := buildFeatureGroup(root, childrenIndex(allBeans), includeDone)
+		return &roadmapData{Root: &rootGroup{Feature: &fg}}
+	default:
+		panic("buildScopedRoadmap: unsupported root type " + root.Type)
+	}
+}
+
+// validateRoadmapRootType returns an error if b is not a valid roadmap scope
+// root (milestone, epic, or feature).
+func validateRoadmapRootType(b *bean.Bean) error {
+	switch b.Type {
+	case "milestone", "epic", "feature":
+		return nil
+	default:
+		return fmt.Errorf("roadmap root must be a milestone, epic, or feature, got %s (%s)", b.Type, b.ID)
 	}
 }
 
