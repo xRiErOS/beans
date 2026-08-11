@@ -145,12 +145,13 @@ func roadmapLeafPrefix(indent int, b *bean.Bean) string {
 	return strings.Repeat(" ", indent) + "- " + b.Type
 }
 
-// renderRoadmapPretty walks the roadmapData produced by buildRoadmap and
-// renders the TTY plain-text tree (symmetric to renderRoadmapMarkdown, which
-// walks the template over the same structure). It performs no sorting of
-// its own (SC-406) -- order comes entirely from buildRoadmap's slices, and
-// within a group it renders .Items before .Features, exactly like
-// roadmap.tmpl.
+// renderRoadmapPretty walks the roadmapData produced by buildRoadmap or
+// buildScopedRoadmap and renders the TTY plain-text tree (symmetric to
+// renderRoadmapMarkdown, which walks the template over the same structure).
+// When data.Root is set, it returns early after rendering the scoped epic or
+// feature; otherwise it renders the full milestone-based tree. It performs no
+// sorting of its own (SC-406) -- order comes entirely from the builder's
+// slices.
 func renderRoadmapPretty(data *roadmapData, width int) string {
 	var sb strings.Builder
 	sb.WriteString("Roadmap\n")

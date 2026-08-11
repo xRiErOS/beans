@@ -728,6 +728,66 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	})
 }
 
+// TestRoadmapOutputSwitchesOnTTYWithRoot verifies that roadmapOutput correctly
+// dispatches Root-scoped data (from buildScopedRoadmap) to both renderers,
+// not just the Milestones-based data tested in TestRoadmapOutputSwitchesOnTTY.
+// This proves the dispatcher itself handles the Root case, alongside the
+// renderer-specific tests (TestRenderRoadmapMarkdownRootEpic, etc.) that test
+// each renderer in isolation.
+func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
+	epic := &bean.Bean{ID: "beans-epic1", Type: "epic", Title: "Auth", Status: "todo", Path: "epic1--auth.md"}
+	item := &bean.Bean{ID: "beans-task1", Type: "task", Title: "Login", Status: "todo", Path: "task1--login.md"}
+	data := &roadmapData{
+		Root: &rootGroup{
+			Epic: &epicGroup{Epic: epic, Items: []*bean.Bean{item}},
+		},
+	}
+
+	t.Run("pipe (non-tty) renders markdown with Root", func(t *testing.T) {
+		got := roadmapOutput(data, false, 0, true, "")
+		if !strings.HasPrefix(got, "# Roadmap") {
+			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
+		}
+		if !strings.Contains(got, "### Epic:") {
+			t.Errorf("expected epic heading (### Epic:), got %q", got)
+		}
+		if !strings.Contains(got, "img.shields.io") {
+			t.Error("expected markdown output to contain an img.shields.io badge")
+		}
+		if !strings.Contains(got, "Auth") {
+			t.Errorf("expected epic title Auth in output, got %q", got)
+		}
+		if !strings.Contains(got, "Login") {
+			t.Errorf("expected item title Login in output, got %q", got)
+		}
+	})
+
+	t.Run("tty renders plain-text table with Root", func(t *testing.T) {
+		got := roadmapOutput(data, true, 80, true, "")
+		if !strings.HasPrefix(got, "Roadmap") {
+			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
+		}
+		if !strings.Contains(got, "▸ Epic") {
+			t.Errorf("expected epic glyph line (▸ Epic), got %q", got)
+		}
+		if strings.Contains(got, "img.shields.io") {
+			t.Error("TTY output must not contain shields.io badges")
+		}
+		if strings.Contains(got, "](") {
+			t.Error("TTY output must not contain markdown link syntax")
+		}
+		if strings.Contains(got, "■ Milestone") {
+			t.Error("root-scoped output must not contain milestone framing")
+		}
+		if !strings.Contains(got, "Auth") {
+			t.Errorf("expected epic title Auth in output, got %q", got)
+		}
+		if !strings.Contains(got, "Login") {
+			t.Errorf("expected item title Login in output, got %q", got)
+		}
+	})
+}
+
 // SC-502 / EARS-5: the non-TTY path of roadmapOutput must be a pure pass
 // -through to renderRoadmapMarkdown -- character-for-character, with the
 // exact same arguments. This is the regression guard for the Q07/D02

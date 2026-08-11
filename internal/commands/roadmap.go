@@ -80,7 +80,13 @@ type featureGroup struct {
 var roadmapCmd = &cobra.Command{
 	Use:   "roadmap [id]",
 	Short: "Generate a Markdown roadmap from milestones and epics",
-	Args:  cobra.MaximumNArgs(1),
+	Long: `Displays a roadmap of milestones, epics, and their child items.
+
+With no argument, renders the entire roadmap. With an ID argument (a milestone,
+epic, or feature), scopes the output to that item's subtree only.
+
+The --status and --no-status flags cannot be combined with an ID argument.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Query all beans via GraphQL resolver
 		resolver := &beangraph.CoreResolver{Core: core}

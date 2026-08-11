@@ -34,9 +34,9 @@ beans roadmap <id>         # new: roadmap rooted at this bean
 
 ## Data Model (`roadmap.go`)
 
-`buildRoadmap` gains a `rootID string` parameter.
+A new `buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData` function builds a roadmapData scoped to a single root bean, leaving `buildRoadmap`'s signature unchanged.
 
-- **Root = milestone**: `milestones` is reduced to the single resolved bean (reusing the existing `buildMilestoneGroup` path unchanged); `Unscheduled` is not built at all — the concept doesn't apply once scoped to one milestone. No renderer changes needed for this case; it's structurally identical to today's output with one milestone in the list.
+- **Root = milestone**: the milestone is looked up in the results of a full `buildRoadmap` call, then returned as a single-entry `Milestones` slice; `Unscheduled` is not built, since the concept doesn't apply once scoped to one milestone. No renderer changes needed for this case; it's structurally identical to today's output with one milestone in the list.
 - **Root = epic or feature**: new field `roadmapData.Root *rootGroup`, where
 
   ```go
