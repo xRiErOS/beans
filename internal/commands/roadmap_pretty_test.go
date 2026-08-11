@@ -477,3 +477,73 @@ func TestRoadmapLinePrefixExactlyAtTitleCol(t *testing.T) {
 		t.Errorf("prefix at exactly title col %d: got %q, want prefix %q", roadmapTitleCol, got, want)
 	}
 }
+
+func TestRenderRoadmapPrettyRootEpic(t *testing.T) {
+	epic := &bean.Bean{ID: "beans-eeee", Title: "Auth", Type: "epic", Status: "todo"}
+	leaf := &bean.Bean{ID: "beans-tttt", Title: "Login", Type: "task", Status: "todo", Parent: "beans-eeee"}
+
+	data := &roadmapData{
+		Root: &rootGroup{
+			Epic: &epicGroup{Epic: epic, Items: []*bean.Bean{leaf}},
+		},
+	}
+	got := renderRoadmapPretty(data, 80)
+	lines := strings.Split(got, "\n")
+	// [0] Roadmap, [1] separator, [2] blank, [3] the epic row, [4] its leaf.
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 lines, got %d:\n%s", len(lines), got)
+	}
+	epicLine, leafLine := lines[3], lines[4]
+
+	if !strings.HasPrefix(epicLine, "▸ Epic") {
+		t.Errorf("epic line prefix = %q, want prefix %q", epicLine, "▸ Epic")
+	}
+	if !strings.Contains(epicLine, "Auth") {
+		t.Errorf("epic line missing title: %q", epicLine)
+	}
+	if !strings.HasPrefix(leafLine, "  - task") {
+		t.Errorf("leaf line prefix = %q, want prefix %q", leafLine, "  - task")
+	}
+	if !strings.Contains(leafLine, "Login") {
+		t.Errorf("leaf line missing title: %q", leafLine)
+	}
+	if strings.Contains(got, "No Milestone") {
+		t.Errorf("root-scoped output must not contain the Unscheduled heading: %q", got)
+	}
+	if strings.Contains(got, "■ Milestone") {
+		t.Errorf("root-scoped output must not contain a Milestone row: %q", got)
+	}
+}
+
+func TestRenderRoadmapPrettyRootFeature(t *testing.T) {
+	feat := &bean.Bean{ID: "beans-ffff", Title: "SSO", Type: "feature", Status: "todo", Priority: "high"}
+	leaf := &bean.Bean{ID: "beans-tttt", Title: "OIDC", Type: "task", Status: "todo", Parent: "beans-ffff"}
+
+	data := &roadmapData{
+		Root: &rootGroup{
+			Feature: &featureGroup{Feature: feat, Items: []*bean.Bean{leaf}},
+		},
+	}
+	got := renderRoadmapPretty(data, 80)
+	lines := strings.Split(got, "\n")
+	if len(lines) < 5 {
+		t.Fatalf("expected at least 5 lines, got %d:\n%s", len(lines), got)
+	}
+	featureLine, leafLine := lines[3], lines[4]
+
+	if !strings.HasPrefix(featureLine, "▪ Feature") {
+		t.Errorf("feature line prefix = %q, want prefix %q", featureLine, "▪ Feature")
+	}
+	if !strings.Contains(featureLine, "SSO") {
+		t.Errorf("feature line missing title: %q", featureLine)
+	}
+	if !strings.Contains(featureLine, "high") {
+		t.Errorf("feature row must show priority (D15): %q", featureLine)
+	}
+	if !strings.HasPrefix(leafLine, "  - task") {
+		t.Errorf("leaf line prefix = %q, want prefix %q", leafLine, "  - task")
+	}
+	if !strings.Contains(leafLine, "OIDC") {
+		t.Errorf("leaf line missing title: %q", leafLine)
+	}
+}

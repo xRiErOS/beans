@@ -157,6 +157,17 @@ func renderRoadmapPretty(data *roadmapData, width int) string {
 	sb.WriteString(strings.Repeat("═", width))
 	sb.WriteString("\n")
 
+	if data.Root != nil {
+		sb.WriteString("\n")
+		if data.Root.Epic != nil {
+			renderRoadmapEpicGroup(&sb, *data.Root.Epic, 0, width)
+		}
+		if data.Root.Feature != nil {
+			renderRoadmapFeatureGroup(&sb, *data.Root.Feature, 0, width)
+		}
+		return sb.String()
+	}
+
 	for _, mg := range data.Milestones {
 		sb.WriteString("\n")
 		sb.WriteString(roadmapLine("■ Milestone", mg.Milestone, false, width))
