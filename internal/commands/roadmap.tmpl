@@ -28,6 +28,14 @@
 {{- end -}}
 
 # Roadmap
+{{- if .Root}}
+{{- if .Root.Epic}}
+{{template "epicGroup" .Root.Epic}}
+{{- end}}
+{{- if .Root.Feature}}
+{{template "featureGroup" .Root.Feature}}
+{{- end}}
+{{- else}}
 {{range .Milestones}}
 ## Milestone: {{.Milestone.Title}} {{beanRef .Milestone}}
 {{with firstParagraph .Milestone.Body}}
@@ -66,6 +74,7 @@
 
 {{range .Unscheduled.Other -}}
 {{template "beanLine" .}}
+{{- end}}
 {{- end}}
 {{- end}}
 {{- end}}

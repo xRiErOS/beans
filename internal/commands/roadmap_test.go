@@ -962,3 +962,50 @@ func TestValidateRoadmapRootType(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderRoadmapMarkdownRootEpic(t *testing.T) {
+	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "Auth", Status: "todo", Path: "e1--auth.md"}
+	item1 := &bean.Bean{ID: "beans-t1", Type: "task", Title: "Login", Status: "todo", Path: "t1--login.md"}
+	data := &roadmapData{
+		Root: &rootGroup{
+			Epic: &epicGroup{Epic: e, Items: []*bean.Bean{item1}},
+		},
+	}
+
+	got := renderRoadmapMarkdown(data, true, "")
+
+	if !strings.HasPrefix(got, "# Roadmap") {
+		t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
+	}
+	if !strings.Contains(got, "### Epic: Auth") {
+		t.Errorf("expected epic heading, got %q", got)
+	}
+	if !strings.Contains(got, "Login") {
+		t.Errorf("expected item Login to be rendered, got %q", got)
+	}
+	if strings.Contains(got, "## Milestone") {
+		t.Errorf("root-scoped output must not contain a Milestone heading, got %q", got)
+	}
+	if strings.Contains(got, "No Milestone") {
+		t.Errorf("root-scoped output must not contain the Unscheduled heading, got %q", got)
+	}
+}
+
+func TestRenderRoadmapMarkdownRootFeature(t *testing.T) {
+	f := &bean.Bean{ID: "beans-f1", Type: "feature", Title: "SSO", Status: "todo", Path: "f1--sso.md"}
+	item1 := &bean.Bean{ID: "beans-t1", Type: "task", Title: "OIDC", Status: "todo", Path: "t1--oidc.md"}
+	data := &roadmapData{
+		Root: &rootGroup{
+			Feature: &featureGroup{Feature: f, Items: []*bean.Bean{item1}},
+		},
+	}
+
+	got := renderRoadmapMarkdown(data, true, "")
+
+	if !strings.Contains(got, "#### Feature: SSO") {
+		t.Errorf("expected feature heading, got %q", got)
+	}
+	if !strings.Contains(got, "OIDC") {
+		t.Errorf("expected item OIDC to be rendered, got %q", got)
+	}
+}
