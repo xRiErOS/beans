@@ -5,7 +5,7 @@ project:
   name: beans
 beans:
   # Directory where bean files are stored
-  path: .beans
+  path: ../.beans
   # Prefix for bean IDs (e.g., "myproject-abc1")
   prefix: beans-
   # Length of the random ID suffix

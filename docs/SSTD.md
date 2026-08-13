@@ -31,6 +31,8 @@ Das lokal installierte `/opt/homebrew/bin/beans` ist ein Build aus diesem Fork, 
 
 **Nächster Schritt:** Milestone `beans-xej5` hat nach den drei abgeschlossenen Epics noch offene Kinder (`beans-mmyp`, `beans-3dvs`, `beans-a29l`, `beans-36fa`, `beans-13ae`, alle `todo`) — `beans list --ready --parent beans-xej5` für den Einstieg. `beans-36fa` (Orphan-Epic verschwindet aus `buildRoadmap`-Output) braucht vor einem Fix einen PO-Entscheid, da er den Markdown-Output ändert.
 
+**Workspace (2026-08-13):** Der vollständige Checkout liegt in der Workspace-Hülle unter `repo/`; der gemeinsame private Store liegt ausschließlich in `../.beans`. `repo/.beans.yml` setzt `beans.path: ../.beans`, die äußere `.envrc` zusätzlich `BEANS_PATH`. Die Entfernung der ehemals getrackten `repo/.beans/`-Dateien gehört zum Workspace-Split-Commit; Wrapper-Dateien selbst werden nicht im Fork versioniert.
+
 ## Nicht-Ableitbarkeiten
 
 ### Zwei Kommandos, die auf dieser Maschine still das Falsche tun
