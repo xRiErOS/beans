@@ -263,8 +263,18 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	var orphanItems []*bean.Bean
 	for _, b := range allBeans {
 		// Skip milestones and epics -- always containers, never flat leaves.
-		if b.Type == "milestone" || b.Type == "epic" {
+		if b.Type == "milestone" {
 			continue
+		}
+		if b.Type == "epic" {
+			// Epics with >=1 leaf descendant or feature are rendered via the
+			// unscheduledEpics loop above as an epicGroup; skip them
+			// here to avoid double-rendering. Childless epics (beans-36fa)
+			// are not containers -- fall through and treat them as a flat
+			// leaf like any other orphan item below.
+			if eg, _ := classifyEpicChild(b, children, includeDone); eg != nil {
+				continue
+			}
 		}
 		if b.Type == "feature" {
 			// Features with >=1 leaf descendant are rendered via the
@@ -462,6 +472,23 @@ func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, 
 	}
 	return nil, feature
 }
+
+// classifyEpicChild resolves a direct epic-typed child bean per beans-36fa:
+// an epic is a container IFF it has >=1 leaf descendant or any feature.
+// (buildEpicGroup, respecting includeDone). If it has descendants/features,
+// the resolved epicGroup is kept for container rendering. If it has none,
+// the epic bean itself is returned as leaf so the caller can fold it into
+// its own flat-leaf list -- and go through the exact same archive-status
+// filtering every other leaf in that list goes through, instead of being
+// silently dropped.
+func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) (eg *epicGroup, leaf *bean.Bean) {
+	built := buildEpicGroup(epic, children, includeDone)
+	if len(built.Items) > 0 || len(built.Features) > 0 {
+		return &built, nil
+	}
+	return nil, epic
+}
+
 
 // buildFeatureGroup builds a feature group: all leaf descendants found
 // anywhere beneath the feature, flattened and sorted.

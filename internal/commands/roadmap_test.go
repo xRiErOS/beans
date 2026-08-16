@@ -672,6 +672,32 @@ func TestChildlessCompletedFeatureDroppedByArchiveFilter(t *testing.T) {
 	}
 }
 
+// beans-36fa: a childless orphan epic (type epic, status open, no parent)
+// must render as a flat leaf row in the Unscheduled group, analogous to
+// childless orphan features (beans-n8zw).
+func TestOrphanChildlessEpicAppearsAsFlatLeaf(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	beans := []*bean.Bean{
+		{ID: "e1", Type: "epic", Title: "Lonely Epic", Status: "todo"},
+	}
+
+	result := buildRoadmap(beans, false, nil, nil)
+
+	if result.Unscheduled == nil {
+		t.Fatal("expected Unscheduled to be non-nil")
+	}
+	if len(result.Unscheduled.Epics) != 0 {
+		t.Errorf("got %d unscheduled epicGroups, want 0 (childless epic must not become a container)", len(result.Unscheduled.Epics))
+	}
+	if len(result.Unscheduled.Other) != 1 || result.Unscheduled.Other[0].ID != "e1" {
+		t.Errorf("Unscheduled.Other = %v, want [e1]", result.Unscheduled.Other)
+	}
+}
+
+
 // --- T5: roadmapOutput TTY switch -------------------------------------------
 //
 // roadmapOutputFixture is a standalone roadmapData literal (T4 pattern) --
