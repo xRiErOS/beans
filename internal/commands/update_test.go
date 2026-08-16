@@ -5,6 +5,8 @@ package commands
 
 import (
 	"bytes"
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
+	"github.com/spf13/cobra"
 )
 
 // setupUpdateTest installs a throwaway core and default config into the
@@ -318,5 +321,128 @@ func TestUpdateCmdSetSucceedsUnderRequireIfMatch(t *testing.T) {
 	}
 	if got.Extra["release"] != "0-4-1" {
 		t.Errorf("Extra[release] = %v, want %q", got.Extra["release"], "0-4-1")
+	}
+}
+
+// beans-13ae AC1/AC3/SC-01/SC-03: `update --json` returns the resulting
+// bean, read back after the write and shaped exactly like `show --json` --
+// not a {success,bean,message} envelope -- so a caller applying several
+// changes in one call (parent plus an extra key here) can verify all of
+// them from one process launch, without a second `show` call.
+func TestUpdateCmdJSONReturnsResultingBean(t *testing.T) {
+	b := setupUpdateTest(t)
+	other := &bean.Bean{ID: "beans-parent1", Slug: bean.Slugify("Parent"), Title: "Parent", Status: "todo", Type: "epic"}
+	if err := core.Create(other); err != nil {
+		t.Fatalf("core.Create(other) error = %v", err)
+	}
+	resetUpdateFlags(t)
+
+	oldJSON := updateJSON
+	updateJSON = true
+	t.Cleanup(func() { updateJSON = oldJSON })
+	scratch := &cobra.Command{Use: "update"}
+	scratch.Flags().StringVar(&updateParent, "parent", "", "")
+	if err := scratch.Flags().Set("parent", other.ID); err != nil {
+		t.Fatalf("setting --parent flag: %v", err)
+	}
+	updateSet = []string{"release=0-6-0"}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	runErr := updateCmd.RunE(scratch, []string{b.ID})
+
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	if runErr != nil {
+		t.Fatalf("updateCmd.RunE() error = %v", runErr)
+	}
+
+	// SC-01/SC-03: the payload IS the bean, at the top level -- no ".bean"
+	// wrapper, no ".success"/".message" envelope keys.
+	var got map[string]any
+	if err := json.Unmarshal(captured, &got); err != nil {
+		t.Fatalf("unmarshaling captured stdout: %v (raw: %s)", err, captured)
+	}
+	for _, envelopeKey := range []string{"success", "message", "bean"} {
+		if _, ok := got[envelopeKey]; ok {
+			t.Errorf("captured JSON has envelope key %q; want the raw bean, same shape as `show --json`", envelopeKey)
+		}
+	}
+
+	// SC-01: parent is visible directly, no second command.
+	if got["parent"] != other.ID {
+		t.Errorf("parent = %v, want %q", got["parent"], other.ID)
+	}
+	// AC3: the extra-key write (a second, separate persist inside RunE)
+	// is also reflected -- proves this is read after BOTH writes, not the
+	// request echoed back.
+	extra, _ := got["extra"].(map[string]any)
+	if extra["release"] != "0-6-0" {
+		t.Errorf("extra[release] = %v, want %q", extra["release"], "0-6-0")
+	}
+
+	// Cross-check against `show --json`'s own schema: unmarshal into the
+	// same bean.Bean struct show uses and confirm nothing was lost.
+	var asBean bean.Bean
+	if err := json.Unmarshal(captured, &asBean); err != nil {
+		t.Fatalf("unmarshaling captured stdout into bean.Bean: %v", err)
+	}
+	if asBean.ID != b.ID || asBean.Parent != other.ID {
+		t.Errorf("decoded bean = %+v, want ID=%q Parent=%q", asBean, b.ID, other.ID)
+	}
+}
+
+// SC-04: update without --json is unaffected by the --json schema change.
+func TestUpdateCmdNonJSONOutputUnchanged(t *testing.T) {
+	b := setupUpdateTest(t)
+	resetUpdateFlags(t)
+
+	oldJSON := updateJSON
+	updateJSON = false
+	t.Cleanup(func() { updateJSON = oldJSON })
+	scratch := &cobra.Command{Use: "update"}
+	scratch.Flags().StringVarP(&updateStatus, "status", "s", "", "")
+	if err := scratch.Flags().Set("status", "completed"); err != nil {
+		t.Fatalf("setting --status flag: %v", err)
+	}
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	runErr := updateCmd.RunE(scratch, []string{b.ID})
+
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	if runErr != nil {
+		t.Fatalf("updateCmd.RunE() error = %v", runErr)
+	}
+
+	if bytes.Contains(captured, []byte("{")) {
+		t.Errorf("non-JSON update output looks like JSON: %q", captured)
+	}
+	want := "Updated " + b.ID
+	if !bytes.Contains(captured, []byte(want)) {
+		t.Errorf("captured = %q, want it to contain %q", captured, want)
 	}
 }

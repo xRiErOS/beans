@@ -144,13 +144,13 @@ var updateCmd = &cobra.Command{
 				"no changes specified (use --status, --type, --priority, --title, --body, --parent, --blocking, --blocked-by, --tag, or their --remove-* variants)")
 		}
 
-		// Output result
+		// Output result. --json returns the resulting bean directly (same
+		// schema as `beans show --json`), not a {success,bean,message}
+		// envelope: a caller applying many mutations and suppressing
+		// stdout still gets a read-after-write state to verify against,
+		// with one command instead of two (beans-13ae).
 		if updateJSON {
-			msg := "Bean updated"
-			if wasArchived {
-				msg = "Bean unarchived and updated"
-			}
-			return output.Success(b, msg)
+			return output.SuccessSingle(b)
 		}
 
 		if wasArchived {
