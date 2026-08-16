@@ -113,6 +113,30 @@ func (c *Core) Config() *config.Config {
 	return c.config
 }
 
+// HasOrphanBackup reports whether beansRoot (a .beans directory path that may
+// not exist) has a sibling .beans.bak-* directory with content -- the signal
+// that a missing or empty live directory is not "no store here" but an
+// interrupted stageAndSwap, and that Core.Load (whose detectOrphanBackup
+// below performs the actual repair) should be given the chance to run
+// instead of the caller failing outright. Read-only; does not repair.
+func HasOrphanBackup(beansRoot string) bool {
+	repo := filepath.Dir(beansRoot)
+	entries, err := os.ReadDir(repo)
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() || !strings.HasPrefix(entry.Name(), ".beans.bak-") {
+			continue
+		}
+		subentries, err := os.ReadDir(filepath.Join(repo, entry.Name()))
+		if err == nil && len(subentries) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // detectOrphanBackup checks for .beans.bak-* orphans left by an interrupted stageAndSwap.
 // If the live .beans directory is missing or empty AND exactly one backup exists with content,
 // it automatically repairs by renaming the backup back to .beans.

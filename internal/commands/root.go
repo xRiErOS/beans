@@ -95,6 +95,15 @@ func resolveBeansPath(flagPath string, c *config.Config) (string, error) {
 	}
 
 	if info, statErr := os.Stat(root); statErr != nil || !info.IsDir() {
+		// A missing/empty live directory next to a non-empty .beans.bak-*
+		// sibling is not "no store here" -- it's an interrupted stageAndSwap
+		// (rename.go: the swap is two os.Rename calls with .beans absent in
+		// between). Core.Load's own detectOrphanBackup repairs or warns
+		// about exactly that case, but only gets the chance to run if this
+		// precheck doesn't fail first.
+		if beancore.HasOrphanBackup(root) {
+			return root, nil
+		}
 		if explicitOverride {
 			return "", fmt.Errorf("beans path does not exist or is not a directory: %s", root)
 		}

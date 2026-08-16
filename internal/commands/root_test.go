@@ -129,6 +129,31 @@ func TestResolveBeansPath(t *testing.T) {
 			t.Errorf("expected 'does not exist' error, got %q", err.Error())
 		}
 	})
+
+	// beans-6ap8: a live .beans dir absent because a stageAndSwap crashed
+	// mid-swap -- and a non-empty .beans.bak-* sibling holding the real
+	// data -- must not be reported as "no store here." Failing this
+	// precheck before Core.Load ever runs is exactly what made
+	// detectOrphanBackup unreachable from the actual CLI entry point.
+	t.Run("missing dir with a recoverable backup sibling is not an error", func(t *testing.T) {
+		repoDir := t.TempDir()
+		liveBeans := filepath.Join(repoDir, ".beans")
+		backup := filepath.Join(repoDir, ".beans.bak-123")
+		if err := os.MkdirAll(backup, 0755); err != nil {
+			t.Fatalf("failed to create backup dir: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(backup, "beans-abcd--x.md"), []byte("---\ntitle: x\nstatus: todo\n---\n"), 0644); err != nil {
+			t.Fatalf("failed to seed backup content: %v", err)
+		}
+
+		got, err := resolveBeansPath(liveBeans, cfg)
+		if err != nil {
+			t.Fatalf("resolveBeansPath() error = %v, want nil (a recoverable backup should defer to Core.Load, not fail here)", err)
+		}
+		if got != liveBeans {
+			t.Errorf("resolveBeansPath() = %q, want %q", got, liveBeans)
+		}
+	})
 }
 
 // evalSymlinks resolves a path so comparisons survive macOS's /var -> /private/var
