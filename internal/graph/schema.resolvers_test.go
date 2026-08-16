@@ -3309,5 +3309,17 @@ func TestMutationUpdateBeanPreservesExtra(t *testing.T) {
 	if got.Extra["release"] != "0-4-1" {
 		t.Errorf("UpdateBean().Extra[release] = %v, want %q (extra keys must survive a mutation of unrelated fields)", got.Extra["release"], "0-4-1")
 	}
+
+	// Verify the extra key is preserved on disk
+	beansDir := filepath.Join(core.Root(), "")
+	filename := bean.BuildFilename("extra-update-test", got.Slug)
+	filePath := filepath.Join(beansDir, filename)
+	fileContent, err := os.ReadFile(filePath)
+	if err != nil {
+		t.Fatalf("failed to read bean file from disk: %v", err)
+	}
+	if !strings.Contains(string(fileContent), "release: 0-4-1") {
+		t.Errorf("bean file does not contain extra key on disk.\nFile content:\n%s", string(fileContent))
+	}
 }
 

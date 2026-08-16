@@ -333,7 +333,7 @@ func sortBeans(beans []*bean.Bean, sortBy string, cfg *config.Config) {
 // a reserved schema field (AC3).
 func validateWhereKeys(wheres []string) error {
 	for _, w := range wheres {
-		key, _, err := parseSetPair(w)
+		key, _, err := parseSetPair(w, "--where")
 		if err != nil {
 			return err
 		}
@@ -357,7 +357,7 @@ func filterByWhere(beans []*bean.Bean, wheres []string) []*bean.Bean {
 	type pair struct{ key, value string }
 	pairs := make([]pair, 0, len(wheres))
 	for _, w := range wheres {
-		key, value, err := parseSetPair(w)
+		key, value, err := parseSetPair(w, "--where")
 		if err != nil {
 			continue
 		}

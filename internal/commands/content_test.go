@@ -302,10 +302,11 @@ func TestParseSetPair(t *testing.T) {
 		{"value contains equals", "url=https://example.com?a=b", "url", "https://example.com?a=b", false},
 		{"empty value", "flag=", "flag", "", false},
 		{"no equals sign", "release", "", "", true},
+		{"empty key", "=value", "", "", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			key, value, err := parseSetPair(tt.arg)
+			key, value, err := parseSetPair(tt.arg, "--set")
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("parseSetPair(%q) error = %v, wantErr %v", tt.arg, err, tt.wantErr)
 			}

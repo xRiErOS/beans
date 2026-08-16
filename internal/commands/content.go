@@ -94,14 +94,19 @@ func applyBodyAppend(body, text string) string {
 	return bean.AppendWithSeparator(body, text)
 }
 
-// parseSetPair splits a --set key=value argument on the first "=". Only the
+// parseSetPair splits a flag-value argument on the first "=". Only the
 // first "=" is significant, so values may contain their own "=" (e.g. URLs).
-func parseSetPair(arg string) (key, value string, err error) {
+// flagName should be the actual flag the user typed (e.g. "--set", "--where").
+func parseSetPair(arg string, flagName string) (key, value string, err error) {
 	idx := strings.Index(arg, "=")
 	if idx < 0 {
-		return "", "", fmt.Errorf("invalid --set value %q: expected key=value", arg)
+		return "", "", fmt.Errorf("invalid %s value %q: expected key=value", flagName, arg)
 	}
-	return arg[:idx], arg[idx+1:], nil
+	key = arg[:idx]
+	if key == "" {
+		return "", "", fmt.Errorf("invalid %s value %q: key cannot be empty", flagName, arg)
+	}
+	return key, arg[idx+1:], nil
 }
 
 // checkReservedKey returns an error naming the native flag for key if key is
@@ -124,7 +129,7 @@ func checkReservedKey(key string) error {
 // --unset may name a reserved schema field.
 func validateExtraKeys(sets []string, unsets []string) error {
 	for _, s := range sets {
-		key, _, err := parseSetPair(s)
+		key, _, err := parseSetPair(s, "--set")
 		if err != nil {
 			return err
 		}
@@ -133,6 +138,9 @@ func validateExtraKeys(sets []string, unsets []string) error {
 		}
 	}
 	for _, key := range unsets {
+		if key == "" {
+			return fmt.Errorf("invalid --unset value: key cannot be empty")
+		}
 		if err := checkReservedKey(key); err != nil {
 			return err
 		}
@@ -148,7 +156,7 @@ func validateExtraKeys(sets []string, unsets []string) error {
 // an error but any already-applied --set writes are not rolled back.
 func applyExtraOps(b *bean.Bean, sets []string, unsets []string) error {
 	for _, s := range sets {
-		key, value, err := parseSetPair(s)
+		key, value, err := parseSetPair(s, "--set")
 		if err != nil {
 			return err
 		}

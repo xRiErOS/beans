@@ -1904,34 +1904,43 @@ func TestRenderTwiceProducesIdenticalOutput(t *testing.T) {
 }
 
 func TestParseRenderRoundtripWithExtraKeys(t *testing.T) {
-	b := &Bean{
-		Title:  "Roundtrip Bean",
-		Status: "in-progress",
-		Type:   "task",
-		Extra: map[string]any{
-			"custom_a": "alpha",
-			"custom_b": "beta",
-			"custom_c": "gamma",
-		},
-	}
+	// This test verifies that parsing and rendering a bean file with extra
+	// (non-standard) frontmatter keys produces output byte-identical to the input.
+	// This is AC2 from beans-54rb: parse → render must preserve all custom fields.
+	inputContent := `---
+title: Roundtrip Bean
+status: in-progress
+type: task
+custom_a: alpha
+custom_b: beta
+custom_c: gamma
+---
 
-	first, err := b.Render()
-	if err != nil {
-		t.Fatalf("Render error: %v", err)
-	}
+`
 
-	parsed, err := Parse(bytes.NewReader(first))
+	// Parse the input content
+	parsed, err := Parse(bytes.NewReader([]byte(inputContent)))
 	if err != nil {
 		t.Fatalf("Parse error: %v", err)
 	}
 
-	second, err := parsed.Render()
+	// Verify extra keys were parsed
+	if parsed.Extra == nil || len(parsed.Extra) != 3 {
+		t.Fatalf("Expected 3 extra keys, got %d", len(parsed.Extra))
+	}
+	if parsed.Extra["custom_a"] != "alpha" || parsed.Extra["custom_b"] != "beta" || parsed.Extra["custom_c"] != "gamma" {
+		t.Errorf("Extra keys not parsed correctly: %v", parsed.Extra)
+	}
+
+	// Render the parsed bean
+	renderedContent, err := parsed.Render()
 	if err != nil {
 		t.Fatalf("Render error: %v", err)
 	}
 
-	if !bytes.Equal(first, second) {
-		t.Errorf("roundtrip not byte-identical:\nfirst:\n%s\nsecond:\n%s", first, second)
+	// Assert byte-identical roundtrip
+	if !bytes.Equal([]byte(inputContent), renderedContent) {
+		t.Errorf("roundtrip not byte-identical:\ninput:\n%s\nrendered:\n%s", inputContent, string(renderedContent))
 	}
 }
 
