@@ -363,7 +363,9 @@ func (c *Config) SetConfigDir(dir string) {
 	c.configDir = dir
 }
 
-// Save writes the configuration to the config file with helpful comments.
+// Save writes the configuration to the config file atomically with helpful comments.
+// Writes to a temporary file in the same directory, fsyncs, and renames to the target.
+// Preserves the existing file mode if the file already exists.
 // If configDir is set, saves to that directory; otherwise saves to the given directory.
 func (c *Config) Save(dir string) error {
 	targetDir := c.configDir
@@ -384,7 +386,46 @@ func (c *Config) Save(dir string) error {
 		return fmt.Errorf("closing encoder: %w", err)
 	}
 
-	return os.WriteFile(path, buf.Bytes(), 0644)
+	// Get the existing file mode if the target file exists
+	fileMode := os.FileMode(0644) // default mode
+	if stat, err := os.Stat(path); err == nil {
+		fileMode = stat.Mode()
+	}
+
+	// Write to a temporary file in the same directory to ensure atomicity.
+	tmpFile, err := os.CreateTemp(targetDir, ConfigFileName+".tmp.*")
+	if err != nil {
+		return fmt.Errorf("creating temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath) // Clean up temp file if it still exists
+
+	if _, err := tmpFile.Write(buf.Bytes()); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("writing temp file: %w", err)
+	}
+
+	// Fsync to ensure the data hits disk before we rename
+	if err := tmpFile.Sync(); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("syncing temp file: %w", err)
+	}
+
+	if err := tmpFile.Close(); err != nil {
+		return fmt.Errorf("closing temp file: %w", err)
+	}
+
+	// Atomic rename from temp to target
+	if err := os.Rename(tmpPath, path); err != nil {
+		return fmt.Errorf("renaming config file: %w", err)
+	}
+
+	// Restore the original file mode if it was different
+	if err := os.Chmod(path, fileMode); err != nil {
+		return fmt.Errorf("restoring file mode: %w", err)
+	}
+
+	return nil
 }
 
 // toYAMLNode builds a yaml.Node document tree with inline comments.

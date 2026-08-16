@@ -107,6 +107,14 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
+	// 4. Check prefix consistency (configuration vs on-disk)
+	prefixError := core.ValidatePrefixConsistency()
+	if prefixError != "" {
+		configErrors = append(configErrors, "prefix consistency: "+prefixError)
+	} else if !checkJSON {
+		fmt.Printf("  %s Prefix consistency valid\n", ui.Success.Render("✓"))
+	}
+
 		// Print config errors in human-readable mode
 		if !checkJSON {
 			for _, e := range configErrors {

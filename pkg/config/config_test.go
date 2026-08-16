@@ -1658,3 +1658,92 @@ server:
 		}
 	})
 }
+
+// TestSaveAtomic verifies that Save() writes atomically via temp file + rename.
+// The test checks that no temp files are left behind after a successful save.
+func TestSaveAtomic(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &Config{
+		Beans: BeansConfig{
+			Path:        ".beans",
+			Prefix:      "test-",
+			IDLength:    6,
+			DefaultType: "task",
+		},
+	}
+	cfg.SetConfigDir(tmpDir)
+
+	// Save the config
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	// Verify no temp files are left behind
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
+	}
+
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), ".tmp.") || strings.Contains(entry.Name(), "tmp") {
+			t.Errorf("Temp file left behind: %s", entry.Name())
+		}
+	}
+
+	// Verify the target file exists
+	configPath := filepath.Join(tmpDir, ConfigFileName)
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		t.Fatal("config file was not created")
+	}
+}
+
+// TestSavePreservesFileMode verifies that Save() preserves the existing file mode.
+func TestSavePreservesFileMode(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := &Config{
+		Beans: BeansConfig{
+			Path:        ".beans",
+			Prefix:      "test-",
+		},
+	}
+	cfg.SetConfigDir(tmpDir)
+
+	// Save the config once to create it
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("first Save() error = %v", err)
+	}
+
+	configPath := filepath.Join(tmpDir, ConfigFileName)
+
+	// Change the file mode
+	targetMode := os.FileMode(0600) // rw-------
+	if err := os.Chmod(configPath, targetMode); err != nil {
+		t.Fatalf("Chmod() error = %v", err)
+	}
+
+	// Verify the mode was set
+	stat, err := os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("Stat() error = %v", err)
+	}
+	if stat.Mode() != targetMode {
+		t.Errorf("Initial mode = %#o, want %#o", stat.Mode(), targetMode)
+	}
+
+	// Save again with a different prefix
+	cfg.Beans.Prefix = "newprefix-"
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("second Save() error = %v", err)
+	}
+
+	// Check that the mode was preserved
+	stat, err = os.Stat(configPath)
+	if err != nil {
+		t.Fatalf("Stat() after second save error = %v", err)
+	}
+	if stat.Mode() != targetMode {
+		t.Errorf("Preserved mode = %#o, want %#o", stat.Mode(), targetMode)
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -2122,4 +2123,136 @@ func TestLoadSkipsDotPrefixedSubdirectories(t *testing.T) {
 	if all[0].ID != "test-real" {
 		t.Fatalf("expected bean id test-real, got %s", all[0].ID)
 	}
+}
+
+// TestValidatePrefixConsistency tests the prefix consistency validation.
+func TestValidatePrefixConsistency(t *testing.T) {
+	t.Run("no error when prefix matches", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "test-",
+			},
+		}
+
+		// Create a bean with the expected prefix
+		b := &bean.Bean{
+			ID:    "test-abc1",
+			Title: "Test Bean",
+		}
+
+		c := New(tmpDir, cfg)
+		c.beans["test-abc1"] = b
+
+		// Should have no error
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg != "" {
+			t.Errorf("ValidatePrefixConsistency() = %q, want empty", errMsg)
+		}
+	})
+
+	t.Run("no error when no beans loaded", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "test-",
+			},
+		}
+
+		c := New(tmpDir, cfg)
+		// Don't add any beans
+
+		// Should have no error even though config has a prefix
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg != "" {
+			t.Errorf("ValidatePrefixConsistency() = %q, want empty", errMsg)
+		}
+	})
+
+	t.Run("detects prefix mismatch", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "test-",
+			},
+		}
+
+		// Create a bean with a different prefix
+		b := &bean.Bean{
+			ID:    "wrong-abc1",
+			Title: "Test Bean",
+		}
+
+		c := New(tmpDir, cfg)
+		c.beans["wrong-abc1"] = b
+
+		// Should report mismatch
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg == "" || !strings.Contains(errMsg, "prefix mismatch") {
+			t.Errorf("ValidatePrefixConsistency() = %q, want prefix mismatch error", errMsg)
+		}
+	})
+
+	t.Run("detects mixed-prefix state", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "test-",
+			},
+		}
+
+		// Create beans with different prefixes (mixed state)
+		b1 := &bean.Bean{
+			ID:    "test-abc1",
+			Title: "Test Bean 1",
+		}
+		b2 := &bean.Bean{
+			ID:    "other-def2",
+			Title: "Test Bean 2",
+		}
+
+		c := New(tmpDir, cfg)
+		c.beans["test-abc1"] = b1
+		c.beans["other-def2"] = b2
+
+		// Should report mixed-prefix state
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg == "" || !strings.Contains(errMsg, "mixed-prefix") {
+			t.Errorf("ValidatePrefixConsistency() = %q, want mixed-prefix error", errMsg)
+		}
+	})
+
+	t.Run("handles empty config prefix", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "", // No prefix configured
+			},
+		}
+
+		// Create beans without prefix
+		b1 := &bean.Bean{
+			ID:    "abc1",
+			Title: "Test Bean 1",
+		}
+		b2 := &bean.Bean{
+			ID:    "def2",
+			Title: "Test Bean 2",
+		}
+
+		c := New(tmpDir, cfg)
+		c.beans["abc1"] = b1
+		c.beans["def2"] = b2
+
+		// Should have no error when beans match empty prefix
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg != "" {
+			t.Errorf("ValidatePrefixConsistency() = %q, want empty", errMsg)
+		}
+	})
 }

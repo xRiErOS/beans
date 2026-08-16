@@ -3,10 +3,8 @@
 package beancore
 
 import (
-	"encoding/hex"
 	"errors"
 	"fmt"
-	"hash/fnv"
 	"io"
 	"os"
 	"path/filepath"
@@ -569,10 +567,8 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 				// If file doesn't exist yet, fall back to stored bean's etag
 				currentETag = storedBean.ETag()
 			} else {
-				// Calculate etag from on-disk content
-				h := fnv.New64a()
-				h.Write(content)
-				currentETag = hex.EncodeToString(h.Sum(nil))
+				// Calculate etag from on-disk content -- same definition bean.ETag uses.
+				currentETag = bean.ETagOf(content)
 			}
 		} else {
 			// No path yet or bean is dirty (not on disk), use in-memory etag
@@ -655,6 +651,7 @@ func (c *Core) saveToDisk(b *bean.Bean) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return fmt.Errorf("writing file: %w", err)
 	}
+	b.SetContentETag(content)
 
 	return nil
 }
@@ -679,6 +676,7 @@ func (c *Core) saveToWorktree(b *bean.Bean, worktreePath string) error {
 	if err := os.WriteFile(path, content, 0644); err != nil {
 		return fmt.Errorf("writing worktree bean: %w", err)
 	}
+	b.SetContentETag(content)
 
 	return nil
 }
@@ -952,6 +950,65 @@ func (c *Core) Close() error {
 	}
 
 	return c.unwatchLocked()
+}
+
+// ValidatePrefixConsistency checks if the configured prefix matches the actual
+// prefixes present in loaded beans. Returns an error message if a mismatch is found.
+// If config prefix is empty, all loaded beans must also have no prefix (or be unprefixed).
+// If config prefix is set, all loaded beans should start with that prefix.
+func (c *Core) ValidatePrefixConsistency() string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	configPrefix := ""
+	if c.config != nil {
+		configPrefix = c.config.Beans.Prefix
+	}
+
+	// Extract unique prefixes from loaded beans
+	prefixesSeen := make(map[string]bool)
+	for beanID := range c.beans {
+		// Extract the prefix from the bean ID (everything up to the first dash followed by letters/digits)
+		// Format is typically "prefix-idpart" where prefix ends at first -
+		parts := strings.Split(beanID, "-")
+		if len(parts) > 1 {
+			// Take everything except the last part as the prefix
+			detectedPrefix := strings.Join(parts[:len(parts)-1], "-")
+			if detectedPrefix != "" {
+				prefixesSeen[detectedPrefix+"-"] = true
+			}
+		} else {
+			// No dash, so no prefix
+			prefixesSeen[""] = true
+		}
+	}
+
+	// If no beans loaded, no inconsistency
+	if len(prefixesSeen) == 0 {
+		return ""
+	}
+
+	// Check for mixed-prefix state
+	if len(prefixesSeen) > 1 {
+		var prefixes []string
+		for p := range prefixesSeen {
+			prefixes = append(prefixes, p)
+		}
+		return fmt.Sprintf("mixed-prefix state detected: beans have prefixes %v but config.beans.prefix is %q", prefixes, configPrefix)
+	}
+
+	// Check if the single prefix matches the config
+	var actualPrefix string
+	for p := range prefixesSeen {
+		actualPrefix = p
+		break
+	}
+
+	if actualPrefix != configPrefix {
+		return fmt.Sprintf("prefix mismatch: beans have prefix %q but config.beans.prefix is %q", actualPrefix, configPrefix)
+	}
+
+	return ""
 }
 
 // Init creates the .beans directory at the given path if it doesn't exist,
