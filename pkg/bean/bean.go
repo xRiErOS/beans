@@ -168,6 +168,11 @@ type Bean struct {
 
 	// Extra holds front matter keys not covered by any typed field above.
 	Extra map[string]any `yaml:"-" json:"extra,omitempty"`
+
+	// contentETag is the hash of the bytes this bean was parsed from, or of
+	// the bytes last written for it. It is the single source of the etag:
+	// see ETag. Unexported so neither YAML nor JSON ever carries it.
+	contentETag string
 }
 
 // frontMatter is the subset of Bean that gets serialized to YAML front matter.
@@ -280,19 +285,20 @@ func Parse(r io.Reader) (*Bean, error) {
 	bodyStr := strings.TrimSuffix(string(body), "\n")
 
 	return &Bean{
-		Title:     fm.Title,
-		Status:    fm.Status,
-		Type:      fm.Type,
-		Priority:  fm.Priority,
-		Tags:      fm.Tags,
-		CreatedAt: fm.CreatedAt,
-		UpdatedAt: fm.UpdatedAt,
-		Order:     fm.Order,
-		Body:      bodyStr,
-		Parent:    fm.Parent,
-		Blocking:  fm.Blocking,
-		BlockedBy: fm.BlockedBy,
-		Extra:     extra,
+		Title:       fm.Title,
+		Status:      fm.Status,
+		Type:        fm.Type,
+		Priority:    fm.Priority,
+		Tags:        fm.Tags,
+		CreatedAt:   fm.CreatedAt,
+		UpdatedAt:   fm.UpdatedAt,
+		Order:       fm.Order,
+		Body:        bodyStr,
+		Parent:      fm.Parent,
+		Blocking:    fm.Blocking,
+		BlockedBy:   fm.BlockedBy,
+		Extra:       extra,
+		contentETag: ETagOf(data),
 	}, nil
 }
 
@@ -382,10 +388,23 @@ func (b *Bean) Render() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// ETag returns a hash of the bean's rendered content for optimistic concurrency control.
-// Uses FNV-1a 64-bit hash, producing a 16-character hex string.
-// Returns "0000000000000000" if rendering fails (should never happen for valid beans).
+// ETag returns the bean's etag for optimistic concurrency control: the FNV-1a
+// 64-bit hash of its serialized bytes, as a 16-character hex string.
+//
+// The bytes are the ones the bean was parsed from, or the ones last written
+// for it -- never a fresh Render() of the in-memory struct, which diverges
+// from the file in two ways that made this token useless: a loader default
+// applied in memory (an absent priority becoming "normal") adds a key the
+// file never had, and any in-memory mutation before the write would report
+// the etag of the new state instead of the one being replaced.
+//
+// A bean that has never touched a file -- freshly constructed in memory or in
+// a test -- has no such bytes; for it the render is the only definition
+// available and is used as the fallback.
 func (b *Bean) ETag() string {
+	if b.contentETag != "" {
+		return b.contentETag
+	}
 	content, err := b.Render()
 	if err != nil {
 		// Return a sentinel value that will never match a real ETag,
@@ -395,12 +414,7 @@ func (b *Bean) ETag() string {
 	return ETagOf(content)
 }
 
-// ETagOf hashes raw content the same way ETag does. Callers that need to
-// compare against a bean's actual on-disk bytes -- rather than a re-rendered
-// in-memory bean, whose Render() output can diverge from a file written
-// before some in-memory-only default was applied to the bean (e.g. an
-// empty Priority defaulted to "normal" on load) -- should hash those bytes
-// with this instead of loading the bean and calling ETag().
+// ETagOf hashes raw content the way ETag does.
 func ETagOf(content []byte) string {
 	h := fnv.New64a()
 	h.Write(content)
@@ -418,3 +432,11 @@ func (b *Bean) MarshalJSON() ([]byte, error) {
 		ETag:      b.ETag(),
 	})
 }
+
+// SetContentETag records the bytes now backing this bean, so that ETag keeps
+// reporting the token the write path validates against. Callers that persist a
+// bean MUST call this with the exact bytes they wrote.
+func (b *Bean) SetContentETag(content []byte) {
+	b.contentETag = ETagOf(content)
+}
+
