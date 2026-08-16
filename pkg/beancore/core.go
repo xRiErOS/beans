@@ -113,6 +113,79 @@ func (c *Core) Config() *config.Config {
 	return c.config
 }
 
+// detectOrphanBackup checks for .beans.bak-* orphans left by an interrupted stageAndSwap.
+// If the live .beans directory is missing or empty AND exactly one backup exists with content,
+// it automatically repairs by renaming the backup back to .beans.
+// If the .beans directory is missing/empty but multiple or zero backups exist, it logs a warning
+// with the exact path and manual recovery command and ensures .beans exists (empty).
+// Returns true if repair was performed, false otherwise.
+func (c *Core) detectOrphanBackup() bool {
+	repo := c.repoRoot()
+	
+	// Check if .beans exists and has content
+	entries, err := os.ReadDir(c.root)
+	if err == nil && len(entries) > 0 {
+		// .beans exists and has content; no orphan
+		return false
+	}
+	
+	// .beans is missing or empty. Look for .beans.bak-* backups.
+	allEntries, err := os.ReadDir(repo)
+	if err != nil {
+		return false // can't read repo dir, nothing to do
+	}
+	
+	var backups []string
+	for _, entry := range allEntries {
+		if strings.HasPrefix(entry.Name(), ".beans.bak-") && entry.IsDir() {
+			backupPath := filepath.Join(repo, entry.Name())
+			// Check if backup has content
+			subentries, err := os.ReadDir(backupPath)
+			if err == nil && len(subentries) > 0 {
+				backups = append(backups, backupPath)
+			}
+		}
+	}
+	
+	if len(backups) == 0 {
+		// No backups found: ensure .beans dir exists (even if empty)
+		if err := os.MkdirAll(c.root, 0755); err != nil {
+			c.logWarn("failed to create .beans directory: %v", err)
+		}
+		return false
+	}
+	
+	if len(backups) == 1 {
+		// Exactly one backup exists: repair by renaming back
+		// First remove empty .beans if it exists
+		if err := os.RemoveAll(c.root); err != nil && !os.IsNotExist(err) {
+			c.logWarn("failed to clear empty .beans directory before repair: %v", err)
+			// Continue anyway, os.Rename will fail with a clear message
+		}
+		if err := os.Rename(backups[0], c.root); err != nil {
+			c.logWarn("failed to repair .beans from backup %s: %v", backups[0], err)
+			// Ensure .beans exists even after failed repair
+			os.MkdirAll(c.root, 0755)
+			return false
+		}
+		c.logWarn("repaired .beans from backup %s (stageAndSwap crash detected and recovered)", backups[0])
+		return true
+	}
+	
+	// Multiple backups exist: emit warning with each path and recovery command
+	c.logWarn("detected multiple .beans.bak-* backups (stageAndSwap may have crashed multiple times):")
+	for _, backup := range backups {
+		c.logWarn("  - %s", backup)
+		c.logWarn("    To recover: rm -rf %s && mv %s %s", c.root, backup, c.root)
+	}
+	// Ensure .beans exists (empty) so Load() can continue
+	if err := os.MkdirAll(c.root, 0755); err != nil {
+		c.logWarn("failed to create .beans directory: %v", err)
+	}
+	return false
+}
+
+
 // Load reads all beans from disk into memory.
 func (c *Core) Load() error {
 	c.mu.Lock()
@@ -126,12 +199,13 @@ func (c *Core) Load() error {
 func (c *Core) loadFromDisk() error {
 	// Migrate legacy directory names (worktrees/ → .worktrees/, conversations/ → .conversations/)
 	c.migrateLegacyDirs()
-
+	
+	// Detect and repair .beans.bak-* orphans left by interrupted stageAndSwap
+	_ = c.detectOrphanBackup() // best-effort; continue loading even if repair failed
+	
 	// Clear existing beans and dirty state
 	c.beans = make(map[string]*bean.Bean)
 	c.dirty = make(map[string]bool)
-
-	// Walk the .beans directory tree, loading all .md files
 	err := filepath.WalkDir(c.root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err

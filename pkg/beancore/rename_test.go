@@ -782,3 +782,193 @@ func contains(s, substr string) bool {
 		return false
 	})()
 }
+
+// TestStageAndSwap_rollbackOnSecondRenameFailure tests that when stageAndSwap
+// performs its second os.Rename (swapping staging back to .beans) and fails,
+// the original .beans is still in place (rollback branch). This validates that
+// swapRename's failure handling correctly restores the original state.
+func TestStageAndSwap_rollbackOnSecondRenameFailure(t *testing.T) {
+	// Save the original swapRename function
+	originalSwapRename := swapRename
+	defer func() { swapRename = originalSwapRename }()
+	
+	// Track if swapRename was called
+	swapRenameCalls := 0
+	swapRename = func(old, new string) error {
+		swapRenameCalls++
+		// Fail on any call (will be first/only call in this test)
+		return fmt.Errorf("injected failure")
+	}
+	
+	repo := t.TempDir()
+	beansDir := filepath.Join(repo, ".beans")
+	
+	// Create initial .beans with a bean
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(beansDir, "tp-aaaa--test.md"), []byte("---\n# tp-aaaa\ntitle: Original\nstatus: todo\ntype: task\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	
+	cfg := config.DefaultWithPrefix("tp-")
+	cfg.SetConfigDir(repo)
+	c := New(beansDir, cfg)
+	if err := c.Load(); err != nil {
+		t.Fatal(err)
+	}
+	
+	// Verify original bean loaded
+	b, err := c.Get("tp-aaaa")
+	if err != nil {
+		t.Fatalf("Failed to load original bean: %v", err)
+	}
+	if b.Title != "Original" {
+		t.Errorf("Original bean title mismatch: got %q, want %q", b.Title, "Original")
+	}
+	
+	// Try to stage and swap - this should fail and rollback
+	err = c.stageAndSwap(map[string][]byte{
+		"tp-bbbb--test.md": []byte("---\n# tp-bbbb\ntitle: New\nstatus: todo\ntype: task\n---\n"),
+	}, nil)
+	
+	if err == nil {
+		t.Fatalf("Expected stageAndSwap to fail (injected failure), but it succeeded. swapRename was called %d times", swapRenameCalls)
+	}
+	if !strings.Contains(err.Error(), "injected failure") {
+		t.Fatalf("Expected injected failure, got: %v", err)
+	}
+	
+	// Verify swapRename was actually called (at least once)
+	if swapRenameCalls < 1 {
+		t.Fatalf("swapRename was never called: %d calls", swapRenameCalls)
+	}
+	
+	// After rollback, original .beans should be restored
+	if _, err := os.Stat(beansDir); os.IsNotExist(err) {
+		t.Fatal("Original .beans dir was not restored after rollback")
+	}
+	
+	// Verify no backup orphan left (they should be cleaned up after successful rollback)
+	orphanDirs, _ := filepath.Glob(filepath.Join(repo, ".beans.bak-*"))
+	if len(orphanDirs) > 0 {
+		t.Errorf("Found orphan backups after rollback: %v", orphanDirs)
+	}
+	
+	// Verify original bean is still there and NOT replaced
+	c2 := New(beansDir, cfg)
+	if err := c2.Load(); err != nil {
+		t.Fatalf("Failed to load after rollback: %v", err)
+	}
+	b2, err := c2.Get("tp-aaaa")
+	if err != nil {
+		t.Fatalf("Original bean lost after rollback: %v", err)
+	}
+	if b2.Title != "Original" {
+		t.Errorf("Original bean corrupted: got %q, want %q", b2.Title, "Original")
+	}
+}
+
+// TestDetectOrphanBackup_repairsExactlyOneBackup tests that when .beans is missing
+// and exactly one .beans.bak-* exists with content, Load() detects and repairs it
+// by renaming the backup back to .beans.
+func TestDetectOrphanBackup_repairsExactlyOneBackup(t *testing.T) {
+	repo := t.TempDir()
+	beansDir := filepath.Join(repo, ".beans")
+	backupDir := filepath.Join(repo, ".beans.bak-1234567890")
+	
+	// Create a backup with a bean inside
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(backupDir, "tp-xxbb--test.md"), []byte("---\n# tp-xxbb\ntitle: Recovered\nstatus: todo\ntype: task\n---\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	
+	// Create Core with missing .beans dir
+	cfg := config.DefaultWithPrefix("tp-")
+	cfg.SetConfigDir(repo)
+	c := New(beansDir, cfg)
+	
+	// Load should detect orphan and repair it
+	if err := c.Load(); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	
+	// After repair, .beans should exist
+	if _, err := os.Stat(beansDir); os.IsNotExist(err) {
+		t.Fatal(".beans was not restored from backup")
+	}
+	
+	// Backup should no longer exist
+	if _, err := os.Stat(backupDir); !os.IsNotExist(err) {
+		t.Fatal("Backup was not removed after repair")
+	}
+	
+	// Verify the bean is now accessible
+	b, err := c.Get("tp-xxbb")
+	if err != nil {
+		t.Fatalf("Bean not found after repair: %v", err)
+	}
+	if b.Title != "Recovered" {
+		t.Errorf("Bean title mismatch: got %q, want %q", b.Title, "Recovered")
+	}
+}
+
+// TestDetectOrphanBackup_warnsOnMultipleBackups tests that when .beans is missing
+// and multiple .beans.bak-* exist, Load() warns but does not auto-repair
+// (ambiguous which to use), allowing the user to manually recover.
+func TestDetectOrphanBackup_warnsOnMultipleBackups(t *testing.T) {
+	repo := t.TempDir()
+	beansDir := filepath.Join(repo, ".beans")
+	
+	// Create multiple backups
+	for _, ts := range []string{"1000", "2000"} {
+		backupDir := filepath.Join(repo, ".beans.bak-"+ts)
+		if err := os.MkdirAll(backupDir, 0755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(backupDir, "tp-aaaa--test.md"), []byte("---\n# tp-aaaa\ntitle: Test\nstatus: todo\ntype: task\n---\n"), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	
+	cfg := config.DefaultWithPrefix("tp-")
+	cfg.SetConfigDir(repo)
+	c := New(beansDir, cfg)
+	
+	// Load should warn but not repair
+	if err := c.Load(); err != nil {
+		t.Fatalf("Load failed: %v", err)
+	}
+	
+	// .beans should exist (empty) but not repaired to any specific backup
+	if _, err := os.Stat(beansDir); os.IsNotExist(err) {
+		t.Fatal(".beans should be created (empty) even when multiple backups present")
+	}
+	
+	// Backups should still exist (not touched)
+	for _, ts := range []string{"1000", "2000"} {
+		backupDir := filepath.Join(repo, ".beans.bak-"+ts)
+		if _, err := os.Stat(backupDir); os.IsNotExist(err) {
+			t.Fatalf("Backup .beans.bak-%s was removed", ts)
+		}
+	}
+}
+
+// TestDetectOrphanBackup_nothingToRepair tests that Load() succeeds normally
+// when .beans exists and has content (no orphans).
+func TestDetectOrphanBackup_nothingToRepair(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--test.md": "---\n# tp-aaaa\ntitle: Normal\nstatus: todo\ntype: task\n---\n",
+	})
+	
+	// newTestCore already calls Load(), so the bean should be loaded
+	b, err := c.Get("tp-aaaa")
+	if err != nil {
+		t.Fatalf("Bean not found: %v", err)
+	}
+	if b.Title != "Normal" {
+		t.Errorf("Bean title mismatch: got %q, want %q", b.Title, "Normal")
+	}
+}
