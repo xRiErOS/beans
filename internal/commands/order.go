@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
@@ -54,24 +53,13 @@ bean file being placed, never the neighbours around it.`,
 			return cmdError(orderJSON, output.ErrValidation, "%s", err)
 		}
 
-		// Capture the bean's actual on-disk etag before mutating it, and
-		// pass it as ifMatch instead of nil: nil bypasses optimistic
-		// concurrency control entirely -- silently ignored under a normal
-		// config, and under require_if_match:true it makes the write fail
-		// outright. b.ETag() is deliberately not used here: every `beans
-		// order` invocation is its own process, so b was just loaded via
-		// Core.Load, which defaults an empty Priority/Type in memory --
-		// fields an ordinary on-disk file (created without -p/-t) never
-		// contains. Render()-ing that defaulted bean would produce bytes
-		// core.Update's own on-disk check never sees, rejecting the write
-		// with a false mismatch on essentially every bean. Hashing the
-		// actual on-disk bytes matches what core.Update itself validates
-		// against.
-		content, err := os.ReadFile(core.FullPath(b))
-		if err != nil {
-			return cmdError(orderJSON, output.ErrFileError, "failed to read current bean state: %v", err)
-		}
-		etag := bean.ETagOf(content)
+		// Pass the bean's own etag as ifMatch instead of nil: nil bypasses
+		// optimistic concurrency control entirely -- silently ignored under a
+		// normal config, and under require_if_match:true it makes the write
+		// fail outright. b was loaded via resolver.Bean/Core.Load, so its
+		// ETag() is the etag of the bytes actually on disk (cached at parse
+		// time), not a re-render of the in-memory struct -- see bean.ETag.
+		etag := b.ETag()
 		b.Order = newOrder
 		if err := core.Update(b, &etag); err != nil {
 			return mutationError(orderJSON, err)
