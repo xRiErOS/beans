@@ -2255,4 +2255,121 @@ func TestValidatePrefixConsistency(t *testing.T) {
 			t.Errorf("ValidatePrefixConsistency() = %q, want empty", errMsg)
 		}
 	})
+
+	t.Run("body reference to a foreign prefix is not a finding", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beansDir := filepath.Join(tmpDir, BeansDir)
+		if err := os.MkdirAll(beansDir, 0755); err != nil {
+			t.Fatalf("failed to create test .beans dir: %v", err)
+		}
+
+		cfg := config.Default()
+		cfg.Beans.Prefix = "own-"
+		core := New(beansDir, cfg)
+		core.SetWarnWriter(nil)
+
+		content := `---
+title: Mentions a foreign bean
+status: open
+---
+
+Built under okf-cli-iaxj, see also foreign-1234 for context. Both are references
+to beans in other stores, not beans of this store.
+`
+		if err := os.WriteFile(filepath.Join(beansDir, "own-abc1--mentions-foreign.md"), []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write test file: %v", err)
+		}
+
+		if err := core.Load(); err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if errMsg := core.ValidatePrefixConsistency(); errMsg != "" {
+			t.Errorf("ValidatePrefixConsistency() = %q, want empty (body text must never be scanned for prefixes)", errMsg)
+		}
+	})
+
+	t.Run("archived bean with a foreign prefix is not a finding", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beansDir := filepath.Join(tmpDir, BeansDir)
+		archiveDir := filepath.Join(beansDir, ArchiveDir)
+		if err := os.MkdirAll(archiveDir, 0755); err != nil {
+			t.Fatalf("failed to create test archive dir: %v", err)
+		}
+
+		cfg := config.Default()
+		cfg.Beans.Prefix = "own-"
+		core := New(beansDir, cfg)
+		core.SetWarnWriter(nil)
+
+		activeContent := `---
+title: Active bean
+status: open
+---
+
+Active bean content.
+`
+		if err := os.WriteFile(filepath.Join(beansDir, "own-abc1--active.md"), []byte(activeContent), 0644); err != nil {
+			t.Fatalf("failed to write active test file: %v", err)
+		}
+
+		// A bean physically copied in from another store's archive — historical,
+		// frozen, and must never count toward this store's live prefix set.
+		archivedContent := `---
+title: Archived foreign bean
+status: completed
+---
+
+Archived content from another project.
+`
+		if err := os.WriteFile(filepath.Join(archiveDir, "okf-cli-3hjr--archived-foreign.md"), []byte(archivedContent), 0644); err != nil {
+			t.Fatalf("failed to write archived test file: %v", err)
+		}
+
+		if err := core.Load(); err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if errMsg := core.ValidatePrefixConsistency(); errMsg != "" {
+			t.Errorf("ValidatePrefixConsistency() = %q, want empty (archived beans must not count toward the live prefix set)", errMsg)
+		}
+	})
+
+	t.Run("two active beans with different id prefixes is still a finding", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		beansDir := filepath.Join(tmpDir, BeansDir)
+		if err := os.MkdirAll(beansDir, 0755); err != nil {
+			t.Fatalf("failed to create test .beans dir: %v", err)
+		}
+
+		cfg := config.Default()
+		cfg.Beans.Prefix = "own-"
+		core := New(beansDir, cfg)
+		core.SetWarnWriter(nil)
+
+		content := `---
+title: Bean %d
+status: open
+---
+
+Bean content.
+`
+		if err := os.WriteFile(filepath.Join(beansDir, "own-abc1--first.md"), []byte(fmt.Sprintf(content, 1)), 0644); err != nil {
+			t.Fatalf("failed to write first test file: %v", err)
+		}
+		// Genuinely active bean with a different id prefix — a real drift, not
+		// an archived or referenced foreign bean, so it must still be reported.
+		if err := os.WriteFile(filepath.Join(beansDir, "other-def2--second.md"), []byte(fmt.Sprintf(content, 2)), 0644); err != nil {
+			t.Fatalf("failed to write second test file: %v", err)
+		}
+
+		if err := core.Load(); err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		errMsg := core.ValidatePrefixConsistency()
+		if errMsg == "" || !strings.Contains(errMsg, "mixed-prefix") {
+			t.Errorf("ValidatePrefixConsistency() = %q, want mixed-prefix error for genuinely mixed active beans", errMsg)
+		}
+	})
 }

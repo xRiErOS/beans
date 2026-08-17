@@ -1063,9 +1063,17 @@ func (c *Core) ValidatePrefixConsistency() string {
 		configPrefix = c.config.Beans.Prefix
 	}
 
-	// Extract unique prefixes from loaded beans
+	// Extract unique prefixes from loaded, non-archived beans. Archived beans
+	// are historical/frozen (project memory, cf. Archive()) and may carry a
+	// prefix that predates a rename or, occasionally, belong to a bean that
+	// was physically copied in from another store; neither case is a live
+	// consistency defect of this store, so archived beans never contribute
+	// to the detected prefix set.
 	prefixesSeen := make(map[string]bool)
-	for beanID := range c.beans {
+	for beanID, b := range c.beans {
+		if c.isArchivedPath(b.Path) {
+			continue
+		}
 		// Extract the prefix from the bean ID (everything up to the first dash followed by letters/digits)
 		// Format is typically "prefix-idpart" where prefix ends at first -
 		parts := strings.Split(beanID, "-")
