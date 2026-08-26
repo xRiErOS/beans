@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/hmans/beans/pkg/bean"
 	"gopkg.in/yaml.v3"
 )
 
@@ -24,6 +25,9 @@ const (
 	// instead of at the config file's directory. Secondary worktrees then share
 	// the main workdir's store rather than each carrying their own.
 	AnchorRepoRoot = "repo-root"
+	// DefaultCommitField is the front matter key used to record a commit SHA
+	// when beans.commit_field is not configured.
+	DefaultCommitField = "commit"
 )
 
 // DefaultStatuses defines the hardcoded status configuration.
@@ -188,6 +192,12 @@ type BeansConfig struct {
 	DefaultStatus  string `yaml:"default_status,omitempty"`
 	DefaultType    string `yaml:"default_type,omitempty"`
 	RequireIfMatch bool   `yaml:"require_if_match,omitempty"`
+	// RequireFieldsOn maps a target status to front matter keys that must carry
+	// a non-empty value whenever a bean is written into that status.
+	RequireFieldsOn map[string][]string `yaml:"require_fields_on,omitempty"`
+	// CommitField names the extra front matter key that holds a git commit SHA.
+	// Only this key is git-verified when written or checked.
+	CommitField string `yaml:"commit_field,omitempty"`
 }
 
 // Default returns a Config with default values.
@@ -303,6 +313,10 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("%s: %w", configPath, err)
 	}
 
+	if err := cfg.validateRequireFieldsOn(); err != nil {
+		return nil, fmt.Errorf("%s: %w", configPath, err)
+	}
+
 	return &cfg, nil
 }
 
@@ -314,6 +328,27 @@ func ValidateAnchor(anchor string) error {
 	default:
 		return fmt.Errorf("unknown beans.anchor %q (expected %q or an empty value)", anchor, AnchorRepoRoot)
 	}
+}
+
+// validateRequireFieldsOn rejects a beans.require_fields_on configuration that
+// names an unknown status, an empty field name, or a field beans already
+// manages as a schema field. Misconfiguration must not silently degrade into
+// no policy at all.
+func (c *Config) validateRequireFieldsOn() error {
+	for status, fields := range c.Beans.RequireFieldsOn {
+		if !c.IsValidStatus(status) {
+			return fmt.Errorf("unknown status %q in beans.require_fields_on (valid: %s)", status, c.StatusList())
+		}
+		for _, field := range fields {
+			if strings.TrimSpace(field) == "" {
+				return fmt.Errorf("beans.require_fields_on[%q] contains an empty field name", status)
+			}
+			if _, known := bean.ReservedKeyFlag(field); known {
+				return fmt.Errorf("beans.require_fields_on[%q] names reserved front matter field %q (managed by beans, not an extra key)", status, field)
+			}
+		}
+	}
+	return nil
 }
 
 // LoadFromDirectory finds and loads the config file by searching upward from the given directory.
@@ -490,6 +525,30 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		beansMapping.Content = append(beansMapping.Content, key, scalar("true", "!!bool"))
 	}
 
+	if len(c.Beans.RequireFieldsOn) > 0 {
+		key := strNode("require_fields_on")
+		key.HeadComment = "Front matter keys that must be set when a bean enters a status"
+		mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		for _, s := range DefaultStatuses { // deterministic key order
+			fields := c.Beans.RequireFieldsOn[s.Name]
+			if len(fields) == 0 {
+				continue
+			}
+			seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
+			for _, f := range fields {
+				seq.Content = append(seq.Content, strNode(f))
+			}
+			mapping.Content = append(mapping.Content, strNode(s.Name), seq)
+		}
+		beansMapping.Content = append(beansMapping.Content, key, mapping)
+	}
+
+	if c.Beans.CommitField != "" {
+		key := strNode("commit_field")
+		key.HeadComment = "Extra front matter key holding the git commit SHA (default: commit)"
+		beansMapping.Content = append(beansMapping.Content, key, strNode(c.Beans.CommitField))
+	}
+
 	// Build the worktree mapping
 	worktreeMapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if c.Worktree.BaseRef != "" {
@@ -573,6 +632,20 @@ func (c *Config) IsValidStatus(status string) bool {
 		}
 	}
 	return false
+}
+
+// RequiredFieldsFor returns the front matter keys that must be set when a bean
+// enters status. Returns nil when no policy applies.
+func (c *Config) RequiredFieldsFor(status string) []string {
+	return c.Beans.RequireFieldsOn[status]
+}
+
+// GetCommitField returns the configured commit field name, or DefaultCommitField.
+func (c *Config) GetCommitField() string {
+	if c.Beans.CommitField != "" {
+		return c.Beans.CommitField
+	}
+	return DefaultCommitField
 }
 
 // StatusList returns a comma-separated list of valid statuses.

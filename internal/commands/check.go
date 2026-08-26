@@ -4,23 +4,27 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/hmans/beans/internal/gitutil"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
 	"github.com/hmans/beans/internal/ui"
 )
 
 var (
-	checkJSON bool
-	checkFix  bool
+	checkJSON   bool
+	checkFix    bool
+	checkStrict bool
 )
 
 type checkResult struct {
-	Success      bool                      `json:"success"`
-	ConfigErrors []string                  `json:"config_errors"`
-	BeanIssues   *beancore.LinkCheckResult `json:"bean_issues,omitempty"`
-	Fixed        int                       `json:"fixed,omitempty"`
+	Success        bool                      `json:"success"`
+	ConfigErrors   []string                  `json:"config_errors"`
+	BeanIssues     *beancore.LinkCheckResult `json:"bean_issues,omitempty"`
+	Fixed          int                       `json:"fixed,omitempty"`
+	PolicyWarnings []string                  `json:"policy_warnings,omitempty"`
 }
 
 var checkCmd = &cobra.Command{
@@ -176,15 +180,88 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			fmt.Printf("  %s No link issues found\n", ui.Success.Render("✓"))
 		}
 
+		// === Policy checks ===
+		var policyWarnings []string
+		if len(cfg.Beans.RequireFieldsOn) > 0 {
+			if !checkJSON {
+				fmt.Println()
+				fmt.Println(ui.Bold.Render("Policy"))
+			}
+
+			commitField := cfg.GetCommitField()
+			type commitRef struct {
+				beanID string
+				sha    string
+			}
+			var refs []commitRef
+			var shas []string
+			seenSha := make(map[string]bool)
+
+			for _, b := range core.All() {
+				if fields := cfg.RequiredFieldsFor(b.Status); len(fields) > 0 {
+					var missing []string
+					for _, f := range fields {
+						v, ok := b.Extra[f]
+						if !ok || v == nil || strings.TrimSpace(fmt.Sprint(v)) == "" {
+							missing = append(missing, f)
+						}
+					}
+					if len(missing) > 0 {
+						policyWarnings = append(policyWarnings, fmt.Sprintf("%s: status %q missing required field(s): %s", b.ID, b.Status, strings.Join(missing, ", ")))
+					}
+				}
+				if v, ok := b.Extra[commitField]; ok {
+					if sha, ok := v.(string); ok && sha != "" {
+						refs = append(refs, commitRef{beanID: b.ID, sha: sha})
+						if !seenSha[sha] {
+							seenSha[sha] = true
+							shas = append(shas, sha)
+						}
+					}
+				}
+			}
+
+			if len(shas) > 0 {
+				var exist map[string]bool
+				ok := false
+				if cwd, err := os.Getwd(); err == nil {
+					exist, ok = gitutil.CommitsExist(cwd, shas)
+				}
+				if !ok {
+					policyWarnings = append(policyWarnings, "commit verification skipped (not a git repository)")
+				} else {
+					for _, ref := range refs {
+						if !exist[ref.sha] {
+							policyWarnings = append(policyWarnings, fmt.Sprintf("%s: commit %s not found in this repository", ref.beanID, ref.sha))
+						}
+					}
+				}
+			}
+
+			if !checkJSON {
+				if len(policyWarnings) == 0 {
+					fmt.Printf("  %s Field policy satisfied\n", ui.Success.Render("✓"))
+				} else {
+					for _, w := range policyWarnings {
+						fmt.Printf("  %s %s\n", ui.Warning.Render("!"), w)
+					}
+				}
+			}
+		}
+
 		// === Summary ===
 		totalIssues := len(configErrors) + linkResult.TotalIssues()
+		if checkStrict {
+			totalIssues += len(policyWarnings)
+		}
 
 		if checkJSON {
 			result := checkResult{
-				Success:      totalIssues == 0,
-				ConfigErrors: configErrors,
-				BeanIssues:   linkResult,
-				Fixed:        fixed,
+				Success:        totalIssues == 0,
+				ConfigErrors:   configErrors,
+				BeanIssues:     linkResult,
+				Fixed:          fixed,
+				PolicyWarnings: policyWarnings,
 			}
 			data, _ := json.MarshalIndent(result, "", "  ")
 			fmt.Println(string(data))
@@ -216,5 +293,6 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 func RegisterCheckCmd(root *cobra.Command) {
 	checkCmd.Flags().BoolVar(&checkJSON, "json", false, "Output as JSON")
 	checkCmd.Flags().BoolVar(&checkFix, "fix", false, "Automatically fix broken links and self-references")
+	checkCmd.Flags().BoolVar(&checkStrict, "strict", false, "Count policy warnings as issues (exit 1)")
 	root.AddCommand(checkCmd)
 }

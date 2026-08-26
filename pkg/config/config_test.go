@@ -323,6 +323,67 @@ func TestLoadAnchor(t *testing.T) {
 	})
 }
 
+func TestLoadRequireFieldsOn(t *testing.T) {
+	write := func(t *testing.T, body string) string {
+		t.Helper()
+		configPath := filepath.Join(t.TempDir(), ConfigFileName)
+		if err := os.WriteFile(configPath, []byte(body), 0644); err != nil {
+			t.Fatalf("WriteFile error = %v", err)
+		}
+		return configPath
+	}
+
+	t.Run("unknown status is an error", func(t *testing.T) {
+		_, err := Load(write(t, "beans:\n  require_fields_on:\n    bogus:\n      - commit\n"))
+		if err == nil {
+			t.Fatal("expected error for unknown status, got nil")
+		}
+		if !strings.Contains(err.Error(), "unknown status") {
+			t.Errorf("expected error to contain \"unknown status\", got %q", err.Error())
+		}
+	})
+
+	t.Run("reserved schema field is an error", func(t *testing.T) {
+		_, err := Load(write(t, "beans:\n  require_fields_on:\n    completed:\n      - title\n"))
+		if err == nil {
+			t.Fatal("expected error for reserved field, got nil")
+		}
+		if !strings.Contains(err.Error(), "reserved front matter field") {
+			t.Errorf("expected error to contain \"reserved front matter field\", got %q", err.Error())
+		}
+	})
+
+	t.Run("save-load roundtrip preserves policy and commit field", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &Config{
+			Beans: BeansConfig{
+				Path:            ".beans",
+				Prefix:          "test-",
+				IDLength:        4,
+				RequireFieldsOn: map[string][]string{"completed": {"commit"}},
+				CommitField:     "commit",
+			},
+		}
+		cfg.SetConfigDir(tmpDir)
+
+		if err := cfg.Save(tmpDir); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		loaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		if got := loaded.RequiredFieldsFor("completed"); len(got) != 1 || got[0] != "commit" {
+			t.Errorf("RequiredFieldsFor(\"completed\") = %v, want [commit]", got)
+		}
+		if got := loaded.GetCommitField(); got != "commit" {
+			t.Errorf("GetCommitField() = %q, want \"commit\"", got)
+		}
+	})
+}
+
 func TestStatusesAreHardcoded(t *testing.T) {
 	// Statuses are hardcoded and not configurable (like types)
 	// Verify that any config only uses hardcoded statuses

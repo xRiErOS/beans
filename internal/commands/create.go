@@ -8,6 +8,7 @@ import (
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/hmans/beans/pkg/config"
@@ -55,6 +56,11 @@ var createCmd = &cobra.Command{
 		if err := validateExtraKeys(createSet, createUnset); err != nil {
 			return cmdError(createJSON, output.ErrValidation, "%s", err)
 		}
+		normalizedSet, err := normalizeCommitSets(createSet)
+		if err != nil {
+			return cmdError(createJSON, output.ErrValidation, "%s", err)
+		}
+		createSet = normalizedSet
 		if cmd.Flags().Changed("order") && !bean.IsValidOrderKey(createOrder) {
 			return cmdError(createJSON, output.ErrValidation, "invalid order value: %q (must be a non-empty base62 fractional index)", createOrder)
 		}
@@ -108,31 +114,34 @@ var createCmd = &cobra.Command{
 			input.Prefix = &createPrefix
 		}
 
+		setMap, err := extraSetMap(createSet)
+		if err != nil {
+			return cmdError(createJSON, output.ErrValidation, "%s", err)
+		}
+
 		// Create via core resolver
 		resolver := &beangraph.CoreResolver{Core: core}
-		b, err := resolver.CreateBean(context.Background(), input)
+		b, err := resolver.CreateBean(context.Background(), input, beancore.WithExtraOps(setMap, nil))
 		if err != nil {
 			return cmdError(createJSON, output.ErrFileError, "failed to create bean: %v", err)
 		}
 
-		// Extra front matter keys and an explicit order aren't part of the
-		// generated CreateBeanInput type, so they're applied and persisted
-		// together as a second write.
-		needsSecondWrite := len(createSet) > 0 || len(createUnset) > 0 || cmd.Flags().Changed("order")
+		// An explicit order and --unset aren't part of the generated
+		// CreateBeanInput type or WithExtraOps (which only sets), so
+		// they're applied and persisted as a second write.
+		needsSecondWrite := len(createUnset) > 0 || cmd.Flags().Changed("order")
 		if needsSecondWrite {
 			// Capture the freshly-created bean's own etag before mutating it,
 			// and pass it as ifMatch below instead of nil: nil bypasses
 			// optimistic concurrency control -- silently ignored under a
 			// normal config, and under require_if_match:true it makes the
 			// write fail outright, leaving the bean on disk without the
-			// extra keys/order that were just requested. The bean's own
-			// current etag satisfies require_if_match and still catches a
-			// genuine concurrent external write between the two writes.
+			// order/unset that were just requested. The bean's own current
+			// etag satisfies require_if_match and still catches a genuine
+			// concurrent external write between the two writes.
 			etag := b.ETag()
-			if len(createSet) > 0 || len(createUnset) > 0 {
-				if err := applyExtraOps(b, createSet, createUnset); err != nil {
-					return cmdError(createJSON, output.ErrValidation, "%s", err)
-				}
+			for _, key := range createUnset {
+				delete(b.Extra, key)
 			}
 			if cmd.Flags().Changed("order") {
 				b.Order = createOrder

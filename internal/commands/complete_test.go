@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -55,9 +56,12 @@ func setupCompleteTest(t *testing.T) *bean.Bean {
 func resetCompleteFlags(t *testing.T) {
 	t.Helper()
 	oldJSON, oldSummary := completeJSON, completeSummary
+	oldCommit, oldSet := completeCommit, completeSet
 	completeJSON, completeSummary = false, ""
+	completeCommit, completeSet = "", nil
 	t.Cleanup(func() {
 		completeJSON, completeSummary = oldJSON, oldSummary
+		completeCommit, completeSet = oldCommit, oldSet
 	})
 }
 
@@ -176,5 +180,152 @@ func TestCompleteJSONOutput(t *testing.T) {
 	}
 	if got.Status != "completed" {
 		t.Errorf("persisted bean status = %q, want %q", got.Status, "completed")
+	}
+}
+
+// setupCompleteTestWithCommitPolicy is like setupCompleteTest but installs a
+// require_fields_on policy requiring "commit" on completion.
+func setupCompleteTestWithCommitPolicy(t *testing.T) *bean.Bean {
+	t.Helper()
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	testCfg := config.Default()
+	testCfg.Beans.RequireFieldsOn = map[string][]string{"completed": {"commit"}}
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	b := &bean.Bean{
+		ID:     "beans-test1",
+		Slug:   bean.Slugify("A test bean"),
+		Title:  "A test bean",
+		Status: "todo",
+		Type:   "task",
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+	return b
+}
+
+// TestCompleteUnderPolicyWithoutCommitFails verifies that under an active
+// require_fields_on policy, completing without --commit fails with the
+// POLICY_VIOLATION JSON code.
+func TestCompleteUnderPolicyWithoutCommitFails(t *testing.T) {
+	b := setupCompleteTestWithCommitPolicy(t)
+	resetCompleteFlags(t)
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	completeJSON = true
+	runErr := completeCmd.RunE(completeCmd, []string{b.ID})
+
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+
+	if runErr == nil {
+		t.Fatal("completeCmd.RunE() expected error, got nil")
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(captured))
+	var resp output.Response
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("decoding JSON output error = %v; output = %s", err, captured)
+	}
+	if resp.Success {
+		t.Errorf("response success = true, want false")
+	}
+	if resp.Code != output.ErrPolicy {
+		t.Errorf("response code = %q, want %q", resp.Code, output.ErrPolicy)
+	}
+}
+
+// TestCompleteUnderPolicyWithCommitHEADSucceeds verifies that --commit HEAD
+// resolves to the repository's current commit SHA and records it under the
+// configured commit field in one write.
+func TestCompleteUnderPolicyWithCommitHEADSucceeds(t *testing.T) {
+	b := setupCompleteTestWithCommitPolicy(t)
+	resetCompleteFlags(t)
+
+	repoDir := t.TempDir()
+	runGit := func(args ...string) {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v\n%s", args, err, out)
+		}
+	}
+	runGit("init", "-q")
+	runGit("commit", "-q", "--allow-empty", "-m", "seed")
+
+	headOut, err := exec.Command("git", "-C", repoDir, "rev-parse", "HEAD").Output()
+	if err != nil {
+		t.Fatalf("git rev-parse HEAD: %v", err)
+	}
+	wantSHA := strings.TrimSpace(string(headOut))
+
+	t.Chdir(repoDir)
+
+	completeCommit = "HEAD"
+	if err := completeCmd.RunE(completeCmd, []string{b.ID}); err != nil {
+		t.Fatalf("completeCmd.RunE() error = %v", err)
+	}
+
+	got, err := core.Get(b.ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+	sha, _ := got.Extra[cfg.GetCommitField()].(string)
+	if sha != wantSHA {
+		t.Errorf("Extra[%q] = %q, want %q", cfg.GetCommitField(), sha, wantSHA)
+	}
+	if len(sha) != 40 {
+		t.Errorf("commit sha length = %d, want 40", len(sha))
+	}
+}
+
+// TestCompleteWithUnresolvableCommitFails verifies a --commit ref that does
+// not resolve to a commit is rejected rather than silently stored.
+func TestCompleteWithUnresolvableCommitFails(t *testing.T) {
+	b := setupCompleteTestWithCommitPolicy(t)
+	resetCompleteFlags(t)
+
+	repoDir := t.TempDir()
+	cmd := exec.Command("git", "init", "-q")
+	cmd.Dir = repoDir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v\n%s", err, out)
+	}
+	t.Chdir(repoDir)
+
+	completeCommit = "deadbeefdeadbeef"
+	err := completeCmd.RunE(completeCmd, []string{b.ID})
+	if err == nil {
+		t.Fatal("completeCmd.RunE() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not resolve to a commit") {
+		t.Errorf("error = %q, want it to contain %q", err.Error(), "does not resolve to a commit")
 	}
 }

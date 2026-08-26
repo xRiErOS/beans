@@ -16,6 +16,7 @@ const (
 	ErrFileError     = "FILE_ERROR"
 	ErrValidation    = "VALIDATION_ERROR"
 	ErrConflict      = "CONFLICT"
+	ErrPolicy        = "POLICY_VIOLATION"
 )
 
 // Response is the standard JSON response envelope.

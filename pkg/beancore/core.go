@@ -3,6 +3,7 @@
 package beancore
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
@@ -38,6 +39,19 @@ type ETagRequiredError struct{}
 
 func (e *ETagRequiredError) Error() string {
 	return "if-match etag is required (set require_if_match: false in config to disable)"
+}
+
+// PolicyViolationError is returned when a write would put a bean into a status
+// whose configured required front matter fields are missing.
+type PolicyViolationError struct {
+	BeanID  string
+	Status  string
+	Missing []string
+}
+
+func (e *PolicyViolationError) Error() string {
+	return fmt.Sprintf("status %q requires front matter field(s) %s: supply them in the same write (e.g. `beans complete %s --commit HEAD`)",
+		e.Status, strings.Join(e.Missing, ", "), e.BeanID)
 }
 
 // Core provides thread-safe in-memory storage for beans with filesystem persistence.
@@ -453,6 +467,8 @@ type UpdateOption func(*updateOptions)
 type updateOptions struct {
 	persist      bool   // whether to write to disk (default: true)
 	worktreePath string // if set, write to this worktree's .beans/ dir instead of main
+	extraSet     map[string]any
+	extraUnset   []string
 }
 
 func defaultUpdateOptions() updateOptions {
@@ -472,6 +488,17 @@ func WithPersist(persist bool) UpdateOption {
 func WithWorktreePath(path string) UpdateOption {
 	return func(o *updateOptions) {
 		o.worktreePath = path
+	}
+}
+
+// WithExtraOps applies extra front matter writes as part of this persist: sets
+// first, then unsets, matching the CLI's --set/--unset precedence. Required so
+// a status change and the fields its status policy demands land in one file
+// write and under one etag.
+func WithExtraOps(set map[string]any, unset []string) UpdateOption {
+	return func(o *updateOptions) {
+		o.extraSet = set
+		o.extraUnset = unset
 	}
 }
 
@@ -571,6 +598,67 @@ func (c *Core) SaveBean(id string) error {
 	return nil
 }
 
+// applyExtraOptions writes o.extraSet then removes o.extraUnset on b.Extra,
+// allocating Extra on demand. A key named by both ends up unset.
+func applyExtraOptions(b *bean.Bean, set map[string]any, unset []string) {
+	if len(set) == 0 && len(unset) == 0 {
+		return
+	}
+	if b.Extra == nil {
+		b.Extra = make(map[string]any)
+	}
+	for k, v := range set {
+		b.Extra[k] = v
+	}
+	for _, k := range unset {
+		delete(b.Extra, k)
+	}
+}
+
+// missingRequiredFields returns the subset of fields that b.Extra does not
+// carry with a non-blank value.
+func missingRequiredFields(b *bean.Bean, fields []string) []string {
+	var missing []string
+	for _, field := range fields {
+		v, ok := b.Extra[field]
+		if !ok || v == nil || strings.TrimSpace(fmt.Sprint(v)) == "" {
+			missing = append(missing, field)
+		}
+	}
+	return missing
+}
+
+// statusOnDisk reads the status of the file this bean would be written to.
+// ok is false when the file is missing, unreadable, or unparseable.
+func (c *Core) statusOnDisk(relPath, worktreePath string) (status string, ok bool) {
+	if relPath == "" {
+		return "", false
+	}
+	var path string
+	if worktreePath != "" {
+		path = filepath.Join(worktreePath, BeansDir, relPath)
+	} else {
+		path = filepath.Join(c.root, relPath)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	b, err := bean.Parse(bytes.NewReader(data))
+	if err != nil {
+		return "", false
+	}
+	return b.Status, true
+}
+
+// requiredFieldsFor is a nil-safe wrapper around c.config's status policy.
+func (c *Core) requiredFieldsFor(status string) []string {
+	if c.config == nil {
+		return nil
+	}
+	return c.config.RequiredFieldsFor(status)
+}
+
 // Create adds a new bean, generating an ID if needed.
 // By default, persists to disk. Use WithPersist(false) to only update runtime state.
 func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
@@ -603,6 +691,14 @@ func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
 	now := time.Now().UTC().Truncate(time.Second)
 	b.CreatedAt = &now
 	b.UpdatedAt = &now
+
+	applyExtraOptions(b, o.extraSet, o.extraUnset)
+
+	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
+		if missing := missingRequiredFields(b, fields); len(missing) > 0 {
+			return &PolicyViolationError{BeanID: b.ID, Status: b.Status, Missing: missing}
+		}
+	}
 
 	if o.persist {
 		// Write to disk
@@ -681,15 +777,26 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 		}
 	}
 
-	// Update timestamp
-	now := time.Now().UTC().Truncate(time.Second)
-	b.UpdatedAt = &now
-
 	// Auto-route to linked worktree if no explicit path given
 	wtPath := o.worktreePath
 	if wtPath == "" {
 		wtPath = c.worktreeLinks[b.ID]
 	}
+
+	applyExtraOptions(b, o.extraSet, o.extraUnset)
+
+	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
+		prev, ok := c.statusOnDisk(storedBean.Path, wtPath)
+		if !ok || prev != b.Status {
+			if missing := missingRequiredFields(b, fields); len(missing) > 0 {
+				return &PolicyViolationError{BeanID: b.ID, Status: b.Status, Missing: missing}
+			}
+		}
+	}
+
+	// Update timestamp
+	now := time.Now().UTC().Truncate(time.Second)
+	b.UpdatedAt = &now
 
 	if wtPath != "" {
 		// Write to the worktree's .beans/ dir; keep dirty in main

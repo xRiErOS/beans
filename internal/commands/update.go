@@ -53,6 +53,11 @@ var updateCmd = &cobra.Command{
 		if err := validateExtraKeys(updateSet, updateUnset); err != nil {
 			return cmdError(updateJSON, output.ErrValidation, "%s", err)
 		}
+		normalizedSet, err := normalizeCommitSets(updateSet)
+		if err != nil {
+			return cmdError(updateJSON, output.ErrValidation, "%s", err)
+		}
+		updateSet = normalizedSet
 
 		// Find the bean
 		b, err := resolver.Bean(ctx, args[0])
@@ -93,7 +98,8 @@ var updateCmd = &cobra.Command{
 
 		// Extra front matter keys aren't part of buildUpdateInput's generated
 		// UpdateBeanInput, but they still count as a change.
-		if len(updateSet) > 0 || len(updateUnset) > 0 {
+		hasExtraOps := len(updateSet) > 0 || len(updateUnset) > 0
+		if hasExtraOps {
 			changes = append(changes, "extra")
 		}
 
@@ -102,38 +108,18 @@ var updateCmd = &cobra.Command{
 			input.IfMatch = ifMatch
 		}
 
-		// Apply all updates atomically via single UpdateBean mutation
-		// This includes field updates, body modifications, and relationship changes
-		if hasFieldUpdates(input) {
-			b, err = resolver.UpdateBean(ctx, b.ID, input)
+		// Apply all updates atomically via a single UpdateBean mutation --
+		// field updates, body modifications, relationship changes, and
+		// extra front matter keys all land in one write under one etag, so
+		// a status change and the extra fields a status policy demands
+		// (e.g. commit) can't be split across writes.
+		if hasFieldUpdates(input) || hasExtraOps {
+			setMap, err := extraSetMap(updateSet)
 			if err != nil {
-				return mutationError(updateJSON, err)
-			}
-		}
-
-		// Extra front matter keys aren't part of the generated UpdateBeanInput
-		// type, so they're applied and persisted as a second write.
-		if len(updateSet) > 0 || len(updateUnset) > 0 {
-			// ifMatch for this write: passing nil here would bypass
-			// optimistic concurrency control entirely -- silently ignored
-			// under a normal config, and under require_if_match:true it
-			// makes the write fail outright, leaving the bean on disk
-			// without the extra keys that were just requested.
-			extraIfMatch := ifMatch
-			if hasFieldUpdates(input) {
-				// The field-update write above already validated the
-				// caller's --if-match; b now reflects that freshly
-				// persisted state. Use its own current etag (captured
-				// before applyExtraOps mutates it) so this second write
-				// still asserts "nothing else touched the bean between the
-				// two writes," without re-demanding a second --if-match.
-				etag := b.ETag()
-				extraIfMatch = &etag
-			}
-			if err := applyExtraOps(b, updateSet, updateUnset); err != nil {
 				return cmdError(updateJSON, output.ErrValidation, "%s", err)
 			}
-			if err := core.Update(b, extraIfMatch); err != nil {
+			b, err = resolver.UpdateBean(ctx, b.ID, input, beancore.WithExtraOps(setMap, updateUnset))
+			if err != nil {
 				return mutationError(updateJSON, err)
 			}
 		}
@@ -294,6 +280,10 @@ func isConflictError(err error) bool {
 func mutationError(jsonOutput bool, err error) error {
 	if isConflictError(err) {
 		return cmdError(jsonOutput, output.ErrConflict, "%s", err)
+	}
+	var policyErr *beancore.PolicyViolationError
+	if errors.As(err, &policyErr) {
+		return cmdError(jsonOutput, output.ErrPolicy, "%s", err)
 	}
 	return cmdError(jsonOutput, output.ErrValidation, "%s", err)
 }

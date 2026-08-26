@@ -10,7 +10,7 @@ import (
 )
 
 // CreateBean creates a new bean from the given input.
-func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInput) (*bean.Bean, error) {
+func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInput, opts ...beancore.UpdateOption) (*bean.Bean, error) {
 	b := &bean.Bean{
 		Slug:     bean.Slugify(input.Title),
 		Title:    input.Title,
@@ -95,7 +95,7 @@ func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInp
 		b.ID = id
 	}
 
-	if err := r.Core.Create(b); err != nil {
+	if err := r.Core.Create(b, opts...); err != nil {
 		return nil, err
 	}
 

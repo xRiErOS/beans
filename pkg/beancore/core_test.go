@@ -2373,3 +2373,118 @@ Bean content.
 		}
 	})
 }
+
+// setupTestCoreWithRequireFieldsOn returns a Core configured with the given
+// beans.require_fields_on policy.
+func setupTestCoreWithRequireFieldsOn(t *testing.T, fields map[string][]string) (*Core, string) {
+	t.Helper()
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, BeansDir)
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	cfg := config.Default()
+	cfg.Beans.RequireFieldsOn = fields
+	core := New(beansDir, cfg)
+	core.SetWarnWriter(nil) // suppress warnings in tests
+	if err := core.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	return core, beansDir
+}
+
+// TestUpdateToCompletedWithoutRequiredFieldReturnsPolicyViolation verifies the
+// gate blocks a status transition into a policy-gated status when the
+// required field is missing, and leaves the on-disk file untouched.
+func TestUpdateToCompletedWithoutRequiredFieldReturnsPolicyViolation(t *testing.T) {
+	core, beansDir := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
+	b := createTestBean(t, core, "test-pol1", "A bean", "todo")
+
+	b.Status = "completed"
+	err := core.Update(b, nil)
+	var polErr *PolicyViolationError
+	if !errors.As(err, &polErr) {
+		t.Fatalf("Update() error = %v, want *PolicyViolationError", err)
+	}
+
+	data, readErr := os.ReadFile(filepath.Join(beansDir, b.Path))
+	if readErr != nil {
+		t.Fatalf("reading bean file: %v", readErr)
+	}
+	if !strings.Contains(string(data), "status: todo") {
+		t.Errorf("on-disk file should still show status: todo, got:\n%s", data)
+	}
+}
+
+// TestUpdateToCompletedWithExtraOpsSucceedsInOneWrite verifies that supplying
+// the required field via WithExtraOps in the same write satisfies the gate
+// and both the status and the field land in the single persisted file.
+func TestUpdateToCompletedWithExtraOpsSucceedsInOneWrite(t *testing.T) {
+	core, beansDir := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
+	b := createTestBean(t, core, "test-pol2", "A bean", "todo")
+
+	b.Status = "completed"
+	sha := strings.Repeat("a", 40)
+	if err := core.Update(b, nil, WithExtraOps(map[string]any{"commit": sha}, nil)); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(beansDir, b.Path))
+	if err != nil {
+		t.Fatalf("reading bean file: %v", err)
+	}
+	if !strings.Contains(string(data), "status: completed") {
+		t.Errorf("expected status: completed in file, got:\n%s", data)
+	}
+	if !strings.Contains(string(data), "commit:") {
+		t.Errorf("expected commit: field in file, got:\n%s", data)
+	}
+}
+
+// TestUpdateMaintenanceWriteOnAlreadyCompletedBeanSucceeds verifies transition
+// (not state) semantics: a bean already on disk in a gated status without the
+// required field can still receive a maintenance write (e.g. a title rename)
+// as long as the status itself does not change.
+func TestUpdateMaintenanceWriteOnAlreadyCompletedBeanSucceeds(t *testing.T) {
+	core, _ := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
+
+	// Persist a bean directly to disk as completed without the required
+	// field, bypassing Core.Create's gate -- simulating a bean written
+	// before the policy was enabled.
+	b := &bean.Bean{
+		ID:     "test-pol3",
+		Slug:   bean.Slugify("Legacy done bean"),
+		Title:  "Legacy done bean",
+		Status: "completed",
+		Type:   "task",
+	}
+	if err := core.saveToDisk(b); err != nil {
+		t.Fatalf("saveToDisk() error = %v", err)
+	}
+	core.beans[b.ID] = b
+
+	b.Title = "Legacy done bean (renamed)"
+	if err := core.Update(b, nil); err != nil {
+		t.Fatalf("Update() error = %v, want maintenance write to succeed", err)
+	}
+}
+
+// TestCreateAsCompletedWithoutRequiredFieldReturnsPolicyViolation verifies
+// Create always gates a policy-covered status, since there is no prior state.
+func TestCreateAsCompletedWithoutRequiredFieldReturnsPolicyViolation(t *testing.T) {
+	core, _ := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
+
+	b := &bean.Bean{
+		Slug:   bean.Slugify("A new bean"),
+		Title:  "A new bean",
+		Status: "completed",
+		Type:   "task",
+	}
+	err := core.Create(b)
+	var polErr *PolicyViolationError
+	if !errors.As(err, &polErr) {
+		t.Fatalf("Create() error = %v, want *PolicyViolationError", err)
+	}
+}

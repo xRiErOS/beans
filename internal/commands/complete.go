@@ -3,9 +3,12 @@ package commands
 import (
 	"context"
 	"fmt"
+	"os"
 
+	"github.com/hmans/beans/internal/gitutil"
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
+	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/spf13/cobra"
@@ -13,6 +16,8 @@ import (
 
 var (
 	completeSummary string
+	completeCommit  string
+	completeSet     []string
 	completeJSON    bool
 )
 
@@ -40,6 +45,32 @@ var completeCmd = &cobra.Command{
 			return cmdError(completeJSON, output.ErrValidation, "invalid status: completed (must be %s)", cfg.StatusList())
 		}
 
+		if err := validateExtraKeys(completeSet, nil); err != nil {
+			return cmdError(completeJSON, output.ErrValidation, "%s", err)
+		}
+		normalizedSet, err := normalizeCommitSets(completeSet)
+		if err != nil {
+			return cmdError(completeJSON, output.ErrValidation, "%s", err)
+		}
+		setMap, err := extraSetMap(normalizedSet)
+		if err != nil {
+			return cmdError(completeJSON, output.ErrValidation, "%s", err)
+		}
+
+		if completeCommit != "" {
+			dir, err := os.Getwd()
+			if err != nil {
+				return cmdError(completeJSON, output.ErrValidation, "%s", err)
+			}
+			sha, err := gitutil.ResolveCommit(dir, completeCommit)
+			if err != nil {
+				return cmdError(completeJSON, output.ErrValidation, "%s", err)
+			}
+			// --commit and --set on the same field both yield the same
+			// normalized SHA type; --commit wins as the more explicit flag.
+			setMap[cfg.GetCommitField()] = sha
+		}
+
 		// Build the update input
 		status := "completed"
 		input := model.UpdateBeanInput{
@@ -59,9 +90,9 @@ var completeCmd = &cobra.Command{
 		}
 
 		// Apply the update
-		b, err = resolver.UpdateBean(ctx, b.ID, input)
+		b, err = resolver.UpdateBean(ctx, b.ID, input, beancore.WithExtraOps(setMap, nil))
 		if err != nil {
-			return cmdError(completeJSON, output.ErrValidation, "failed to update bean: %v", err)
+			return mutationError(completeJSON, err)
 		}
 
 		// Output result
@@ -76,6 +107,8 @@ var completeCmd = &cobra.Command{
 
 func RegisterCompleteCmd(root *cobra.Command) {
 	completeCmd.Flags().StringVar(&completeSummary, "summary", "", "Optional summary of changes")
+	completeCmd.Flags().StringVar(&completeCommit, "commit", "", "Git ref (HEAD, branch, tag, SHA) recorded in the configured commit field")
+	completeCmd.Flags().StringArrayVar(&completeSet, "set", nil, "Set an extra front matter key as key=value (can be repeated)")
 	completeCmd.Flags().BoolVar(&completeJSON, "json", false, "Output as JSON")
 	root.AddCommand(completeCmd)
 }

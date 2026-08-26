@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/hmans/beans/internal/gitutil"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/internal/output"
 )
@@ -169,6 +170,48 @@ func applyExtraOps(b *bean.Bean, sets []string, unsets []string) error {
 		delete(b.Extra, key)
 	}
 	return nil
+}
+
+// extraSetMap parses validated --set pairs into the map beancore.WithExtraOps
+// takes. Callers must run validateExtraKeys first.
+func extraSetMap(sets []string) (map[string]any, error) {
+	m := make(map[string]any, len(sets))
+	for _, s := range sets {
+		key, value, err := parseSetPair(s, "--set")
+		if err != nil {
+			return nil, err
+		}
+		m[key] = value
+	}
+	return m, nil
+}
+
+// normalizeCommitSets rewrites every --set pair naming cfg.GetCommitField() so
+// the stored value is the full 40-hex SHA, rejecting refs that do not resolve
+// in the current working directory's repository.
+func normalizeCommitSets(sets []string) ([]string, error) {
+	field := cfg.GetCommitField()
+	result := make([]string, len(sets))
+	for i, s := range sets {
+		key, value, err := parseSetPair(s, "--set")
+		if err != nil {
+			return nil, err
+		}
+		if key != field {
+			result[i] = s
+			continue
+		}
+		dir, err := os.Getwd()
+		if err != nil {
+			return nil, err
+		}
+		sha, err := gitutil.ResolveCommit(dir, value)
+		if err != nil {
+			return nil, err
+		}
+		result[i] = key + "=" + sha
+	}
+	return result, nil
 }
 
 // resolveAppendContent handles --append value, supporting stdin with "-".
