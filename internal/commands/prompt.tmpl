@@ -15,7 +15,7 @@ All commands support `--json` for machine-readable output. Use this flag to pars
 - **Starting work**: Check if there is already a bean for it (`beans list -S "<keywords>"`). If not, create one with `beans create "Title" -t <type> -d "Description..." -s todo`. Then mark it in-progress and show it with `beans start <id>`.
 - **Finding work**: `beans next` shows the single highest-priority bean that is ready to start (not blocked, excludes in-progress/completed/scrapped/draft). `beans list --ready` (or `beans list --json --ready`) lists all such beans instead of just one. `beans show --json <id> [id...]` shows full details for specific beans (supports multiple IDs).
 - **Handling blocked work**: `beans list --is-blocked` (or `beans list --json --is-blocked`) lists beans that are currently blocked (directly, or via a blocked ancestor).
-- **Completing work**: ONLY once a bean has no unchecked todo items left, run `beans complete <id> --summary "what was done"` — this sets status to completed and appends a `## Summary of Changes` section to the bean body. If this project requires a commit reference on completion (see "Commit Traceability" below), pass `beans complete <id> --commit <ref> --summary "..."` in the same call.
+- **Completing work**: ONLY once a bean has no unchecked todo items left, run `beans complete <id> --summary "what was done"` — this sets status to completed and appends a `## Summary of Changes` section to the bean body.{{if .CommitFieldGated}} This project requires a commit reference to complete a bean: pass `--commit <ref>` in the same call (see "Required Fields on Status Transitions" below).{{end}}
 - **Scrapping work**: `beans scrap <id> --reason "why"` — this sets status to scrapped and appends a `## Reason for Scrapping` section to the bean body. `--reason` is required.
 - **Checking progress**: `beans progress` shows counts by status plus a percent-complete figure across the whole workspace; `beans progress --parent <id>` scopes it to one bean's descendants (e.g. a milestone or epic).
 - **Listing milestones**: `beans milestones` lists all milestone beans with their descendant completion counts (e.g. `3/10 completed`); completed/scrapped milestones are hidden by default, use `--all` to include them.
@@ -163,26 +163,28 @@ beans list --json --where release=0-5-0
 - Extra keys appear in `list`/`show --json` under an `extra` object, and are queryable over GraphQL.
 - This is metadata, not a new hierarchy level: use it for cross-cutting groupings (like a release) that don't map onto the milestone → epic → task parent chain.
 
-## Commit Traceability (opt-in)
+{{if .RequiredFields}}
+## Required Fields on Status Transitions
 
-Some projects configure `beans.require_fields_on` in `.beans.yml` (e.g. `completed: [commit]`) so a bean can only enter that status once the required front matter field is set. If it's active here, `beans complete`/`beans update`/`beans create` reject an unqualified transition into the gated status with a `POLICY_VIOLATION` error naming the missing field(s).
+This project's `.beans.yml` requires the following front matter field(s) before a bean can enter a given status. `beans complete`/`beans update`/`beans create` reject an unqualified transition into a listed status with a `POLICY_VIOLATION` error naming what's missing.
+{{range .RequiredFields}}
+- **{{.Status}}**: {{range $i, $f := .Fields}}{{if $i}}, {{end}}`{{$f}}`{{end}}
+{{- end}}
+{{if .CommitFieldGated}}
+`{{.CommitField}}` is resolved automatically -- pass a git ref and beans records the full 40-character SHA in one write:
 
 ```bash
-# Resolves <ref> via git to a full 40-character SHA and records it in one write
 beans complete <id> --commit <ref> --summary "what was done"
-
-# Same resolution on create/update via --set (the field name defaults to "commit",
-# configurable as beans.commit_field)
-beans update <id> --set commit=<ref> -s completed
-beans create --json "Title" -t task --set commit=<ref> -s completed
-
-# Surface policy violations across the workspace (warnings by default;
-# --strict counts them as issues and exits non-zero)
-beans check --strict
+beans update <id> --set {{.CommitField}}=<ref> -s completed
+beans create --json "Title" -t task --set {{.CommitField}}=<ref> -s completed
 ```
 
-- `<ref>` accepts anything `git rev-parse --verify <ref>^{commit}` resolves (`HEAD`, a branch, tag, short SHA); an unresolvable ref fails before any write, and no partial state is saved.
-- A bean already sitting in the gated status without the field (e.g. pre-policy data) can still receive maintenance writes (rename, body edits) as long as its status doesn't change -- the policy only gates the transition itself.
+`<ref>` accepts anything `git rev-parse --verify <ref>^{commit}` resolves (`HEAD`, a branch, tag, short SHA); an unresolvable ref fails before any write, and no partial state is saved.
+{{end}}
+Any other required field needs a plain `--set <field>=<value>` in the same write as the status change.
+
+Surface every policy violation across the workspace: `beans check --strict` (warnings show by default; `--strict` counts them as issues and exits non-zero). A bean already sitting in a gated status without the field (e.g. pre-policy data) can still receive maintenance writes -- rename, body edits -- as long as its status doesn't change; the policy only gates the transition itself.
+{{end}}
 
 ## Manual Ordering
 
