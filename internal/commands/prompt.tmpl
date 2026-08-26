@@ -15,7 +15,7 @@ All commands support `--json` for machine-readable output. Use this flag to pars
 - **Starting work**: Check if there is already a bean for it (`beans list -S "<keywords>"`). If not, create one with `beans create "Title" -t <type> -d "Description..." -s todo`. Then mark it in-progress and show it with `beans start <id>`.
 - **Finding work**: `beans next` shows the single highest-priority bean that is ready to start (not blocked, excludes in-progress/completed/scrapped/draft). `beans list --ready` (or `beans list --json --ready`) lists all such beans instead of just one. `beans show --json <id> [id...]` shows full details for specific beans (supports multiple IDs).
 - **Handling blocked work**: `beans list --is-blocked` (or `beans list --json --is-blocked`) lists beans that are currently blocked (directly, or via a blocked ancestor).
-- **Completing work**: ONLY once a bean has no unchecked todo items left, run `beans complete <id> --summary "what was done"` — this sets status to completed and appends a `## Summary of Changes` section to the bean body.{{if .CommitFieldGated}} This project requires a commit reference to complete a bean: pass `--commit <ref>` in the same call (see "Required Fields on Status Transitions" below).{{end}}
+- **Completing work**: ONLY once a bean has no unchecked todo items left, run `beans complete <id> --summary "what was done"` — this sets status to completed and appends a `## Summary of Changes` section to the bean body.{{if .CompletionCommitGated}} This project requires a commit reference to complete a bean: pass `--commit <ref>` in the same call (see "Required Fields on Status Transitions" below).{{end}}
 - **Scrapping work**: `beans scrap <id> --reason "why"` — this sets status to scrapped and appends a `## Reason for Scrapping` section to the bean body. `--reason` is required.
 - **Checking progress**: `beans progress` shows counts by status plus a percent-complete figure across the whole workspace; `beans progress --parent <id>` scopes it to one bean's descendants (e.g. a milestone or epic).
 - **Listing milestones**: `beans milestones` lists all milestone beans with their descendant completion counts (e.g. `3/10 completed`); completed/scrapped milestones are hidden by default, use `--all` to include them.
@@ -174,9 +174,9 @@ This project's `.beans.yml` requires the following front matter field(s) before 
 `{{.CommitField}}` is resolved automatically -- pass a git ref and beans records the full 40-character SHA in one write:
 
 ```bash
-beans complete <id> --commit <ref> --summary "what was done"
-beans update <id> --set {{.CommitField}}=<ref> -s completed
-beans create --json "Title" -t task --set {{.CommitField}}=<ref> -s completed
+{{if .CompletionCommitGated}}beans complete <id> --commit <ref> --summary "what was done"
+{{end}}beans update <id> --set {{.CommitField}}=<ref> ...   # combine with whichever status change requires it
+beans create --json "Title" -t task --set {{.CommitField}}=<ref> ...
 ```
 
 `<ref>` accepts anything `git rev-parse --verify <ref>^{commit}` resolves (`HEAD`, a branch, tag, short SHA); an unresolvable ref fails before any write, and no partial state is saved.

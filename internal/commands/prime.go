@@ -32,8 +32,14 @@ type promptData struct {
 	// CommitField is the configured beans.commit_field (or its default).
 	CommitField string
 	// CommitFieldGated is true when CommitField is among some status's
-	// required fields, i.e. `--commit` resolution actually applies here.
+	// required fields, i.e. `--commit` resolution applies somewhere in
+	// this project (used by the generic policy section).
 	CommitFieldGated bool
+	// CompletionCommitGated is true specifically when CommitField is
+	// required on the "completed" status, i.e. `beans complete` itself
+	// needs `--commit`. A project can gate CommitField on another status
+	// (e.g. "accepted") without gating completion at all.
+	CompletionCommitGated bool
 }
 
 var primeCmd = &cobra.Command{
@@ -106,13 +112,22 @@ var primeCmd = &cobra.Command{
 			}
 		}
 
+		completionCommitGated := false
+		for _, f := range loadedCfg.RequiredFieldsFor("completed") {
+			if f == commitField {
+				completionCommitGated = true
+				break
+			}
+		}
+
 		data := promptData{
-			Types:            config.DefaultTypes,
-			Statuses:         config.DefaultStatuses,
-			Priorities:       config.DefaultPriorities,
-			RequiredFields:   requiredFields,
-			CommitField:      commitField,
-			CommitFieldGated: commitFieldGated,
+			Types:                 config.DefaultTypes,
+			Statuses:              config.DefaultStatuses,
+			Priorities:            config.DefaultPriorities,
+			RequiredFields:        requiredFields,
+			CommitField:           commitField,
+			CommitFieldGated:      commitFieldGated,
+			CompletionCommitGated: completionCommitGated,
 		}
 
 		return tmpl.Execute(os.Stdout, data)
