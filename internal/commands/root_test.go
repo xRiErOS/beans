@@ -314,3 +314,124 @@ func TestResolveBeansPathAnchor(t *testing.T) {
 		}
 	})
 }
+
+// A .beans.yml found by upward search from the cwd is the repository's own
+// declaration of where its store lives. An inherited BEANS_PATH -- direnv
+// exports it in most of this fleet's workspaces -- must not redirect calls
+// made inside such a repository to a foreign store.
+func TestResolveBeansPathConfigFileOutranksEnv(t *testing.T) {
+	foreignRoot := t.TempDir()
+	foreignBeans := filepath.Join(foreignRoot, ".beans")
+	if err := os.MkdirAll(foreignBeans, 0755); err != nil {
+		t.Fatalf("failed to create foreign store: %v", err)
+	}
+
+	localRoot := t.TempDir()
+	localBeans := filepath.Join(localRoot, ".beans")
+	if err := os.MkdirAll(localBeans, 0755); err != nil {
+		t.Fatalf("failed to create local store: %v", err)
+	}
+	configFile := filepath.Join(localRoot, config.ConfigFileName)
+	if err := os.WriteFile(configFile, []byte("beans:\n  path: .beans\n  prefix: loc\n"), 0644); err != nil {
+		t.Fatalf("failed to write config file: %v", err)
+	}
+
+	t.Run("config file found upward outranks env var", func(t *testing.T) {
+		t.Setenv("BEANS_PATH", foreignBeans)
+
+		c, err := config.LoadFromDirectory(localRoot)
+		if err != nil {
+			t.Fatalf("LoadFromDirectory() error = %v", err)
+		}
+
+		got, err := resolveBeansPath("", c)
+		if err != nil {
+			t.Fatalf("resolveBeansPath() error = %v", err)
+		}
+		if got != localBeans {
+			t.Errorf("expected local store %q, got %q", localBeans, got)
+		}
+	})
+
+	t.Run("explicit --config outranks env var", func(t *testing.T) {
+		t.Setenv("BEANS_PATH", foreignBeans)
+
+		c, err := config.Load(configFile)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+
+		got, err := resolveBeansPath("", c)
+		if err != nil {
+			t.Fatalf("resolveBeansPath() error = %v", err)
+		}
+		if got != localBeans {
+			t.Errorf("expected local store %q, got %q", localBeans, got)
+		}
+	})
+
+	t.Run("flag still outranks the config file", func(t *testing.T) {
+		t.Setenv("BEANS_PATH", foreignBeans)
+
+		c, err := config.LoadFromDirectory(localRoot)
+		if err != nil {
+			t.Fatalf("LoadFromDirectory() error = %v", err)
+		}
+
+		got, err := resolveBeansPath(foreignBeans, c)
+		if err != nil {
+			t.Fatalf("resolveBeansPath() error = %v", err)
+		}
+		if got != foreignBeans {
+			t.Errorf("expected flag path %q, got %q", foreignBeans, got)
+		}
+	})
+
+	// Without a config file there is nothing repo-local to honour, so the
+	// env var remains the next-best answer.
+	t.Run("env var still wins when no config file exists", func(t *testing.T) {
+		t.Setenv("BEANS_PATH", foreignBeans)
+
+		bare := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(bare, ".beans"), 0755); err != nil {
+			t.Fatalf("failed to create bare store: %v", err)
+		}
+
+		c, err := config.LoadFromDirectory(bare)
+		if err != nil {
+			t.Fatalf("LoadFromDirectory() error = %v", err)
+		}
+
+		got, err := resolveBeansPath("", c)
+		if err != nil {
+			t.Fatalf("resolveBeansPath() error = %v", err)
+		}
+		if got != foreignBeans {
+			t.Errorf("expected env var store %q, got %q", foreignBeans, got)
+		}
+	})
+
+	// A config file that points at a store which is not there must say so
+	// instead of silently falling back to the inherited env var.
+	t.Run("config file pointing at a missing store errors, no env fallback", func(t *testing.T) {
+		t.Setenv("BEANS_PATH", foreignBeans)
+
+		emptyRoot := t.TempDir()
+		if err := os.WriteFile(filepath.Join(emptyRoot, config.ConfigFileName), []byte("beans:\n  path: .beans\n"), 0644); err != nil {
+			t.Fatalf("failed to write config file: %v", err)
+		}
+
+		c, err := config.LoadFromDirectory(emptyRoot)
+		if err != nil {
+			t.Fatalf("LoadFromDirectory() error = %v", err)
+		}
+
+		_, err = resolveBeansPath("", c)
+		if err == nil {
+			t.Fatal("expected an error for a config file pointing at a missing store, got nil")
+		}
+		if !strings.Contains(err.Error(), "beans init") {
+			t.Errorf("expected error to suggest 'beans init', got %q", err.Error())
+		}
+	})
+}

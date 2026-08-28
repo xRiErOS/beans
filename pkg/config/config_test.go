@@ -1808,3 +1808,71 @@ func TestSavePreservesFileMode(t *testing.T) {
 		t.Errorf("Preserved mode = %#o, want %#o", stat.Mode(), targetMode)
 	}
 }
+
+// ConfigFile is what lets a caller tell "this repository declared its store"
+// apart from "nothing was found, these are the defaults". Path resolution
+// ranks a real declaration above the BEANS_PATH env var, so a defaulted
+// config must never claim to have a file.
+func TestConfigFile(t *testing.T) {
+	t.Run("Default has no config file", func(t *testing.T) {
+		if got := Default().ConfigFile(); got != "" {
+			t.Errorf("Default().ConfigFile() = %q, want empty", got)
+		}
+	})
+
+	t.Run("Load records the file it read", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ConfigFileName)
+		if err := os.WriteFile(path, []byte("beans:\n  path: .beans\n"), 0644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+
+		cfg, err := Load(path)
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if cfg.ConfigFile() != path {
+			t.Errorf("ConfigFile() = %q, want %q", cfg.ConfigFile(), path)
+		}
+	})
+
+	t.Run("Load of a missing file records nothing", func(t *testing.T) {
+		cfg, err := Load(filepath.Join(t.TempDir(), ConfigFileName))
+		if err != nil {
+			t.Fatalf("Load() error = %v", err)
+		}
+		if got := cfg.ConfigFile(); got != "" {
+			t.Errorf("ConfigFile() = %q, want empty", got)
+		}
+	})
+
+	t.Run("LoadFromDirectory records the file found upward", func(t *testing.T) {
+		dir := t.TempDir()
+		path := filepath.Join(dir, ConfigFileName)
+		if err := os.WriteFile(path, []byte("beans:\n  path: .beans\n"), 0644); err != nil {
+			t.Fatalf("WriteFile() error = %v", err)
+		}
+		nested := filepath.Join(dir, "a", "b")
+		if err := os.MkdirAll(nested, 0755); err != nil {
+			t.Fatalf("MkdirAll() error = %v", err)
+		}
+
+		cfg, err := LoadFromDirectory(nested)
+		if err != nil {
+			t.Fatalf("LoadFromDirectory() error = %v", err)
+		}
+		if cfg.ConfigFile() != path {
+			t.Errorf("ConfigFile() = %q, want %q", cfg.ConfigFile(), path)
+		}
+	})
+
+	t.Run("LoadFromDirectory without a config file records nothing", func(t *testing.T) {
+		cfg, err := LoadFromDirectory(t.TempDir())
+		if err != nil {
+			t.Fatalf("LoadFromDirectory() error = %v", err)
+		}
+		if got := cfg.ConfigFile(); got != "" {
+			t.Errorf("ConfigFile() = %q, want empty", got)
+		}
+	})
+}

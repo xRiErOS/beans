@@ -71,7 +71,15 @@ a full view of your project.`,
 }
 
 // resolveBeansPath determines the beans data directory path.
-// Precedence: --beans-path flag > BEANS_PATH env var > beans.anchor > config default.
+// Precedence: --beans-path flag > .beans.yml (found upward or named via
+// --config) > BEANS_PATH env var > default.
+//
+// A .beans.yml is the repository's own declaration of where its store lives,
+// so it outranks BEANS_PATH: the env var is commonly exported by direnv and
+// inherited into unrelated repositories, where honouring it would silently
+// redirect every call to a foreign store. Without such a declaration the env
+// var is still the next-best answer. The anchor is part of that declaration
+// and is applied while resolving it (see resolveAnchoredPath).
 //
 // In worktrees, the CLI uses the worktree's local .beans/ directory.
 // beans-serve watches worktree .beans/ dirs and merges changes into
@@ -79,14 +87,19 @@ a full view of your project.`,
 // A repository that wants one shared store instead opts out of that with
 // `beans.anchor: repo-root` in its .beans.yml (see resolveAnchoredPath).
 func resolveBeansPath(flagPath string, c *config.Config) (string, error) {
-	explicitOverride := flagPath != "" || os.Getenv("BEANS_PATH") != ""
+	envPath := os.Getenv("BEANS_PATH")
+	// A found .beans.yml, and only a found one, demotes the env var. A
+	// defaulted config carries no declaration to honour.
+	useEnv := envPath != "" && (c == nil || c.ConfigFile() == "")
+	explicitOverride := flagPath != "" || useEnv
 
 	var root string
-	if flagPath != "" {
+	switch {
+	case flagPath != "":
 		root = flagPath
-	} else if envPath := os.Getenv("BEANS_PATH"); envPath != "" {
+	case useEnv:
 		root = envPath
-	} else {
+	default:
 		anchored, err := resolveAnchoredPath(c)
 		if err != nil {
 			return "", err
