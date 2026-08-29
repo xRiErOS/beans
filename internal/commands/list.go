@@ -36,6 +36,7 @@ var (
 	listReady       bool
 	listQuiet       bool
 	listSort        string
+	listDesc        bool
 	listFull        bool
 	listWhere       []string
 )
@@ -126,7 +127,7 @@ Search Syntax (--search/-S):
 		beans = filterByWhere(beans, listWhere)
 
 		// Sort beans
-		sortBeans(beans, listSort, cfg)
+		sortBeans(beans, listSort, listDesc, cfg)
 
 		// JSON output (flat list)
 		if listJSON {
@@ -163,7 +164,7 @@ Search Syntax (--search/-S):
 
 		// Create sort function for tree building
 		sortFn := func(b []*bean.Bean) {
-			sortBeans(b, listSort, cfg)
+			sortBeans(b, listSort, listDesc, cfg)
 		}
 
 		// Build tree
@@ -217,7 +218,11 @@ func applyReadyFilter(filter *model.BeanFilter) {
 	filter.ExcludeImplicitTerminal = &excludeImplicitTerminal
 }
 
-func sortBeans(beans []*bean.Bean, sortBy string, cfg *config.Config) {
+// sortBeans orders beans in place. desc reverses the finished ordering, so
+// every sort field gains a direction without each branch having to know
+// about one. With sortBy == "order" the reversal also flips the parent
+// groups the order branch builds, not just the beans inside them.
+func sortBeans(beans []*bean.Bean, sortBy string, desc bool, cfg *config.Config) {
 	statusNames := cfg.StatusNames()
 	priorityNames := cfg.PriorityNames()
 	typeNames := cfg.TypeNames()
@@ -326,6 +331,12 @@ func sortBeans(beans []*bean.Bean, sortBy string, cfg *config.Config) {
 		// Default: sort by status order, then priority, then type order, then title (same as TUI)
 		bean.SortByStatusPriorityAndType(beans, statusNames, priorityNames, typeNames)
 	}
+
+	if desc {
+		for i, j := 0, len(beans)-1; i < j; i, j = i+1, j-1 {
+			beans[i], beans[j] = beans[j], beans[i]
+		}
+	}
 }
 
 // validateWhereKeys checks every --where argument up front: each entry must
@@ -408,6 +419,7 @@ func RegisterListCmd(root *cobra.Command) {
 	listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft)")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent) (default: status, priority, type, title)")
+	listCmd.Flags().BoolVar(&listDesc, "desc", false, "Reverse the sort order")
 	listCmd.Flags().BoolVar(&listFull, "full", false, "Include bean body in JSON output")
 	listCmd.Flags().StringArrayVar(&listWhere, "where", nil, "Filter by extra front matter key=value (can be repeated, AND logic)")
 	root.AddCommand(listCmd)

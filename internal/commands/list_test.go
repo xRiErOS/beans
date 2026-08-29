@@ -28,7 +28,7 @@ func TestSortBeans(t *testing.T) {
 			{ID: "a1"},
 			{ID: "b2"},
 		}
-		sortBeans(beans, "id", testCfg)
+		sortBeans(beans, "id", false, testCfg)
 
 		if beans[0].ID != "a1" || beans[1].ID != "b2" || beans[2].ID != "c3" {
 			t.Errorf("sort by id: got [%s, %s, %s], want [a1, b2, c3]",
@@ -42,7 +42,7 @@ func TestSortBeans(t *testing.T) {
 			{ID: "new", CreatedAt: &now},
 			{ID: "mid", CreatedAt: &earlier},
 		}
-		sortBeans(beans, "created", testCfg)
+		sortBeans(beans, "created", false, testCfg)
 
 		// Should be newest first
 		if beans[0].ID != "new" || beans[1].ID != "mid" || beans[2].ID != "old" {
@@ -57,7 +57,7 @@ func TestSortBeans(t *testing.T) {
 			{ID: "has", CreatedAt: &now},
 			{ID: "nil2", CreatedAt: nil},
 		}
-		sortBeans(beans, "created", testCfg)
+		sortBeans(beans, "created", false, testCfg)
 
 		// Non-nil should come first, then nil sorted by ID
 		if beans[0].ID != "has" {
@@ -71,7 +71,7 @@ func TestSortBeans(t *testing.T) {
 			{ID: "new", UpdatedAt: &now},
 			{ID: "mid", UpdatedAt: &earlier},
 		}
-		sortBeans(beans, "updated", testCfg)
+		sortBeans(beans, "updated", false, testCfg)
 
 		// Should be newest first
 		if beans[0].ID != "new" || beans[1].ID != "mid" || beans[2].ID != "old" {
@@ -87,7 +87,7 @@ func TestSortBeans(t *testing.T) {
 			{ID: "i1", Status: "in-progress"},
 			{ID: "t2", Status: "todo"},
 		}
-		sortBeans(beans, "status", testCfg)
+		sortBeans(beans, "status", false, testCfg)
 
 		// Should be ordered by status config order (in-progress, todo, draft, completed, scrapped), then by ID within same status
 		expected := []string{"i1", "t1", "t2", "c1"}
@@ -113,7 +113,7 @@ func TestSortBeans(t *testing.T) {
 			// Order is a fractional index scoped per parent (R-12).
 			{ID: "p2-x", Title: "x", Parent: "p2", Order: "a"},
 		}
-		sortBeans(beans, "order", testCfg)
+		sortBeans(beans, "order", false, testCfg)
 
 		expected := []string{"p1-a", "p1-b", "p1-c", "p1-d", "p1-e", "p2-x"}
 		got := make([]string, len(beans))
@@ -136,7 +136,7 @@ func TestSortBeans(t *testing.T) {
 			{ID: "completed-task", Status: "completed", Type: "task"},
 			{ID: "todo-bug", Status: "todo", Type: "bug"},
 		}
-		sortBeans(beans, "", testCfg)
+		sortBeans(beans, "", false, testCfg)
 
 		// Should be: non-archive first (sorted by type order from DefaultTypes: milestone, epic, bug, feature, task),
 		// then archive (sorted by type)
@@ -471,4 +471,46 @@ func TestTruncate(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestSortBeansDescReversesEveryField verifies that --desc is a property of
+// sortBeans itself and therefore holds for every sort field, rather than
+// being wired into one branch.
+func TestSortBeansDescReversesEveryField(t *testing.T) {
+	testCfg := config.Default()
+
+	for _, sortBy := range []string{"", "id", "created", "updated", "status", "priority", "order"} {
+		t.Run("sort="+sortBy, func(t *testing.T) {
+			mk := func() []*bean.Bean {
+				return []*bean.Bean{
+					{ID: "beans-d001", Title: "First", Status: "todo", Type: "task", Priority: "high", Order: "a"},
+					{ID: "beans-d002", Title: "Second", Status: "in-progress", Type: "bug", Priority: "low", Order: "b"},
+					{ID: "beans-d003", Title: "Third", Status: "done", Type: "epic", Priority: "normal", Order: "c"},
+				}
+			}
+
+			asc := mk()
+			sortBeans(asc, sortBy, false, testCfg)
+			desc := mk()
+			sortBeans(desc, sortBy, true, testCfg)
+
+			if len(asc) != len(desc) {
+				t.Fatalf("length changed: asc=%d desc=%d", len(asc), len(desc))
+			}
+			for i := range asc {
+				want := asc[len(asc)-1-i].ID
+				if desc[i].ID != want {
+					t.Errorf("desc[%d].ID = %q, want %q (reverse of ascending %v)", i, desc[i].ID, want, idsOf(asc))
+				}
+			}
+		})
+	}
+}
+
+func idsOf(beans []*bean.Bean) []string {
+	ids := make([]string, len(beans))
+	for i, b := range beans {
+		ids[i] = b.ID
+	}
+	return ids
 }

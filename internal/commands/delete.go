@@ -79,12 +79,9 @@ warned and those references will be removed after confirmation. Use -f to skip a
 			if len(deleted) == 1 {
 				return output.Success(deleted[0], "Bean deleted")
 			}
-			return output.JSON(output.Response{
-				Success: true,
-				Beans:   deleted,
-				Count:   len(deleted),
-				Message: fmt.Sprintf("%d beans deleted", len(deleted)),
-			})
+			// Bare array, like every other batch verb — the hand-built
+			// envelope here was the one shape a consumer had to special-case.
+			return output.SuccessMultiple(deleted)
 		}
 
 		if totalLinksRemoved > 0 {

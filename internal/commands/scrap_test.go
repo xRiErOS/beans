@@ -201,3 +201,68 @@ func TestScrapJSONOutput(t *testing.T) {
 		t.Errorf("persisted bean status = %q, want %q", got.Status, "scrapped")
 	}
 }
+
+// mkScrapBean adds another bean to the store set up by setupScrapTest.
+func mkScrapBean(t *testing.T, id, title string) *bean.Bean {
+	t.Helper()
+	b := &bean.Bean{
+		ID:     id,
+		Slug:   bean.Slugify(title),
+		Title:  title,
+		Status: "todo",
+		Type:   "task",
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create(%s) error = %v", id, err)
+	}
+	return b
+}
+
+// TestScrapTakesMultipleIDs verifies the batch signature scraps every named
+// bean and gives each the shared reason section.
+func TestScrapTakesMultipleIDs(t *testing.T) {
+	first := setupScrapTest(t)
+	resetScrapFlags(t)
+	second := mkScrapBean(t, "beans-bts2", "Second bean")
+
+	scrapReason = "Superseded by the new approach"
+	if err := scrapCmd.RunE(scrapCmd, []string{first.ID, second.ID}); err != nil {
+		t.Fatalf("scrapCmd.RunE() error = %v", err)
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		got, err := core.Get(id)
+		if err != nil {
+			t.Fatalf("core.Get(%s) error = %v", id, err)
+		}
+		if got.Status != "scrapped" {
+			t.Errorf("bean %s status = %q, want %q", id, got.Status, "scrapped")
+		}
+		if !strings.Contains(got.Body, "Superseded by the new approach") {
+			t.Errorf("bean %s body does not carry the shared reason, body = %q", id, got.Body)
+		}
+	}
+}
+
+// TestScrapPreflightRejectsUnknownID verifies nothing is written when any ID
+// in the call cannot be resolved.
+func TestScrapPreflightRejectsUnknownID(t *testing.T) {
+	first := setupScrapTest(t)
+	resetScrapFlags(t)
+	second := mkScrapBean(t, "beans-brs2", "Second bean")
+
+	scrapReason = "Not going to happen"
+	if err := scrapCmd.RunE(scrapCmd, []string{first.ID, "beans-nope", second.ID}); err == nil {
+		t.Fatal("scrapCmd.RunE() error = nil, want an error for the unknown ID")
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		got, err := core.Get(id)
+		if err != nil {
+			t.Fatalf("core.Get(%s) error = %v", id, err)
+		}
+		if got.Status != "todo" {
+			t.Errorf("bean %s status = %q, want it untouched at %q", id, got.Status, "todo")
+		}
+	}
+}

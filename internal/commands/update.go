@@ -276,16 +276,24 @@ func isConflictError(err error) bool {
 	return errors.As(err, &mismatchErr) || errors.As(err, &requiredErr)
 }
 
-// mutationError returns a cmdError with the appropriate error code based on the error type.
-func mutationError(jsonOutput bool, err error) error {
+// mutationErrorCode maps a write-path error to the output error code that
+// describes it. Split out of mutationError so that the batch verbs, which
+// have to report a failure alongside the beans already written, classify it
+// exactly the same way.
+func mutationErrorCode(err error) string {
 	if isConflictError(err) {
-		return cmdError(jsonOutput, output.ErrConflict, "%s", err)
+		return output.ErrConflict
 	}
 	var policyErr *beancore.PolicyViolationError
 	if errors.As(err, &policyErr) {
-		return cmdError(jsonOutput, output.ErrPolicy, "%s", err)
+		return output.ErrPolicy
 	}
-	return cmdError(jsonOutput, output.ErrValidation, "%s", err)
+	return output.ErrValidation
+}
+
+// mutationError returns a cmdError with the appropriate error code based on the error type.
+func mutationError(jsonOutput bool, err error) error {
+	return cmdError(jsonOutput, mutationErrorCode(err), "%s", err)
 }
 
 func RegisterUpdateCmd(root *cobra.Command) {

@@ -615,9 +615,12 @@ func applyExtraOptions(b *bean.Bean, set map[string]any, unset []string) {
 	}
 }
 
-// missingRequiredFields returns the subset of fields that b.Extra does not
-// carry with a non-blank value.
-func missingRequiredFields(b *bean.Bean, fields []string) []string {
+// MissingRequiredFields returns the subset of fields that b.Extra does not
+// carry with a non-blank value. Exported so that read-only callers — the
+// check command and the batch preflight of the status verbs — can ask the
+// same question the write path asks, instead of each keeping a copy of the
+// rule that then drifts.
+func MissingRequiredFields(b *bean.Bean, fields []string) []string {
 	var missing []string
 	for _, field := range fields {
 		v, ok := b.Extra[field]
@@ -695,7 +698,7 @@ func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
 	applyExtraOptions(b, o.extraSet, o.extraUnset)
 
 	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
-		if missing := missingRequiredFields(b, fields); len(missing) > 0 {
+		if missing := MissingRequiredFields(b, fields); len(missing) > 0 {
 			return &PolicyViolationError{BeanID: b.ID, Status: b.Status, Missing: missing}
 		}
 	}
@@ -788,7 +791,7 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
 		prev, ok := c.statusOnDisk(storedBean.Path, wtPath)
 		if !ok || prev != b.Status {
-			if missing := missingRequiredFields(b, fields); len(missing) > 0 {
+			if missing := MissingRequiredFields(b, fields); len(missing) > 0 {
 				return &PolicyViolationError{BeanID: b.ID, Status: b.Status, Missing: missing}
 			}
 		}

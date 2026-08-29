@@ -2,12 +2,12 @@ package commands
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/hmans/beans/internal/gitutil"
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
+	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/hmans/beans/pkg/beangraph/model"
@@ -22,22 +22,21 @@ var (
 )
 
 var completeCmd = &cobra.Command{
-	Use:   "complete <id>",
-	Short: "Mark a bean as completed",
-	Long:  `Marks an existing bean as completed.`,
-	Args:  cobra.ExactArgs(1),
+	Use:   "complete <id> [id...]",
+	Short: "Mark one or more beans as completed",
+	Long: `Marks one or more existing beans as completed.
+
+--summary, --commit and --set apply to every bean named in the call. Every ID
+is resolved and checked against the status policy before the first bean is
+written, so an unknown ID or a policy violation leaves the whole batch alone.`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		resolver := &beangraph.CoreResolver{Core: core}
 
-		// Find the bean
-		b, err := resolver.Bean(ctx, args[0])
+		targets, code, err := resolveBatchTargets(ctx, resolver, args)
 		if err != nil {
-			return cmdError(completeJSON, output.ErrNotFound, "failed to find bean: %v", err)
-		}
-
-		if b == nil {
-			return cmdError(completeJSON, output.ErrNotFound, "bean not found: %s", args[0])
+			return cmdError(completeJSON, code, "%s", err)
 		}
 
 		// Validate the status
@@ -57,6 +56,9 @@ var completeCmd = &cobra.Command{
 			return cmdError(completeJSON, output.ErrValidation, "%s", err)
 		}
 
+		// Resolve --commit once for the whole batch: ResolveCommit shells
+		// out and reads the working directory, and a ref like HEAD could
+		// otherwise resolve differently for beans later in the loop.
 		if completeCommit != "" {
 			dir, err := os.Getwd()
 			if err != nil {
@@ -77,7 +79,9 @@ var completeCmd = &cobra.Command{
 			Status: &status,
 		}
 
-		// Handle optional summary
+		// Handle optional summary. Resolved once, before the loop: with "-"
+		// this reads stdin, and stdin can only be drained once — inside the
+		// loop every bean after the first would get an empty section.
 		if completeSummary != "" {
 			appendText, err := resolveAppendContent(completeSummary)
 			if err != nil {
@@ -89,26 +93,32 @@ var completeCmd = &cobra.Command{
 			}
 		}
 
-		// Apply the update
-		b, err = resolver.UpdateBean(ctx, b.ID, input, beancore.WithExtraOps(setMap, nil))
-		if err != nil {
+		if err := preflightStatusPolicy(targets, status, setMap); err != nil {
 			return mutationError(completeJSON, err)
 		}
 
-		// Output result
-		if completeJSON {
-			return output.Success(b, "Bean completed")
+		// Apply the update
+		done := make([]*bean.Bean, 0, len(targets))
+		for _, target := range targets {
+			b, err := resolver.UpdateBean(ctx, target.ID, input, beancore.WithExtraOps(setMap, nil))
+			if err != nil {
+				return emitBatchFailure(completeJSON, done, err)
+			}
+			done = append(done, b)
 		}
 
-		fmt.Println(ui.Success.Render("Completed ") + ui.ID.Render(b.ID) + " " + b.Title)
-		return nil
+		return emitBatchSuccess(completeJSON, done,
+			func(b *bean.Bean) error { return output.Success(b, "Bean completed") },
+			func(b *bean.Bean) string {
+				return ui.Success.Render("Completed ") + ui.ID.Render(b.ID) + " " + b.Title
+			})
 	},
 }
 
 func RegisterCompleteCmd(root *cobra.Command) {
-	completeCmd.Flags().StringVar(&completeSummary, "summary", "", "Optional summary of changes")
-	completeCmd.Flags().StringVar(&completeCommit, "commit", "", "Git ref (HEAD, branch, tag, SHA) recorded in the configured commit field")
-	completeCmd.Flags().StringArrayVar(&completeSet, "set", nil, "Set an extra front matter key as key=value (can be repeated)")
+	completeCmd.Flags().StringVar(&completeSummary, "summary", "", "Optional summary of changes, applied to every bean in the call")
+	completeCmd.Flags().StringVar(&completeCommit, "commit", "", "Git ref (HEAD, branch, tag, SHA) recorded in the configured commit field of every bean in the call")
+	completeCmd.Flags().StringArrayVar(&completeSet, "set", nil, "Set an extra front matter key as key=value on every bean in the call (can be repeated)")
 	completeCmd.Flags().BoolVar(&completeJSON, "json", false, "Output as JSON")
 	root.AddCommand(completeCmd)
 }
