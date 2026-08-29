@@ -143,3 +143,50 @@ func TestETagIfMatchRejectsGenuineConcurrentModification(t *testing.T) {
 		t.Fatalf("expected *ETagMismatchError, got %T: %v", err, err)
 	}
 }
+
+// TestUpdateWithIfMatchAndStatusPolicy covers the two on-disk checks Update
+// runs together: the etag it validates If-Match against, and the previous
+// status the field policy is measured from. Both read the same file, and they
+// have to keep agreeing after that read was consolidated.
+func TestUpdateWithIfMatchAndStatusPolicy(t *testing.T) {
+	core, _ := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
+	b := createTestBean(t, core, "test-etpol", "Gated bean", "todo")
+	etag := b.ETag()
+
+	t.Run("policy blocks the transition even with a matching etag", func(t *testing.T) {
+		b.Status = "completed"
+		err := core.Update(b, &etag)
+
+		var polErr *PolicyViolationError
+		if !errors.As(err, &polErr) {
+			t.Fatalf("Update() error = %v, want *PolicyViolationError", err)
+		}
+	})
+
+	t.Run("a stale etag is rejected before the policy runs", func(t *testing.T) {
+		stale := "0123456789abcdef"
+		b.Status = "completed"
+		err := core.Update(b, &stale)
+
+		var mismatch *ETagMismatchError
+		if !errors.As(err, &mismatch) {
+			t.Fatalf("Update() error = %v, want *ETagMismatchError", err)
+		}
+	})
+
+	t.Run("the transition goes through once the field is there", func(t *testing.T) {
+		b.Status = "completed"
+		b.Extra = map[string]any{"commit": "abc1234"}
+		if err := core.Update(b, &etag); err != nil {
+			t.Fatalf("Update() error = %v, want nil", err)
+		}
+
+		got, err := core.Get("test-etpol")
+		if err != nil {
+			t.Fatalf("Get() error = %v", err)
+		}
+		if got.Status != "completed" {
+			t.Errorf("Status = %q, want %q", got.Status, "completed")
+		}
+	})
+}

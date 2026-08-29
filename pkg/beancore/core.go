@@ -685,6 +685,12 @@ func (c *Core) statusOnDisk(relPath, worktreePath string) (status string, ok boo
 	if err != nil {
 		return "", false
 	}
+	return statusOfContent(data)
+}
+
+// statusOfContent parses the status out of a bean file's bytes.
+// ok is false when the content is unparseable.
+func statusOfContent(data []byte) (status string, ok bool) {
 	b, err := bean.Parse(bytes.NewReader(data))
 	if err != nil {
 		return "", false
@@ -789,25 +795,38 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 		return &ETagRequiredError{}
 	}
 
-	if ifMatch != nil && *ifMatch != "" {
-		// Calculate etag from the on-disk version by reading the stored bean's path
-		// This is necessary because the in-memory bean may have already been modified
-		// (Go uses pointers, so modifying the bean passed to Update also modifies c.beans[id])
-		var currentETag string
-		if storedBean.Path != "" && !c.dirty[b.ID] {
-			// Read current file from disk to calculate etag
-			diskPath := filepath.Join(c.root, storedBean.Path)
-			content, err := os.ReadFile(diskPath)
-			if err != nil {
-				// If file doesn't exist yet, fall back to stored bean's etag
-				currentETag = storedBean.ETag()
-			} else {
-				// Calculate etag from on-disk content -- same definition bean.ETag uses.
-				currentETag = bean.ETagOf(content)
-			}
-		} else {
-			// No path yet or bean is dirty (not on disk), use in-memory etag
-			currentETag = storedBean.ETag()
+	// Auto-route to linked worktree if no explicit path given
+	wtPath := o.worktreePath
+	if wtPath == "" {
+		wtPath = c.worktreeLinks[b.ID]
+	}
+
+	// The main-store file backs both checks below: the etag If-Match is
+	// validated against, and the previous status the field policy is measured
+	// from. Read it once, and read it here rather than before taking the lock:
+	// a read outside the lock leaves a window in which another writer replaces
+	// the file, which would turn a stale If-Match into a silent accept — the
+	// exact lost update the etag exists to prevent.
+	var mainContent []byte
+	var haveMainContent bool
+	readsMainFile := storedBean.Path != "" && !c.dirty[b.ID] && wtPath == ""
+	wantsETagFromDisk := ifMatch != nil && *ifMatch != ""
+	wantsStatusFromDisk := len(c.requiredFieldsFor(b.Status)) > 0
+	if readsMainFile && (wantsETagFromDisk || wantsStatusFromDisk) {
+		if content, err := os.ReadFile(filepath.Join(c.root, storedBean.Path)); err == nil {
+			mainContent, haveMainContent = content, true
+		}
+	}
+
+	if wantsETagFromDisk {
+		// The etag has to come from the file, not from the in-memory bean: Go
+		// passes the bean by pointer, so the caller's edits already landed in
+		// c.beans[id] and its etag describes the new state, not the one being
+		// replaced.
+		currentETag := storedBean.ETag()
+		if haveMainContent {
+			// Same definition bean.ETag uses.
+			currentETag = bean.ETagOf(mainContent)
 		}
 
 		if currentETag != *ifMatch {
@@ -818,16 +837,16 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 		}
 	}
 
-	// Auto-route to linked worktree if no explicit path given
-	wtPath := o.worktreePath
-	if wtPath == "" {
-		wtPath = c.worktreeLinks[b.ID]
-	}
-
 	applyExtraOptions(b, o.extraSet, o.extraUnset)
 
 	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
-		prev, ok := c.statusOnDisk(storedBean.Path, wtPath)
+		var prev string
+		var ok bool
+		if haveMainContent {
+			prev, ok = statusOfContent(mainContent)
+		} else {
+			prev, ok = c.statusOnDisk(storedBean.Path, wtPath)
+		}
 		if !ok || prev != b.Status {
 			if missing := MissingRequiredFields(b, fields); len(missing) > 0 {
 				return &PolicyViolationError{BeanID: b.ID, Status: b.Status, Missing: missing}
