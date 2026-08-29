@@ -622,6 +622,13 @@ func (m *Manager) readOutput(beanID string, stdout io.Reader, workDir string, pr
 
 	// Flush any remaining pending tool message at end of stream
 	flushToolMsg()
+
+	// A scanner error means the stream broke: the process died mid-line, the
+	// pipe failed, or a single line outgrew the buffer. Without this the read
+	// just ended and the session sat in RUNNING with nothing explaining it.
+	if err := scanner.Err(); err != nil {
+		m.setError(beanID, fmt.Sprintf("agent output stream failed: %v", err))
+	}
 }
 
 // wasLastUserMessage checks if the most recent user message in the session
