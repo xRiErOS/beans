@@ -954,8 +954,11 @@ func (r *subscriptionResolver) BeanChanged(ctx context.Context, includeInitial *
 		defer unsubscribe()
 		defer close(out)
 
-		// If includeInitial is true, emit all current beans as a single snapshot
-		if includeInitial != nil && *includeInitial {
+		// sendSnapshot emits the full current state as one event. It is both the
+		// initial payload and the answer to a resync: after beancore dropped
+		// events for this subscriber, incremental updates would build on an
+		// incomplete history, so the client replaces its state wholesale.
+		sendSnapshot := func() bool {
 			beans := r.Core.All()
 			cfg := r.Core.Config()
 			bean.SortByStatusPriorityAndType(beans, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
@@ -965,8 +968,15 @@ func (r *subscriptionResolver) BeanChanged(ctx context.Context, includeInitial *
 				Type:  model.ChangeTypeInitialSnapshot,
 				Beans: beans,
 			}:
-				// Sent successfully
+				return true
 			case <-ctx.Done():
+				return false
+			}
+		}
+
+		// If includeInitial is true, emit all current beans as a single snapshot
+		if includeInitial != nil && *includeInitial {
+			if !sendSnapshot() {
 				return
 			}
 		}
@@ -984,6 +994,13 @@ func (r *subscriptionResolver) BeanChanged(ctx context.Context, includeInitial *
 
 				// Forward each event to the GraphQL subscription
 				for _, event := range events {
+					if event.Type == beancore.EventResync {
+						if !sendSnapshot() {
+							return
+						}
+						continue
+					}
+
 					gqlEvent := &model.BeanChangeEvent{
 						BeanID: event.BeanID,
 						Bean:   event.Bean,

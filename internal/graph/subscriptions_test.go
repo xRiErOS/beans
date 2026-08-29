@@ -2,6 +2,7 @@ package graph
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -154,4 +155,45 @@ func TestSubscriptionsStopOnContextCancel(t *testing.T) {
 			_ = v
 		}
 	})
+}
+
+// TestBeanChangedResyncsAfterOverflow covers the recovery path for a client
+// that fell behind: beancore drops its events, marks it for resync, and the
+// resolver answers with a fresh full snapshot instead of leaving the client on
+// an incomplete history.
+func TestBeanChangedResyncsAfterOverflow(t *testing.T) {
+	resolver, core := setupTestResolver(t)
+	sr := resolver.Subscription()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Enough beans that archiving them all outruns both buffers (16 in
+	// beancore, 64 in the resolver).
+	const beanCount = 200
+	for i := range beanCount {
+		createTestBean(t, core, fmt.Sprintf("overflow-%03d", i), fmt.Sprintf("Bean %d", i), "todo")
+	}
+
+	ch, err := sr.BeanChanged(ctx, nil)
+	if err != nil {
+		t.Fatalf("BeanChanged() error = %v", err)
+	}
+
+	// Produce events without reading any of them.
+	for i := range beanCount {
+		if err := core.Archive(fmt.Sprintf("overflow-%03d", i)); err != nil {
+			t.Fatalf("Archive() error = %v", err)
+		}
+	}
+
+	sawSnapshot := false
+	for !sawSnapshot {
+		event, _ := recvWithin(t, ch, 5*time.Second, "a resync snapshot")
+		if event.Type == model.ChangeTypeInitialSnapshot {
+			sawSnapshot = true
+			if len(event.Beans) == 0 {
+				t.Error("resync snapshot carried no beans")
+			}
+		}
+	}
 }
