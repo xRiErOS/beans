@@ -2,9 +2,11 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/config"
 )
 
 func TestConnectorIsEmptyAtRoot(t *testing.T) {
@@ -98,5 +100,130 @@ func TestFlatRowsAreAllDepthZero(t *testing.T) {
 		if r.Bean != beans[i] {
 			t.Errorf("row %d: Bean pointer mismatch", i)
 		}
+	}
+}
+
+func testRows(titles ...string) []Row {
+	rows := make([]Row, 0, len(titles))
+	for _, ti := range titles {
+		rows = append(rows, Row{Bean: &bean.Bean{
+			ID: "beans-abcd", Title: ti, Type: "task", Status: "todo", Priority: "normal",
+		}})
+	}
+	return rows
+}
+
+func TestNarrowTerminalKeepsEveryAxisShort(t *testing.T) {
+	c := NewColumns(testRows("a short title"), 80, true, config.Default())
+	if c.LongStatus || c.LongType || c.LongPrio {
+		t.Errorf("at 80 columns nothing should be long: type=%v status=%v prio=%v",
+			c.LongType, c.LongStatus, c.LongPrio)
+	}
+}
+
+func TestStatusIsBoughtBeforeType(t *testing.T) {
+	// The buying order is status, then type, then priority. At a width that
+	// affords exactly one upgrade, it must be status.
+	rows := testRows(strings.Repeat("x", 200))
+	for w := 80; w <= 200; w++ {
+		c := NewColumns(rows, w, true, config.Default())
+		if c.LongType && !c.LongStatus {
+			t.Fatalf("at width %d type went long before status", w)
+		}
+		if c.LongPrio && !c.LongType {
+			t.Fatalf("at width %d priority went long before type", w)
+		}
+	}
+}
+
+func TestTitleNeverDropsBelowTheFloorForAnUpgrade(t *testing.T) {
+	rows := testRows(strings.Repeat("x", 200))
+	for w := 80; w <= 200; w++ {
+		c := NewColumns(rows, w, true, config.Default())
+		if (c.LongStatus || c.LongType || c.LongPrio) && c.Title < minTitleWidth {
+			t.Fatalf("width %d: bought a long form and left the title at %d", w, c.Title)
+		}
+	}
+}
+
+func TestColumnsNeverExceedTheTerminal(t *testing.T) {
+	rows := testRows(strings.Repeat("x", 200), "short")
+	for w := 60; w <= 200; w++ {
+		c := NewColumns(rows, w, true, config.Default())
+		total := c.Indent + c.Type + c.Gap + c.ID + c.Gap + c.Title +
+			c.Gap + c.Status + c.Gap + c.Prio
+		if c.Tags > 0 {
+			total += c.Gap + c.Tags
+		}
+		if total > w {
+			t.Errorf("width %d: columns sum to %d", w, total)
+		}
+	}
+}
+
+func TestTagsGiveWayBeforeTheTitleIsCrushed(t *testing.T) {
+	c := NewColumns(testRows(strings.Repeat("x", 200)), 62, true, config.Default())
+	if c.Tags != 0 {
+		t.Errorf("at 62 columns the tags column should have been dropped, got %d", c.Tags)
+	}
+}
+
+func TestIndentFollowsTheDeepestRow(t *testing.T) {
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "a", Title: "root", Type: "epic"}, Depth: 0},
+		{Bean: &bean.Bean{ID: "b", Title: "kid", Type: "task"}, Depth: 1, AncestorsLast: []bool{true}},
+		{Bean: &bean.Bean{ID: "c", Title: "gk", Type: "task"}, Depth: 2, AncestorsLast: []bool{true, true}},
+	}
+	c := NewColumns(rows, 110, false, config.Default())
+	if c.Indent != 6 {
+		t.Errorf("Indent = %d, want 6 for a depth-2 tree", c.Indent)
+	}
+}
+
+func TestFlatRowsNeedNoIndent(t *testing.T) {
+	c := NewColumns(FlatRows([]*bean.Bean{{ID: "a", Title: "x", Type: "task"}}), 110, false, config.Default())
+	if c.Indent != 0 {
+		t.Errorf("Indent = %d, want 0 for flat rows", c.Indent)
+	}
+}
+
+func TestCounterWidthIsMeasuredNotAssumed(t *testing.T) {
+	// A real store reached 131/139 and burst a fixed five-cell counter.
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "a", Title: "m", Type: "milestone"}, Progress: &Progress{Done: 131, Total: 139}},
+		{Bean: &bean.Bean{ID: "b", Title: "n", Type: "milestone"}, Progress: &Progress{Done: 0, Total: 5}},
+	}
+	c := NewColumns(rows, 110, false, config.Default())
+	if c.Counter != 7 {
+		t.Errorf("Counter = %d, want 7 for \"131/139\"", c.Counter)
+	}
+	if c.ProgressWidth != 6+2+7 {
+		t.Errorf("ProgressWidth = %d, want bar(6) + gap(2) + counter(7)", c.ProgressWidth)
+	}
+}
+
+func TestTypeTextFollowsTheLongFlag(t *testing.T) {
+	b := &bean.Bean{Type: "milestone"}
+	short := Columns{LongType: false}
+	if got := short.TypeText(b); got != "M" {
+		t.Errorf("short type = %q, want %q", got, "M")
+	}
+	long := Columns{LongType: true}
+	if got := long.TypeText(b); got != "milestone" {
+		t.Errorf("long type = %q, want %q", got, "milestone")
+	}
+}
+
+func TestPrioTextHidesNormal(t *testing.T) {
+	c := Columns{LongPrio: true}
+	if got := c.PrioText(&bean.Bean{Priority: "normal"}); got != "" {
+		t.Errorf("normal priority = %q, want empty", got)
+	}
+	if got := c.PrioText(&bean.Bean{Priority: "high"}); got != "high" {
+		t.Errorf("high priority = %q, want %q", got, "high")
+	}
+	short := Columns{LongPrio: false}
+	if got := short.PrioText(&bean.Bean{Priority: "critical"}); got != "‼" {
+		t.Errorf("short critical = %q, want %q", got, "‼")
 	}
 }
