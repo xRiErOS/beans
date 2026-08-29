@@ -108,6 +108,7 @@ func (c *Core) applyRenameSlug(plan *RenamePlan) error {
 		b.Path = ch.NewPath
 		_, b.Slug = bean.ParseFilename(filepath.Base(newAbs))
 	}
+	c.mainPaths[ch.OldID] = ch.NewPath
 	return nil
 }
 

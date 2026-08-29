@@ -65,6 +65,12 @@ type Core struct {
 	dirty          map[string]bool       // IDs of beans modified in runtime but not yet persisted to disk
 	worktreeLinks  map[string]string     // bean ID -> worktree path (beans linked to a worktree)
 
+	// mainPaths maps a bean ID to its file path relative to root, for beans
+	// backed by a file in the main store. A worktree overlay replaces the entry
+	// in beans but never touches this map, so it still answers "which file in
+	// the main store holds this bean" while a worktree version is active.
+	mainPaths map[string]string
+
 	// Search index (optional, lazy-initialized)
 	searchIndex *search.Index
 
@@ -92,6 +98,7 @@ func New(root string, cfg *config.Config) *Core {
 		beans:         make(map[string]*bean.Bean),
 		dirty:         make(map[string]bool),
 		worktreeLinks: make(map[string]string),
+		mainPaths:     make(map[string]string),
 		subscribers: make(map[uint64]*subscription),
 		warnWriter:  os.Stderr,
 	}
@@ -244,6 +251,7 @@ func (c *Core) loadFromDisk() error {
 	// Clear existing beans and dirty state
 	c.beans = make(map[string]*bean.Bean)
 	c.dirty = make(map[string]bool)
+	c.mainPaths = make(map[string]string)
 	err := filepath.WalkDir(c.root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -269,6 +277,7 @@ func (c *Core) loadFromDisk() error {
 		}
 
 		c.beans[b.ID] = b
+		c.mainPaths[b.ID] = b.Path
 		return nil
 	})
 	if err != nil {
@@ -860,6 +869,7 @@ func (c *Core) saveToDisk(b *bean.Bean) error {
 		return fmt.Errorf("writing file: %w", err)
 	}
 	b.SetContentETag(content)
+	c.mainPaths[b.ID] = b.Path
 
 	return nil
 }
@@ -921,6 +931,7 @@ func (c *Core) Delete(id string) error {
 
 	// Remove from in-memory map
 	delete(c.beans, targetID)
+	delete(c.mainPaths, targetID)
 
 	// Update search index if active (best-effort, don't fail delete)
 	if c.searchIndex != nil {
@@ -970,6 +981,7 @@ func (c *Core) Archive(id string) error {
 	// Update bean's path in store and notify subscribers
 	targetBean.Path = newRelPath
 	c.beans[targetID] = targetBean
+	c.mainPaths[targetID] = newRelPath
 	c.mu.Unlock()
 
 	c.fanOut([]BeanEvent{{
@@ -1010,6 +1022,7 @@ func (c *Core) Unarchive(id string) error {
 	// Update bean's path
 	targetBean.Path = newRelPath
 	c.beans[targetID] = targetBean
+	c.mainPaths[targetID] = newRelPath
 
 	return nil
 }
