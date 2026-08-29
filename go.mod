@@ -20,6 +20,7 @@ require (
 	github.com/gorilla/websocket v1.5.0
 	github.com/matoous/go-nanoid/v2 v2.1.0
 	github.com/spf13/cobra v1.10.2
+	github.com/spf13/pflag v1.0.10
 	github.com/tidwall/pretty v1.2.1
 	github.com/vektah/gqlparser/v2 v2.5.31
 	golang.org/x/term v0.38.0
@@ -98,7 +99,6 @@ require (
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/sahilm/fuzzy v0.1.1 // indirect
 	github.com/sosodev/duration v1.3.1 // indirect
-	github.com/spf13/pflag v1.0.10 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/u-root/u-root v0.11.0 // indirect
 	github.com/ugorji/go/codec v1.3.0 // indirect
