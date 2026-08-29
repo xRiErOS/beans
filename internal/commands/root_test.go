@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/config"
 )
 
@@ -434,4 +435,43 @@ func TestResolveBeansPathConfigFileOutranksEnv(t *testing.T) {
 			t.Errorf("expected error to suggest 'beans init', got %q", err.Error())
 		}
 	})
+}
+
+// TestConfiguredThemeReachesTheRenderer verifies the config -> renderer
+// chain through the actual entry point: NewRootCmd's PersistentPreRunE, not
+// just a manual config.Load()+ui.SetTheme() pairing that would pass whether
+// or not root.go itself ever calls ui.SetTheme. It drives the real
+// PersistentPreRunE with a config that names the "latte" flavour and checks
+// that ui.ActiveTheme() picks it up.
+func TestConfiguredThemeReachesTheRenderer(t *testing.T) {
+	t.Cleanup(func() { ui.SetTheme("mocha") })
+
+	oldCfg, oldCore, oldConfigPath, oldBeansPath := cfg, core, configPath, beansPath
+	t.Cleanup(func() { cfg, core, configPath, beansPath = oldCfg, oldCore, oldConfigPath, oldBeansPath })
+
+	dir := t.TempDir()
+	beansDir := filepath.Join(dir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating test .beans dir: %v", err)
+	}
+	path := filepath.Join(dir, ".beans.yml")
+	body := "beans:\n  path: .beans\n  prefix: t-\ndisplay:\n  theme: latte\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	// NewRootCmd's flag registration (StringVar) resets configPath/beansPath
+	// to their flag defaults as a side effect, so they must be set after
+	// building the command, not before.
+	root := NewRootCmd()
+	configPath = path
+	beansPath = ""
+
+	if err := root.PersistentPreRunE(root, nil); err != nil {
+		t.Fatalf("PersistentPreRunE: %v", err)
+	}
+
+	if got := ui.ActiveTheme().Name; got != "latte" {
+		t.Errorf(`ActiveTheme() = %q, want "latte"`, got)
+	}
 }
