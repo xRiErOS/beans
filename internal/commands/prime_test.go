@@ -61,7 +61,10 @@ func TestPrimeCmdDocumentsWorkflowRecipes(t *testing.T) {
 	for _, want := range []string{
 		"beans start <id>",
 		"beans complete <id>",
-		"beans scrap <id> --reason",
+		// The exact signature is pinned by TestPrimeCmdDocumentsBatchAndFilters;
+		// here it is only the recipe and its defining flag that must be present.
+		"beans scrap",
+		"--reason",
 		"beans next",
 		"beans milestones",
 		"beans progress",
@@ -70,6 +73,27 @@ func TestPrimeCmdDocumentsWorkflowRecipes(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prime output missing %q (workflow recipe undocumented)", want)
+		}
+	}
+}
+
+// The batch signatures and the tag verb exist only for agents that know to
+// reach for them. next's filters are the same case: an agent that has only
+// ever seen bare `beans next` will keep pulling the wrong bean out of a
+// large store.
+func TestPrimeCmdDocumentsBatchAndFilters(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	for _, want := range []string{
+		"beans complete <id> [id...]",
+		"beans scrap <id> [id...]",
+		"beans start <id> [id...]",
+		"beans tag <id> [id...]",
+		"--remove-tag",
+		"beans next --type",
+		"--desc",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prime output missing %q (batch/filter capability undocumented)", want)
 		}
 	}
 }
