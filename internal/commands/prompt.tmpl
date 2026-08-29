@@ -223,6 +223,36 @@ beans create --json "Title" -t task --order V
 - Placing a bean relative to (`--after`/`--before`) a sibling that has no order value yet fails -- place that sibling first (e.g. with `--last`).
 - A move writes exactly one file: the bean being placed, never its neighbours.
 
+## Failure Output
+
+Every command exits 1 on failure and describes it in exactly one place — which
+place depends on whether you passed `--json`.
+
+Without `--json`, two lines go to stderr and stdout stays empty:
+
+```
+Error: parent bean not found: beans-nope
+Run '<command> --help' for usage.
+```
+
+With `--json`, one document goes to stdout and stderr stays empty:
+
+```json
+{"success": false, "error": "parent bean not found: beans-nope", "code": "VALIDATION_ERROR"}
+```
+
+Codes: `NOT_FOUND`, `NO_BEANS_DIR`, `INVALID_STATUS`, `FILE_ERROR`,
+`VALIDATION_ERROR`, `CONFLICT`, `POLICY_VIOLATION`.
+
+So: under `--json`, parse stdout and branch on `success`; an empty stderr is
+normal and not a sign that something went missing. A success payload never
+carries an `error` key, so the two are unambiguous. No command prints a usage
+block on failure — if you want the flags, ask for them with `--help`.
+
+A batch verb (`complete`, `scrap`, `start`, `tag`, `delete`) that fails partway
+through returns `{"success": false, "beans": [...], "count": n, ...}` — the
+beans listed there were already written before the failure struck.
+
 ## Concurrency Control
 
 Use etags with `--if-match`:
