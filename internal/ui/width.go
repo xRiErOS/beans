@@ -3,6 +3,7 @@ package ui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/mattn/go-runewidth"
 )
@@ -35,15 +36,19 @@ func Truncate(s string, width int) string {
 	if DisplayWidth(s) <= width {
 		return s
 	}
-	if width == 1 {
-		return "…"
-	}
 	return runewidth.Truncate(s, width, "…")
 }
 
 // WrapText breaks s into lines of at most width cells. Words longer than width
 // are broken hard, because leaving them whole would overflow the column. The
 // result always has at least one element, so callers can index [0] safely.
+//
+// Two guarantees are in tension in one degenerate case: a column narrower
+// than a single wide (e.g. CJK) character's cell width has no line that is
+// both non-empty and within width. When that happens this function keeps
+// "never hangs, never returns an empty line" and gives up "no line exceeds
+// width" for that one line — see the head == "" branch below. Do not "fix"
+// that branch away; it exists so this loop terminates.
 func WrapText(s string, width int) []string {
 	if width < 1 {
 		width = 1
@@ -62,6 +67,16 @@ func WrapText(s string, width int) []string {
 				cur = ""
 			}
 			head := runewidth.Truncate(w, width, "")
+			if head == "" {
+				// runewidth.Truncate returns "" when even the first
+				// grapheme alone already exceeds width (e.g. a 2-cell-wide
+				// CJK character in a 1-cell column). Force one rune of
+				// progress so the loop cannot spin forever; the resulting
+				// line may be one cell wider than requested, which is
+				// visible and recoverable, unlike a hang.
+				_, size := utf8.DecodeRuneInString(w)
+				head = w[:size]
+			}
 			lines = append(lines, head)
 			w = w[len(head):]
 		}

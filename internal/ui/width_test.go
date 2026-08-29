@@ -46,6 +46,7 @@ func TestTruncate(t *testing.T) {
 		{"abcdef", 10, "abcdef"},
 		{"abcdef", 6, "abcdef"},
 		{"abcdef", 4, "abc…"},
+		{"abcdef", 2, "a…"},
 		{"abcdef", 1, "…"},
 		{"abcdef", 0, ""},
 		{"abcdef", -3, ""},
@@ -84,6 +85,40 @@ func TestWrapTextNoLineExceedsTheWidth(t *testing.T) {
 	for _, line := range WrapText(long, 24) {
 		if w := DisplayWidth(line); w > 24 {
 			t.Errorf("line %q is %d cells wide, want at most 24", line, w)
+		}
+	}
+}
+
+// A column narrower than one wide (CJK) character's cell width has no line
+// that is both non-empty and within width — the two guarantees conflict.
+// WrapText must still terminate and never return an empty line; it is
+// allowed to overflow width by one cell in this single degenerate case.
+// This must NOT be "fixed" back to strict width compliance here, or the
+// underlying loop hangs forever again.
+func TestWrapTextNarrowColumnWithWideCharacterTerminates(t *testing.T) {
+	in := "日本語"
+	got := WrapText(in, 1)
+	if len(got) == 0 {
+		t.Fatalf("WrapText(%q, 1) returned no lines", in)
+	}
+	for _, line := range got {
+		if line == "" {
+			t.Errorf("WrapText(%q, 1) produced an empty line: %#v", in, got)
+		}
+	}
+}
+
+// At width 2 every rune of "日本語" exactly fits its own line, so both
+// guarantees hold here: non-empty lines, and no line wider than requested.
+func TestWrapTextWideCharacterExactlyFitsTheWidth(t *testing.T) {
+	in := "日本語"
+	got := WrapText(in, 2)
+	for _, line := range got {
+		if line == "" {
+			t.Errorf("WrapText(%q, 2) produced an empty line: %#v", in, got)
+		}
+		if w := DisplayWidth(line); w > 2 {
+			t.Errorf("WrapText(%q, 2) line %q is %d cells wide, want at most 2", in, line, w)
 		}
 	}
 }
