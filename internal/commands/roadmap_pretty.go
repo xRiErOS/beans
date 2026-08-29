@@ -92,7 +92,9 @@ func roadmapWrapTitle(title string, width int) []string {
 // roadmapTagRow renders a bean's tags as "#tag #tag", wrapped to the title
 // cell and hung at the title column, or "" when the bean has none. Tags get
 // their own row so the title cell and the right-hand attribute block keep
-// their widths regardless of how many tags a bean carries.
+// their widths regardless of how many tags a bean carries. The row ends on a
+// blank line so the tags read as belonging to the bean above rather than
+// running into the next one; rows without tags stay adjacent as before.
 func roadmapTagRow(b *bean.Bean, titleW int) string {
 	if len(b.Tags) == 0 {
 		return ""
@@ -107,6 +109,7 @@ func roadmapTagRow(b *bean.Bean, titleW int) string {
 		sb.WriteString(strings.Repeat(" ", roadmapTitleCol))
 		sb.WriteString(line)
 	}
+	sb.WriteString("\n")
 	return sb.String()
 }
 

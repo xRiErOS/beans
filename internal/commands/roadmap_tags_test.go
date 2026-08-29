@@ -151,3 +151,51 @@ func TestRoadmapMarkdownWithoutTagsFlagUnchanged(t *testing.T) {
 		t.Errorf("tags leaked into the default Markdown render:\n%s", withFlag)
 	}
 }
+
+// TestRoadmapTagRowFollowedByBlankLine pins the separation Erik asked for:
+// a tag row is followed by an empty line so the tags read as belonging to
+// the row above rather than running into the next bean.
+func TestRoadmapTagRowFollowedByBlankLine(t *testing.T) {
+	out := renderRoadmapPretty(tagsFixture(), 110, true)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+
+	for i, l := range lines {
+		if !strings.Contains(l, "#planning") {
+			continue
+		}
+		if i+1 >= len(lines) {
+			t.Fatalf("tag row is the last line, want a blank line after it:\n%s", out)
+		}
+		if lines[i+1] != "" {
+			t.Errorf("line after the tag row = %q, want empty", lines[i+1])
+		}
+		if i+2 >= len(lines) || !strings.Contains(lines[i+2], "Wire up sheet") {
+			t.Errorf("the next bean row does not follow the blank line:\n%s", out)
+		}
+		return
+	}
+	t.Fatalf("tag row not found in:\n%s", out)
+}
+
+// TestRoadmapUntaggedBeanKeepsNoBlankLine pins that the blank line belongs
+// to the tag row, not to --tags as a mode: rows without tags stay adjacent.
+func TestRoadmapUntaggedBeanKeepsNoBlankLine(t *testing.T) {
+	a := &bean.Bean{ID: "beans-it01", Title: "First", Type: "task", Status: "todo"}
+	b := &bean.Bean{ID: "beans-it02", Title: "Second", Type: "task", Status: "todo"}
+	ms := &bean.Bean{ID: "beans-ms01", Title: "Payments", Type: "milestone", Status: "todo"}
+	data := &roadmapData{Milestones: []milestoneGroup{{Milestone: ms, Other: []*bean.Bean{a, b}}}}
+
+	out := renderRoadmapPretty(data, 110, true)
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+
+	for i, l := range lines {
+		if !strings.Contains(l, "First") {
+			continue
+		}
+		if !strings.Contains(lines[i+1], "Second") {
+			t.Errorf("untagged rows separated by %q, want them adjacent:\n%s", lines[i+1], out)
+		}
+		return
+	}
+	t.Fatalf("row not found in:\n%s", out)
+}
