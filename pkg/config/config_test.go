@@ -1937,7 +1937,7 @@ func TestTypeListFallsBackToTheDefaults(t *testing.T) {
 
 func TestConfigOverridesASingleColour(t *testing.T) {
 	c := Default()
-	c.Types = []TypeConfig{{Name: "bug", Color: "#ff0000"}}
+	c.Types = []TypeOverride{{Name: "bug", Color: "#ff0000"}}
 
 	got := c.GetType("bug")
 	if got == nil || got.Color != "#ff0000" {
@@ -1954,7 +1954,7 @@ func TestConfigOverridesASingleColour(t *testing.T) {
 
 func TestAnOverrideKeepsUnsetFields(t *testing.T) {
 	c := Default()
-	c.Types = []TypeConfig{{Name: "epic", Color: "#00ff00"}}
+	c.Types = []TypeOverride{{Name: "epic", Color: "#00ff00"}}
 	got := c.GetType("epic")
 	if got == nil {
 		t.Fatal("GetType(\"epic\") = nil, want the merged entry")
@@ -1968,7 +1968,7 @@ func TestAnOverrideKeepsUnsetFields(t *testing.T) {
 
 func TestAnUnknownNameIsAppended(t *testing.T) {
 	c := Default()
-	c.Statuses = []StatusConfig{{Name: "blocked", Color: "red"}}
+	c.Statuses = []StatusOverride{{Name: "blocked", Color: "red"}}
 	if got := c.GetStatus("blocked"); got == nil {
 		t.Error("a status the defaults do not know should be appended")
 	}
@@ -1979,7 +1979,7 @@ func TestAnUnknownNameIsAppended(t *testing.T) {
 
 func TestStatusNamesFollowTheMergedList(t *testing.T) {
 	c := Default()
-	c.Statuses = []StatusConfig{{Name: "blocked", Color: "red"}}
+	c.Statuses = []StatusOverride{{Name: "blocked", Color: "red"}}
 	found := false
 	for _, n := range c.StatusNames() {
 		if n == "blocked" {
@@ -1993,7 +1993,7 @@ func TestStatusNamesFollowTheMergedList(t *testing.T) {
 
 func TestPriorityOverride(t *testing.T) {
 	c := Default()
-	c.Priorities = []PriorityConfig{{Name: "critical", Color: "#ff00ff"}}
+	c.Priorities = []PriorityOverride{{Name: "critical", Color: "#ff00ff"}}
 	if got := c.GetPriority("critical"); got == nil || got.Color != "#ff00ff" {
 		t.Errorf("GetPriority(\"critical\").Color = %v, want the override", got)
 	}
@@ -2014,9 +2014,9 @@ func TestSaveRoundTripsTypeStatusAndPriorityOverrides(t *testing.T) {
 
 	cfg := DefaultWithPrefix("test-")
 	cfg.SetConfigDir(tmpDir)
-	cfg.Types = []TypeConfig{{Name: "bug", Color: "#ff00ff"}}
-	cfg.Statuses = []StatusConfig{{Name: "blocked", Color: "red", Archive: true}}
-	cfg.Priorities = []PriorityConfig{{Name: "critical", Color: "#ff0000"}}
+	cfg.Types = []TypeOverride{{Name: "bug", Color: "#ff00ff"}}
+	cfg.Statuses = []StatusOverride{{Name: "blocked", Color: "red", Archive: boolPtr(true)}}
+	cfg.Priorities = []PriorityOverride{{Name: "critical", Color: "#ff0000"}}
 
 	if err := cfg.Save(tmpDir); err != nil {
 		t.Fatalf("Save() error = %v", err)
@@ -2035,5 +2035,35 @@ func TestSaveRoundTripsTypeStatusAndPriorityOverrides(t *testing.T) {
 	}
 	if got := reloaded.GetPriority("critical"); got == nil || got.Color != "#ff0000" {
 		t.Errorf("reloaded GetPriority(\"critical\").Color = %v, want the saved override", got)
+	}
+}
+
+// Fix round 1, Commit 1: a colour-only override must not silently flip
+// Archive back to false (the field the previous, unconditional-assignment
+// merge got wrong for "completed"). Archive is a pointer precisely so these
+// two directions - "not mentioned" vs. "explicitly set" - are distinguishable.
+
+func TestRecolouringAStatusPreservesItsArchiveFlag(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusOverride{{Name: "completed", Color: "#a6e3a1"}}
+
+	got := c.GetStatus("completed")
+	if got == nil {
+		t.Fatal("GetStatus(\"completed\") = nil, want the merged entry")
+	}
+	if got.Color != "#a6e3a1" {
+		t.Errorf("GetStatus(\"completed\").Color = %q, want the override", got.Color)
+	}
+	if !c.IsArchiveStatus("completed") {
+		t.Error("IsArchiveStatus(\"completed\") = false, want true: a colour-only override must not touch Archive")
+	}
+}
+
+func TestAnExplicitArchiveOverrideIsHonoured(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusOverride{{Name: "completed", Archive: boolPtr(false)}}
+
+	if c.IsArchiveStatus("completed") {
+		t.Error("IsArchiveStatus(\"completed\") = true, want false: an explicit archive: false must be honoured")
 	}
 }

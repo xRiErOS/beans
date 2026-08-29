@@ -84,6 +84,34 @@ type PriorityConfig struct {
 	Description string `yaml:"description,omitempty"`
 }
 
+// StatusOverride is one entry of Config.Statuses: a status the config wants
+// to override (matched by Name) or add. Archive is a pointer so an omitted
+// key is structurally distinct from an explicit "archive: false" - a plain
+// bool cannot make that distinction, and collapsing it silently flips a
+// status like "completed" back to non-archiving on any recolour-only edit.
+type StatusOverride struct {
+	Name        string `yaml:"name"`
+	Color       string `yaml:"color,omitempty"`
+	Description string `yaml:"description,omitempty"`
+	Archive     *bool  `yaml:"archive,omitempty"`
+}
+
+// TypeOverride is one entry of Config.Types: a type the config wants to
+// override (matched by Name) or add.
+type TypeOverride struct {
+	Name        string `yaml:"name"`
+	Color       string `yaml:"color,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
+// PriorityOverride is one entry of Config.Priorities: a priority the config
+// wants to override (matched by Name) or add.
+type PriorityOverride struct {
+	Name        string `yaml:"name"`
+	Color       string `yaml:"color,omitempty"`
+	Description string `yaml:"description,omitempty"`
+}
+
 // PermissionMode represents the default agent permission mode.
 type PermissionMode string
 
@@ -189,9 +217,9 @@ type Config struct {
 	// Statuses, Types and Priorities override the built-in tables entry by
 	// entry: a config naming only "bug" keeps the other four types as they are.
 	// A name the defaults do not carry is appended.
-	Statuses   []StatusConfig   `yaml:"statuses,omitempty"`
-	Types      []TypeConfig     `yaml:"types,omitempty"`
-	Priorities []PriorityConfig `yaml:"priorities,omitempty"`
+	Statuses   []StatusOverride   `yaml:"statuses,omitempty"`
+	Types      []TypeOverride     `yaml:"types,omitempty"`
+	Priorities []PriorityOverride `yaml:"priorities,omitempty"`
 
 	// configDir is the directory containing the config file (not serialized)
 	// Used to resolve relative paths
@@ -332,8 +360,10 @@ func Load(configPath string) (*Config, error) {
 		cfg.Beans.DefaultStatus = "todo"
 	}
 	if cfg.Beans.DefaultType == "" {
-		// Read through the merged list so a config that overrides the first
-		// type still gets a fallback consistent with what it actually declared.
+		// DefaultTypes[0].Name via the merged list: harmless today (an
+		// override never changes an entry's Name, only its Color and
+		// Description), kept this way only because a future merge that did
+		// allow renaming should not have to remember this call site too.
 		cfg.Beans.DefaultType = cfg.TypeList()[0].Name
 	}
 
@@ -642,8 +672,8 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if s.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(s.Color))
 		}
-		if s.Archive {
-			m.Content = append(m.Content, strNode("archive"), scalar("true", "!!bool"))
+		if s.Archive != nil {
+			m.Content = append(m.Content, strNode("archive"), scalar(fmt.Sprintf("%t", *s.Archive), "!!bool"))
 		}
 		if s.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(s.Description))
@@ -751,34 +781,62 @@ func (c *Config) GetCommitField() string {
 	return DefaultCommitField
 }
 
+// mergeDefaults merges a config's override entries into a copy of a
+// built-in default table, matched by name. An override naming an entry the
+// defaults already have is applied onto that entry via apply; an override
+// naming an unknown entry is appended as a new one (apply runs against a
+// zero-value T, so it must itself set every field the new entry needs,
+// starting with the name). This is the single place the three list merges
+// (statuses, types, priorities) share, so a merge rule such as "only an
+// explicit field touches the default" is written once, not duplicated per
+// type - see StatusList's Archive handling for why that duplication was the
+// actual defect the previous copy-pasted version hid.
+func mergeDefaults[T, O any](defaults []T, overrides []O, key func(T) string, name func(O) string, apply func(*T, O)) []T {
+	out := make([]T, len(defaults))
+	copy(out, defaults)
+	for _, override := range overrides {
+		merged := false
+		for i := range out {
+			if key(out[i]) != name(override) {
+				continue
+			}
+			apply(&out[i], override)
+			merged = true
+			break
+		}
+		if !merged {
+			var fresh T
+			apply(&fresh, override)
+			out = append(out, fresh)
+		}
+	}
+	return out
+}
+
 // StatusList returns the built-in statuses with any configured overrides
 // applied. A config entry overrides its named status field by field; a name
 // the defaults do not carry is appended, so custom statuses are possible
 // without this being their dedicated feature.
 func (c *Config) StatusList() []StatusConfig {
-	out := make([]StatusConfig, len(DefaultStatuses))
-	copy(out, DefaultStatuses)
-	for _, override := range c.Statuses {
-		merged := false
-		for i := range out {
-			if out[i].Name != override.Name {
-				continue
+	return mergeDefaults(DefaultStatuses, c.Statuses,
+		func(t StatusConfig) string { return t.Name },
+		func(o StatusOverride) string { return o.Name },
+		func(t *StatusConfig, o StatusOverride) {
+			t.Name = o.Name
+			if o.Color != "" {
+				t.Color = o.Color
 			}
-			if override.Color != "" {
-				out[i].Color = override.Color
+			if o.Description != "" {
+				t.Description = o.Description
 			}
-			if override.Description != "" {
-				out[i].Description = override.Description
+			// Archive is a pointer: only an explicit archive: key (true or
+			// false) touches it, so a colour-only override cannot flip a
+			// status like "completed" back to non-archiving by accident.
+			if o.Archive != nil {
+				t.Archive = *o.Archive
 			}
-			out[i].Archive = override.Archive
-			merged = true
-			break
-		}
-		if !merged {
-			out = append(out, override)
-		}
-	}
-	return out
+		},
+	)
 }
 
 // StatusNames returns the names of the merged status list (see StatusList).
@@ -861,28 +919,19 @@ func (c *Config) IsValidType(typeName string) bool {
 // A config entry overrides its named type field by field; a name the
 // defaults do not carry is appended.
 func (c *Config) TypeList() []TypeConfig {
-	out := make([]TypeConfig, len(DefaultTypes))
-	copy(out, DefaultTypes)
-	for _, override := range c.Types {
-		merged := false
-		for i := range out {
-			if out[i].Name != override.Name {
-				continue
+	return mergeDefaults(DefaultTypes, c.Types,
+		func(t TypeConfig) string { return t.Name },
+		func(o TypeOverride) string { return o.Name },
+		func(t *TypeConfig, o TypeOverride) {
+			t.Name = o.Name
+			if o.Color != "" {
+				t.Color = o.Color
 			}
-			if override.Color != "" {
-				out[i].Color = override.Color
+			if o.Description != "" {
+				t.Description = o.Description
 			}
-			if override.Description != "" {
-				out[i].Description = override.Description
-			}
-			merged = true
-			break
-		}
-		if !merged {
-			out = append(out, override)
-		}
-	}
-	return out
+		},
+	)
 }
 
 // BeanColors holds resolved color information for rendering a bean
@@ -959,28 +1008,19 @@ func (c *Config) IsValidPriority(priority string) bool {
 // applied. A config entry overrides its named priority field by field; a
 // name the defaults do not carry is appended.
 func (c *Config) PriorityList() []PriorityConfig {
-	out := make([]PriorityConfig, len(DefaultPriorities))
-	copy(out, DefaultPriorities)
-	for _, override := range c.Priorities {
-		merged := false
-		for i := range out {
-			if out[i].Name != override.Name {
-				continue
+	return mergeDefaults(DefaultPriorities, c.Priorities,
+		func(t PriorityConfig) string { return t.Name },
+		func(o PriorityOverride) string { return o.Name },
+		func(t *PriorityConfig, o PriorityOverride) {
+			t.Name = o.Name
+			if o.Color != "" {
+				t.Color = o.Color
 			}
-			if override.Color != "" {
-				out[i].Color = override.Color
+			if o.Description != "" {
+				t.Description = o.Description
 			}
-			if override.Description != "" {
-				out[i].Description = override.Description
-			}
-			merged = true
-			break
-		}
-		if !merged {
-			out = append(out, override)
-		}
-	}
-	return out
+		},
+	)
 }
 
 // boolPtr returns a pointer to the given bool value.
