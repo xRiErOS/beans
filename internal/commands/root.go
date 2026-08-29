@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"github.com/hmans/beans/internal/gitutil"
+	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
@@ -22,6 +23,14 @@ func NewRootCmd() *cobra.Command {
 	rootCmd := &cobra.Command{
 		Use:   "beans",
 		Short: "A file-based issue tracker for AI-first workflows",
+		// Reporting a failure is done once, in reportExecutionError. Cobra
+		// otherwise prints the error itself and follows it with the whole
+		// usage block — measured at 33 lines behind a one-line failure, and
+		// identical for a runtime outcome and a typo'd flag. Both switches
+		// are conjunctions over command and root, so setting them here
+		// covers every subcommand of all three binaries.
+		SilenceErrors: true,
+		SilenceUsage:  true,
 		Long: `Beans is a lightweight issue tracker that stores issues as markdown files.
 Track your work alongside your code and supercharge your coding agent with
 a full view of your project.`,
@@ -147,9 +156,28 @@ func resolveAnchoredPath(c *config.Config) (string, error) {
 	}
 }
 
+// reportExecutionError writes the one shape a failure takes: the error line
+// and a pointer to the manual, both on stderr. It is cobra's own idiom for an
+// unknown command (command.go:1124-1133), adopted here for every error class
+// rather than inventing a second policy.
+//
+// The suppression is keyed on the error already carrying a machine-readable
+// document, not on --json being present. That way a --json consumer gets
+// exactly one artifact, while an error raised before a command reached the
+// output layer — a broken config, a missing store — still reaches the user.
+func reportExecutionError(cmd *cobra.Command, err error) {
+	if output.Emitted(err) {
+		return
+	}
+	cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
+	cmd.PrintErrf("Run '%v --help' for usage.\n", cmd.CommandPath())
+}
+
 // Execute runs the given root command and exits on error.
 func Execute(rootCmd *cobra.Command) {
-	if err := rootCmd.Execute(); err != nil {
+	cmd, err := rootCmd.ExecuteC()
+	if err != nil {
+		reportExecutionError(cmd, err)
 		os.Exit(1)
 	}
 }

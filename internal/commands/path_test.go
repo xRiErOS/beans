@@ -32,8 +32,10 @@ func TestPathCmdPrintsResolvedStore(t *testing.T) {
 // Scripts call `beans path`, so the command has to be wired into the CLI, not
 // merely defined.
 func TestPathCmdIsRegistered(t *testing.T) {
-	root := NewRootCmd()
-	RegisterCoreCommands(root)
+	// The command objects and their flag variables are package-level
+	// singletons, so RegisterCoreCommands may run only once per process.
+	// sharedTestRoot owns that single registration.
+	root := sharedTestRoot(t)
 
 	for _, c := range root.Commands() {
 		if c.Name() == "path" {

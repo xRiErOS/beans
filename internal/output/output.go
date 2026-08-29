@@ -2,7 +2,7 @@ package output
 
 import (
 	"encoding/json"
-	"fmt"
+	"errors"
 	"os"
 
 	"github.com/hmans/beans/pkg/bean"
@@ -91,6 +91,23 @@ func SuccessInit(path string) error {
 	})
 }
 
+// emittedError marks an error whose machine-readable document has already
+// been written to stdout. The reporting path at the top of the CLI reads that
+// mark to decide whether the failure still needs a human-readable line on
+// stderr, so that a --json consumer gets exactly one artifact and an error
+// raised before the output layer was reached is not swallowed.
+type emittedError struct {
+	message string
+}
+
+func (e *emittedError) Error() string { return e.message }
+
+// Emitted reports whether err has already been written as a JSON document.
+func Emitted(err error) bool {
+	var e *emittedError
+	return errors.As(err, &e)
+}
+
 // Error outputs an error response and returns an error for command handling.
 func Error(code string, message string) error {
 	_ = JSON(Response{
@@ -98,7 +115,7 @@ func Error(code string, message string) error {
 		Error:   message,
 		Code:    code,
 	})
-	return fmt.Errorf("%s", message)
+	return &emittedError{message: message}
 }
 
 // ErrorFrom outputs an error response from an existing error.
