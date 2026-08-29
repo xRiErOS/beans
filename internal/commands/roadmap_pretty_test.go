@@ -138,13 +138,13 @@ func TestRoadmapLine(t *testing.T) {
 	epic := &bean.Bean{ID: "beans-tquh", Title: "Checkout Flow", Type: "epic",
 		Status: "in-progress", Priority: "normal"}
 
-	got := roadmapLine("  ▸ Epic", epic, false, 80)
+	got := roadmapLine("  ▸ Epic", epic, false, 80, false)
 	// Prefix "  ▸ Epic" is 8 runes, so 9 spaces pad it to column 17.
 	want := "  ▸ Epic         Checkout Flow" +
 		strings.Repeat(" ", 23) +
 		"          in-progress  tquh"
 	if got != want {
-		t.Errorf("roadmapLine() =\n%q\nwant\n%q", got, want)
+		t.Errorf("roadmapLine(, false) =\n%q\nwant\n%q", got, want)
 	}
 	if utf8.RuneCountInString(got) != 80 {
 		t.Errorf("line width = %d, want 80", utf8.RuneCountInString(got))
@@ -164,7 +164,7 @@ func TestRoadmapLineWrapsWithHangingIndent(t *testing.T) {
 		Status:   "todo",
 		Priority: "high",
 	}
-	got := roadmapLine("    - task", long, true, 80)
+	got := roadmapLine("    - task", long, true, 80, false)
 	lines := strings.Split(got, "\n")
 	if len(lines) != 3 {
 		t.Fatalf("want 3 lines, got %d:\n%s", len(lines), got)
@@ -188,7 +188,7 @@ func TestRoadmapLineOverlongPrefix(t *testing.T) {
 	// D17: a custom type longer than the raster gets exactly one space.
 	b := &bean.Bean{ID: "beans-zz99", Title: "Titel", Type: "verylongcustomtype",
 		Status: "todo", Priority: "normal"}
-	got := roadmapLine("      - verylongcustomtype", b, true, 80)
+	got := roadmapLine("      - verylongcustomtype", b, true, 80, false)
 	if !strings.HasPrefix(got, "      - verylongcustomtype Titel") {
 		t.Errorf("overlong prefix not followed by single space + title: %q", got)
 	}
@@ -306,9 +306,9 @@ No Milestone
     - task       Add trace IDs                                 todo         xm6j
   - task         Rotate signing key                            todo         nfun
 `
-	got := renderRoadmapPretty(prettyFixture(), 80)
+	got := renderRoadmapPretty(prettyFixture(), 80, false)
 	if got != want {
-		t.Errorf("renderRoadmapPretty() =\n%s\nwant\n%s", got, want)
+		t.Errorf("renderRoadmapPretty(, false) =\n%s\nwant\n%s", got, want)
 	}
 }
 
@@ -316,7 +316,7 @@ No Milestone
 // corners (floor, mid, cap): no rendered line may exceed W runes.
 func TestRenderRoadmapPrettyLineWidths(t *testing.T) {
 	for _, w := range []int{80, 96, 110} {
-		got := renderRoadmapPretty(prettyFixture(), w)
+		got := renderRoadmapPretty(prettyFixture(), w, false)
 		for i, line := range strings.Split(got, "\n") {
 			if n := utf8.RuneCountInString(line); n > w {
 				t.Errorf("width %d: line %d has %d runes (> %d): %q", w, i, n, w, line)
@@ -331,7 +331,7 @@ func TestRenderRoadmapPrettyLineWidths(t *testing.T) {
 // raster. Lines shorter than 18 runes (header, blank lines, "No Milestone")
 // are skipped, since indexing rune 17 would be meaningless/out of range.
 func TestRenderRoadmapPrettyTitleColumn(t *testing.T) {
-	got := renderRoadmapPretty(prettyFixture(), 80)
+	got := renderRoadmapPretty(prettyFixture(), 80, false)
 	for i, line := range strings.Split(got, "\n") {
 		runes := []rune(line)
 		if len(runes) <= roadmapTitleCol {
@@ -368,7 +368,7 @@ func TestRenderRoadmapPrettyPriorityVisibility(t *testing.T) {
 			},
 		},
 	}
-	got := renderRoadmapPretty(data, 80)
+	got := renderRoadmapPretty(data, 80, false)
 	lines := strings.Split(got, "\n")
 	if len(lines) < 7 {
 		t.Fatalf("expected at least 7 lines, got %d:\n%s", len(lines), got)
@@ -412,7 +412,7 @@ func TestRenderRoadmapPrettyUnscheduledFeature(t *testing.T) {
 			},
 		},
 	}
-	got := renderRoadmapPretty(data, 80)
+	got := renderRoadmapPretty(data, 80, false)
 	lines := strings.Split(got, "\n")
 	// [0] Roadmap, [1] separator, [2] blank, [3] "No Milestone", [4] blank,
 	// [5] the feature row, [6] its leaf.
@@ -457,10 +457,10 @@ func TestRenderRoadmapPrettyUnscheduledFeature(t *testing.T) {
 // TestRenderRoadmapPrettyEmpty pins EARS-9: an empty roadmapData renders
 // only the header and separator line.
 func TestRenderRoadmapPrettyEmpty(t *testing.T) {
-	got := renderRoadmapPretty(&roadmapData{}, 80)
+	got := renderRoadmapPretty(&roadmapData{}, 80, false)
 	want := "Roadmap\n" + strings.Repeat("═", 80) + "\n"
 	if got != want {
-		t.Errorf("renderRoadmapPretty(empty) =\n%q\nwant\n%q", got, want)
+		t.Errorf("renderRoadmapPretty(empty, false) =\n%q\nwant\n%q", got, want)
 	}
 }
 
@@ -471,7 +471,7 @@ func TestRoadmapLinePrefixExactlyAtTitleCol(t *testing.T) {
 	}
 	b := &bean.Bean{ID: "beans-ex17", Title: "Word", Type: "task",
 		Status: "todo", Priority: "normal"}
-	got := roadmapLine(prefix, b, false, 80)
+	got := roadmapLine(prefix, b, false, 80, false)
 	want := prefix + " " + "Word"
 	if !strings.HasPrefix(got, want) {
 		t.Errorf("prefix at exactly title col %d: got %q, want prefix %q", roadmapTitleCol, got, want)
@@ -487,7 +487,7 @@ func TestRenderRoadmapPrettyRootEpic(t *testing.T) {
 			Epic: &epicGroup{Epic: epic, Items: []*bean.Bean{leaf}},
 		},
 	}
-	got := renderRoadmapPretty(data, 80)
+	got := renderRoadmapPretty(data, 80, false)
 	lines := strings.Split(got, "\n")
 	// [0] Roadmap, [1] separator, [2] blank, [3] the epic row, [4] its leaf.
 	if len(lines) < 5 {
@@ -524,7 +524,7 @@ func TestRenderRoadmapPrettyRootFeature(t *testing.T) {
 			Feature: &featureGroup{Feature: feat, Items: []*bean.Bean{leaf}},
 		},
 	}
-	got := renderRoadmapPretty(data, 80)
+	got := renderRoadmapPretty(data, 80, false)
 	lines := strings.Split(got, "\n")
 	if len(lines) < 5 {
 		t.Fatalf("expected at least 5 lines, got %d:\n%s", len(lines), got)

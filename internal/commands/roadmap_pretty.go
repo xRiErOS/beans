@@ -89,11 +89,33 @@ func roadmapWrapTitle(title string, width int) []string {
 	return lines
 }
 
+// roadmapTagRow renders a bean's tags as "#tag #tag", wrapped to the title
+// cell and hung at the title column, or "" when the bean has none. Tags get
+// their own row so the title cell and the right-hand attribute block keep
+// their widths regardless of how many tags a bean carries.
+func roadmapTagRow(b *bean.Bean, titleW int) string {
+	if len(b.Tags) == 0 {
+		return ""
+	}
+	tags := make([]string, len(b.Tags))
+	for i, t := range b.Tags {
+		tags[i] = "#" + t
+	}
+	var sb strings.Builder
+	for _, line := range roadmapWrapTitle(strings.Join(tags, " "), titleW) {
+		sb.WriteString("\n")
+		sb.WriteString(strings.Repeat(" ", roadmapTitleCol))
+		sb.WriteString(line)
+	}
+	return sb.String()
+}
+
 // roadmapLine renders one bean as one or more physical lines. The first line
 // carries prefix, title and the right-hand attribute block; continuation lines
-// carry only the wrapped title at the hanging indent (D07). The returned
-// string has no trailing newline.
-func roadmapLine(prefix string, b *bean.Bean, showPrio bool, width int) string {
+// carry only the wrapped title at the hanging indent (D07). With showTags, a
+// tag row follows the title's last continuation line. The returned string has
+// no trailing newline.
+func roadmapLine(prefix string, b *bean.Bean, showPrio bool, width int, showTags bool) string {
 	titleW := width - roadmapTitleCol - 2 - roadmapRightW
 	if titleW < 1 {
 		titleW = 1
@@ -122,6 +144,9 @@ func roadmapLine(prefix string, b *bean.Bean, showPrio bool, width int) string {
 		sb.WriteString("\n")
 		sb.WriteString(strings.Repeat(" ", roadmapTitleCol))
 		sb.WriteString(cont)
+	}
+	if showTags {
+		sb.WriteString(roadmapTagRow(b, titleW))
 	}
 	return sb.String()
 }
@@ -152,7 +177,7 @@ func roadmapLeafPrefix(indent int, b *bean.Bean) string {
 // feature; otherwise it renders the full milestone-based tree. It performs no
 // sorting of its own (SC-406) -- order comes entirely from the builder's
 // slices.
-func renderRoadmapPretty(data *roadmapData, width int) string {
+func renderRoadmapPretty(data *roadmapData, width int, showTags bool) string {
 	var sb strings.Builder
 	sb.WriteString("Roadmap\n")
 	sb.WriteString(strings.Repeat("═", width))
@@ -161,26 +186,26 @@ func renderRoadmapPretty(data *roadmapData, width int) string {
 	if data.Root != nil {
 		sb.WriteString("\n")
 		if data.Root.Epic != nil {
-			renderRoadmapEpicGroup(&sb, *data.Root.Epic, 0, width)
+			renderRoadmapEpicGroup(&sb, *data.Root.Epic, 0, width, showTags)
 		}
 		if data.Root.Feature != nil {
-			renderRoadmapFeatureGroup(&sb, *data.Root.Feature, 0, width)
+			renderRoadmapFeatureGroup(&sb, *data.Root.Feature, 0, width, showTags)
 		}
 		return sb.String()
 	}
 
 	for _, mg := range data.Milestones {
 		sb.WriteString("\n")
-		sb.WriteString(roadmapLine("■ Milestone", mg.Milestone, false, width))
+		sb.WriteString(roadmapLine("■ Milestone", mg.Milestone, false, width, showTags))
 		sb.WriteString("\n")
 		for _, eg := range mg.Epics {
-			renderRoadmapEpicGroup(&sb, eg, 2, width)
+			renderRoadmapEpicGroup(&sb, eg, 2, width, showTags)
 		}
 		for _, fg := range mg.Features {
-			renderRoadmapFeatureGroup(&sb, fg, 2, width)
+			renderRoadmapFeatureGroup(&sb, fg, 2, width, showTags)
 		}
 		for _, it := range mg.Other {
-			sb.WriteString(roadmapLine(roadmapLeafPrefix(2, it), it, true, width))
+			sb.WriteString(roadmapLine(roadmapLeafPrefix(2, it), it, true, width, showTags))
 			sb.WriteString("\n")
 		}
 	}
@@ -196,13 +221,13 @@ func renderRoadmapPretty(data *roadmapData, width int) string {
 		sb.WriteString("No Milestone\n")
 		sb.WriteString("\n")
 		for _, eg := range data.Unscheduled.Epics {
-			renderRoadmapEpicGroup(&sb, eg, 2, width)
+			renderRoadmapEpicGroup(&sb, eg, 2, width, showTags)
 		}
 		for _, fg := range data.Unscheduled.Features {
-			renderRoadmapFeatureGroup(&sb, fg, 2, width)
+			renderRoadmapFeatureGroup(&sb, fg, 2, width, showTags)
 		}
 		for _, it := range data.Unscheduled.Other {
-			sb.WriteString(roadmapLine(roadmapLeafPrefix(2, it), it, true, width))
+			sb.WriteString(roadmapLine(roadmapLeafPrefix(2, it), it, true, width, showTags))
 			sb.WriteString("\n")
 		}
 	}
@@ -213,25 +238,25 @@ func renderRoadmapPretty(data *roadmapData, width int) string {
 // renderRoadmapEpicGroup renders an Epic branch: the epic row itself (no
 // priority, D10), its direct leaf items, then its nested Feature branches --
 // items before features, per roadmap.tmpl.
-func renderRoadmapEpicGroup(sb *strings.Builder, eg epicGroup, indent int, width int) {
-	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▸ Epic", eg.Epic, false, width))
+func renderRoadmapEpicGroup(sb *strings.Builder, eg epicGroup, indent int, width int, showTags bool) {
+	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▸ Epic", eg.Epic, false, width, showTags))
 	sb.WriteString("\n")
 	for _, it := range eg.Items {
-		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width))
+		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width, showTags))
 		sb.WriteString("\n")
 	}
 	for _, fg := range eg.Features {
-		renderRoadmapFeatureGroup(sb, fg, indent+2, width)
+		renderRoadmapFeatureGroup(sb, fg, indent+2, width, showTags)
 	}
 }
 
 // renderRoadmapFeatureGroup renders a Feature branch: the feature row
 // itself (with priority, D15) followed by its flattened leaf items.
-func renderRoadmapFeatureGroup(sb *strings.Builder, fg featureGroup, indent int, width int) {
-	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▪ Feature", fg.Feature, true, width))
+func renderRoadmapFeatureGroup(sb *strings.Builder, fg featureGroup, indent int, width int, showTags bool) {
+	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▪ Feature", fg.Feature, true, width, showTags))
 	sb.WriteString("\n")
 	for _, it := range fg.Items {
-		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width))
+		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width, showTags))
 		sb.WriteString("\n")
 	}
 }

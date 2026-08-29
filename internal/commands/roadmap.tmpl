@@ -1,9 +1,9 @@
 {{- define "beanLine" -}}
-- {{typeBadge .}} {{.Title}} {{beanRef .}}
+- {{typeBadge .}} {{.Title}} {{beanRef .}}{{tagLine . "  "}}
 {{end -}}
 
 {{- define "featureGroup" -}}
-#### Feature: {{.Feature.Title}} {{beanRef .Feature}}
+#### Feature: {{.Feature.Title}} {{beanRef .Feature}}{{tagLine .Feature ""}}
 {{with firstParagraph .Feature.Body}}
 > {{.}}
 {{end}}
@@ -14,7 +14,7 @@
 {{- end -}}
 
 {{- define "epicGroup" -}}
-### Epic: {{.Epic.Title}} {{beanRef .Epic}}
+### Epic: {{.Epic.Title}} {{beanRef .Epic}}{{tagLine .Epic ""}}
 {{with firstParagraph .Epic.Body}}
 > {{.}}
 {{end}}
@@ -37,7 +37,7 @@
 {{- end}}
 {{- else}}
 {{range .Milestones}}
-## Milestone: {{.Milestone.Title}} {{beanRef .Milestone}}
+## Milestone: {{.Milestone.Title}} {{beanRef .Milestone}}{{tagLine .Milestone ""}}
 {{with firstParagraph .Milestone.Body}}
 > {{.}}
 {{end}}
