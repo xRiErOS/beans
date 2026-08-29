@@ -133,12 +133,6 @@ func progressBarSegments(percent int) (filled, empty string) {
 	return strings.Repeat("━", n), strings.Repeat("░", progressBarWidth-n)
 }
 
-// progressBar renders a fixed-width unicode block bar scaled by percent.
-func progressBar(percent int) string {
-	filled, empty := progressBarSegments(percent)
-	return filled + empty
-}
-
 func RegisterProgressCmd(root *cobra.Command) {
 	progressCmd.Flags().BoolVar(&progressJSON, "json", false, "Output as JSON")
 	progressCmd.Flags().StringVar(&progressParent, "parent", "", "Scope counts to this bean's descendants")

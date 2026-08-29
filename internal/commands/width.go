@@ -28,16 +28,16 @@ const (
 // silently collapse every render to the floor, which is what naively
 // defaulting the detected width to widthFloor would do.
 func resolveWidth(flagValue int, flagChanged bool, cfg *config.Config) int {
-	cap := widthDefault
+	widthCap := widthDefault
 	switch {
 	case flagChanged:
-		cap = flagValue
+		widthCap = flagValue
 	case cfg != nil:
-		cap = cfg.GetMaxWidth()
+		widthCap = cfg.GetMaxWidth()
 	}
 
-	uncapped := cap <= 0 // 0 from the flag, or -1 from the config
-	target := cap
+	uncapped := widthCap <= 0 // 0 from the flag, or -1 from the config
+	target := widthCap
 	if uncapped {
 		target = widthDefault
 	}
