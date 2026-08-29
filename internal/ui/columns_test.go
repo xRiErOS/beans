@@ -189,11 +189,22 @@ func TestFlatRowsNeedNoIndent(t *testing.T) {
 
 func TestCounterWidthIsMeasuredNotAssumed(t *testing.T) {
 	// A real store reached 131/139 and burst a fixed five-cell counter.
+	//
+	// The n/m counter itself is digits and a slash — always one byte per
+	// cell, so len() and DisplayWidth() can never disagree on it; no fixture
+	// could make that half of this test catch a DisplayWidth-for-len swap.
+	// The same row-scanning loop also measures the bean ID, and IDs are free
+	// text (a slug carrying an umlaut is realistic in this codebase), so
+	// "beans-über" here is what actually exercises DisplayWidth: 11 bytes,
+	// 10 cells, because ü is two UTF-8 bytes but one terminal cell.
 	rows := []Row{
-		{Bean: &bean.Bean{ID: "a", Title: "m", Type: "milestone"}, Progress: &Progress{Done: 131, Total: 139}},
+		{Bean: &bean.Bean{ID: "beans-über", Title: "m", Type: "milestone"}, Progress: &Progress{Done: 131, Total: 139}},
 		{Bean: &bean.Bean{ID: "b", Title: "n", Type: "milestone"}, Progress: &Progress{Done: 0, Total: 5}},
 	}
 	c := NewColumns(rows, 110, false, config.Default())
+	if c.ID != 10 {
+		t.Errorf("ID = %d, want 10 cells for \"beans-über\" (11 bytes, 10 cells) — len() would report 11", c.ID)
+	}
 	if c.Counter != 7 {
 		t.Errorf("Counter = %d, want 7 for \"131/139\"", c.Counter)
 	}
