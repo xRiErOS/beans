@@ -2,6 +2,7 @@ package ui
 
 import (
 	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -35,17 +36,41 @@ func stripANSI(s string) string {
 func TestRenderMarkdownLeavesNoTrailingPadding(t *testing.T) {
 	withTrueColor(t)
 	// glamour pads every line to the full width with coloured spaces, which is
-	// the visible rubbish this replaces. A code line carrying trailing spaces
-	// in the source (common in pasted terminal output) must not leak them
-	// into the rendered output either — that path preserves the line
-	// verbatim except for the trailing trim, so it is the one place a
-	// dropped trim would actually show up.
-	in := "A short paragraph.\n\n```\ncode line with trailing spaces   \n```\n"
+	// the visible rubbish this replaces. Cover every construct the renderer
+	// understands, not just prose: a heading, a bullet, a blank line, and a
+	// code line carrying trailing spaces in the source (common in pasted
+	// terminal output) — that last one preserves the line verbatim except
+	// for the trailing trim, so it is the one place a dropped trim would
+	// actually show up.
+	in := "# Heading\n\nA short paragraph.\n\n- a bullet item\n\n```\ncode line with trailing spaces   \n```\n"
 	out := RenderMarkdown(in, 80)
 	for _, line := range strings.Split(out, "\n") {
 		plain := stripANSI(line)
 		if plain != strings.TrimRight(plain, " ") {
 			t.Errorf("line has trailing padding: %q", plain)
+		}
+	}
+}
+
+func TestRenderMarkdownHasNoBackgroundColour(t *testing.T) {
+	withTrueColor(t)
+	// glamour's other headline defect: it paints background colours that
+	// clash with the surrounding table. Nothing this renderer emits may set
+	// one, on any construct. This does not merely grep for a literal "48;" —
+	// it parses every SGR escape's parameters, so a background introduced as
+	// a leading or trailing parameter (e.g. "1;48;2;...m") is still caught.
+	doc := "# Heading\n\nSome prose that runs on for a while.\n\n- a bullet item\n\n```\ncode\n```\n"
+	out := RenderMarkdown(doc, 40)
+	for _, code := range ansiEscape.FindAllString(out, -1) {
+		body := strings.TrimSuffix(strings.TrimPrefix(code, "\x1b["), "m")
+		for _, p := range strings.Split(body, ";") {
+			n, err := strconv.Atoi(p)
+			if err != nil {
+				continue
+			}
+			if n == 48 || (n >= 40 && n <= 47) || (n >= 100 && n <= 107) {
+				t.Errorf("escape %q sets a background colour, want none", code)
+			}
 		}
 	}
 }
@@ -89,6 +114,20 @@ func TestRenderMarkdownMarksHeadings(t *testing.T) {
 	}
 	if !strings.Contains(out, "Identified Improvements") {
 		t.Errorf("heading text is missing: %q", out)
+	}
+}
+
+func TestRenderMarkdownWrapsHeadings(t *testing.T) {
+	withTrueColor(t)
+	// A heading longer than the text width is exactly the overflowing line
+	// this whole renderer exists to eliminate. Unlike a code block, a
+	// heading has no verbatim semantics worth protecting, so it wraps like
+	// prose.
+	long := "## " + strings.Repeat("word ", 30)
+	for _, line := range strings.Split(RenderMarkdown(long, 40), "\n") {
+		if got := DisplayWidth(stripANSI(line)); got > 40 {
+			t.Errorf("line is %d cells, want at most 40: %q", got, stripANSI(line))
+		}
 	}
 }
 
