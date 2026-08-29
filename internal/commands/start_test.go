@@ -131,3 +131,95 @@ func TestStartRejectsUnknownID(t *testing.T) {
 		t.Errorf("startCmd.RunE() expected error for unknown ID, got nil")
 	}
 }
+
+// captureStartStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureStartStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return data
+}
+
+// mkStartBean adds another bean to the store set up by setupStartTest.
+func mkStartBean(t *testing.T, id, title string) *bean.Bean {
+	t.Helper()
+	b := &bean.Bean{
+		ID:     id,
+		Slug:   bean.Slugify(title),
+		Title:  title,
+		Status: "todo",
+		Type:   "task",
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create(%s) error = %v", id, err)
+	}
+	return b
+}
+
+// TestStartTakesMultipleIDs verifies the batch signature starts every named
+// bean. With more than one ID the output collapses to one line per bean
+// instead of the full show rendering, which would otherwise dump n bodies.
+func TestStartTakesMultipleIDs(t *testing.T) {
+	first := setupStartTest(t)
+	resetStartFlags(t)
+	second := mkStartBean(t, "beans-bst2", "Second bean")
+
+	out := captureStartStdout(t, func() {
+		if err := startCmd.RunE(startCmd, []string{first.ID, second.ID}); err != nil {
+			t.Fatalf("startCmd.RunE() error = %v", err)
+		}
+	})
+
+	for _, id := range []string{first.ID, second.ID} {
+		got, err := core.Get(id)
+		if err != nil {
+			t.Fatalf("core.Get(%s) error = %v", id, err)
+		}
+		if got.Status != "in-progress" {
+			t.Errorf("bean %s status = %q, want %q", id, got.Status, "in-progress")
+		}
+		if !strings.Contains(string(out), id) {
+			t.Errorf("output does not mention %s, output = %q", id, out)
+		}
+	}
+	if n := strings.Count(string(out), "\n"); n > 4 {
+		t.Errorf("output has %d lines, want the compact per-bean form; output = %q", n, out)
+	}
+}
+
+// TestStartPreflightRejectsUnknownID verifies nothing is written when any ID
+// in the call cannot be resolved.
+func TestStartPreflightRejectsUnknownID(t *testing.T) {
+	first := setupStartTest(t)
+	resetStartFlags(t)
+	second := mkStartBean(t, "beans-brt2", "Second bean")
+
+	if err := startCmd.RunE(startCmd, []string{first.ID, "beans-nope", second.ID}); err == nil {
+		t.Fatal("startCmd.RunE() error = nil, want an error for the unknown ID")
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		got, err := core.Get(id)
+		if err != nil {
+			t.Fatalf("core.Get(%s) error = %v", id, err)
+		}
+		if got.Status != "todo" {
+			t.Errorf("bean %s status = %q, want it untouched at %q", id, got.Status, "todo")
+		}
+	}
+}

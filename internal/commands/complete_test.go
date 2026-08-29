@@ -329,3 +329,206 @@ func TestCompleteWithUnresolvableCommitFails(t *testing.T) {
 		t.Errorf("error = %q, want it to contain %q", err.Error(), "does not resolve to a commit")
 	}
 }
+
+// captureCompleteStdout redirects os.Stdout for the duration of fn and
+// returns everything written to it, mirroring captureNextStdout.
+func captureCompleteStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return data
+}
+
+// mkCompleteBean adds another bean to the store set up by setupCompleteTest.
+func mkCompleteBean(t *testing.T, id, title string) *bean.Bean {
+	t.Helper()
+	b := &bean.Bean{
+		ID:     id,
+		Slug:   bean.Slugify(title),
+		Title:  title,
+		Status: "todo",
+		Type:   "task",
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create(%s) error = %v", id, err)
+	}
+	return b
+}
+
+func statusOf(t *testing.T, id string) string {
+	t.Helper()
+	got, err := core.Get(id)
+	if err != nil {
+		t.Fatalf("core.Get(%s) error = %v", id, err)
+	}
+	return got.Status
+}
+
+// TestCompleteTakesMultipleIDs verifies the batch signature completes every
+// named bean and applies the shared --summary to each of them.
+func TestCompleteTakesMultipleIDs(t *testing.T) {
+	first := setupCompleteTest(t)
+	resetCompleteFlags(t)
+	second := mkCompleteBean(t, "beans-btc2", "Second bean")
+	third := mkCompleteBean(t, "beans-btc3", "Third bean")
+
+	completeSummary = "Shipped together"
+	if err := completeCmd.RunE(completeCmd, []string{first.ID, second.ID, third.ID}); err != nil {
+		t.Fatalf("completeCmd.RunE() error = %v", err)
+	}
+
+	for _, id := range []string{first.ID, second.ID, third.ID} {
+		if got := statusOf(t, id); got != "completed" {
+			t.Errorf("bean %s status = %q, want %q", id, got, "completed")
+		}
+		got, _ := core.Get(id)
+		if !strings.Contains(got.Body, "Shipped together") {
+			t.Errorf("bean %s body does not carry the shared summary, body = %q", id, got.Body)
+		}
+	}
+}
+
+// TestCompletePreflightRejectsUnknownID is the core of the batch promise: an
+// unresolvable ID anywhere in the call means nothing is written at all.
+func TestCompletePreflightRejectsUnknownID(t *testing.T) {
+	first := setupCompleteTest(t)
+	resetCompleteFlags(t)
+	second := mkCompleteBean(t, "beans-brc2", "Second bean")
+
+	err := completeCmd.RunE(completeCmd, []string{first.ID, "beans-nope", second.ID})
+	if err == nil {
+		t.Fatal("completeCmd.RunE() error = nil, want an error for the unknown ID")
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		if got := statusOf(t, id); got != "todo" {
+			t.Errorf("bean %s status = %q, want it untouched at %q", id, got, "todo")
+		}
+	}
+}
+
+// TestCompleteRejectsDuplicateIDs guards against completing the same bean
+// twice in one call, which would append the summary section twice.
+func TestCompleteRejectsDuplicateIDs(t *testing.T) {
+	first := setupCompleteTest(t)
+	resetCompleteFlags(t)
+
+	if err := completeCmd.RunE(completeCmd, []string{first.ID, first.ID}); err == nil {
+		t.Fatal("completeCmd.RunE() error = nil, want an error for the repeated ID")
+	}
+	if got := statusOf(t, first.ID); got != "todo" {
+		t.Errorf("bean status = %q, want it untouched at %q", got, "todo")
+	}
+}
+
+// TestCompletePreflightCatchesPolicyViolation verifies that a required-fields
+// policy is evaluated before the first write, not on the way into it.
+func TestCompletePreflightCatchesPolicyViolation(t *testing.T) {
+	first := setupCompleteTest(t)
+	resetCompleteFlags(t)
+	second := mkCompleteBean(t, "beans-bpc2", "Second bean")
+
+	cfg.Beans.RequireFieldsOn = map[string][]string{"completed": {"reviewer"}}
+	// The first bean satisfies the policy, the second does not — so a
+	// per-bean write loop would complete the first before failing.
+	first.Extra = map[string]any{"reviewer": "erik"}
+	if err := core.Update(first, nil); err != nil {
+		t.Fatalf("core.Update(first) error = %v", err)
+	}
+
+	if err := completeCmd.RunE(completeCmd, []string{first.ID, second.ID}); err == nil {
+		t.Fatal("completeCmd.RunE() error = nil, want a policy violation")
+	}
+
+	for _, id := range []string{first.ID, second.ID} {
+		if got := statusOf(t, id); got != "todo" {
+			t.Errorf("bean %s status = %q, want it untouched at %q", id, got, "todo")
+		}
+	}
+}
+
+// TestCompletePolicySatisfiedByCommitFlag verifies the preflight sees the
+// fields --commit and --set contribute, rather than judging the stored bean.
+func TestCompletePolicySatisfiedByCommitFlag(t *testing.T) {
+	first := setupCompleteTest(t)
+	resetCompleteFlags(t)
+	second := mkCompleteBean(t, "beans-bsc2", "Second bean")
+
+	cfg.Beans.RequireFieldsOn = map[string][]string{"completed": {"reviewer"}}
+	completeSet = []string{"reviewer=erik"}
+
+	if err := completeCmd.RunE(completeCmd, []string{first.ID, second.ID}); err != nil {
+		t.Fatalf("completeCmd.RunE() error = %v, want the --set value to satisfy the policy", err)
+	}
+	for _, id := range []string{first.ID, second.ID} {
+		if got := statusOf(t, id); got != "completed" {
+			t.Errorf("bean %s status = %q, want %q", id, got, "completed")
+		}
+	}
+}
+
+// TestCompleteJSONShape pins E5 down: one ID keeps the shape earlier releases
+// emitted, several IDs give a bare array.
+func TestCompleteJSONShape(t *testing.T) {
+	t.Run("single stays an envelope", func(t *testing.T) {
+		b := setupCompleteTest(t)
+		resetCompleteFlags(t)
+		completeJSON = true
+
+		out := captureCompleteStdout(t, func() {
+			if err := completeCmd.RunE(completeCmd, []string{b.ID}); err != nil {
+				t.Fatalf("completeCmd.RunE() error = %v", err)
+			}
+		})
+
+		var resp struct {
+			Success bool `json:"success"`
+			Bean    struct {
+				ID string `json:"id"`
+			} `json:"bean"`
+		}
+		if err := json.Unmarshal(out, &resp); err != nil {
+			t.Fatalf("decoding JSON: %v; output = %s", err, out)
+		}
+		if !resp.Success || resp.Bean.ID != b.ID {
+			t.Errorf("single-ID JSON = %s, want the unchanged envelope for %s", out, b.ID)
+		}
+	})
+
+	t.Run("multiple gives a bare array", func(t *testing.T) {
+		first := setupCompleteTest(t)
+		resetCompleteFlags(t)
+		second := mkCompleteBean(t, "beans-bjc2", "Second bean")
+		completeJSON = true
+
+		out := captureCompleteStdout(t, func() {
+			if err := completeCmd.RunE(completeCmd, []string{first.ID, second.ID}); err != nil {
+				t.Fatalf("completeCmd.RunE() error = %v", err)
+			}
+		})
+
+		var got []struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("decoding JSON as a bare array: %v; output = %s", err, out)
+		}
+		if len(got) != 2 || got[0].ID != first.ID || got[1].ID != second.ID {
+			t.Errorf("array = %s, want [%s %s]", out, first.ID, second.ID)
+		}
+	})
+}
