@@ -2,6 +2,7 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -147,17 +148,87 @@ func TestTitleNeverDropsBelowTheFloorForAnUpgrade(t *testing.T) {
 }
 
 func TestColumnsNeverExceedTheTerminal(t *testing.T) {
-	rows := testRows(strings.Repeat("x", 200), "short")
+	// Progress rows are in the sweep on purpose: Title is width minus every
+	// other column's cost, so a sum built only from the fields NewColumns
+	// just returned is an identity — it balances no matter what those fields
+	// are, even if a whole column's cost silently stopped being subtracted.
+	// wantProgress is computed here from the same inputs (progressBarWidth
+	// plus the counter text), never read off c.ProgressWidth, so it stays
+	// correct even if NewColumns forgets to reserve room for it — which is
+	// exactly the prototype's overflow: a milestone row's progress column
+	// pushed the line past the terminal because nothing had reserved its
+	// width.
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "beans-abcd", Title: strings.Repeat("x", 200), Type: "milestone"},
+			Progress: &Progress{Done: 3, Total: 10}},
+		{Bean: &bean.Bean{ID: "beans-abcd", Title: "short", Type: "task"}},
+	}
+	wantProgress := progressBarWidth + 2 + DisplayWidth(fmt.Sprintf("%d/%d", 3, 10)) // 6 + 2 + 4 = 12
 	for w := 60; w <= 200; w++ {
 		c := NewColumns(rows, w, true, config.Default())
 		total := c.Indent + c.Type + c.Gap + c.ID + c.Gap + c.Title +
-			c.Gap + c.Status + c.Gap + c.Prio
+			c.Gap + c.Status + c.Gap + c.Prio + c.Gap + wantProgress
 		if c.Tags > 0 {
 			total += c.Gap + c.Tags
 		}
 		if total > w {
-			t.Errorf("width %d: columns sum to %d", w, total)
+			t.Errorf("width %d: columns plus the reserved progress column sum to %d", w, total)
 		}
+	}
+}
+
+// TestFixedCostIsPinnedNotJustBalanced pins every column's width at one known
+// fixture against numbers worked out independently of NewColumns, so a change
+// to Gap or a tags width is caught rather than silently absorbed into a
+// bigger or smaller Title. TestColumnsNeverExceedTheTerminal cannot do this:
+// Title is defined as "whatever budget() leaves over", so any sum built from
+// NewColumns's own output fields balances to the width by construction,
+// whatever those fields happen to be — that identity is what let Gap going
+// from 2 to 3, or the wide-tags width going from 24 to 28, leave every test
+// in this file green.
+//
+// At width 200 with a 10-cell ID and tags showing, the budget affords every
+// upgrade: Indent 0 (depth 0), Type 10 (long), ID 10, Status 11 (long),
+// Prio 8 (long), Tags 24 (width >= 120), Gap 2, six gaps (before type, ID,
+// title, status, prio, tags). These numbers were worked out by hand from the
+// brief's constants, not read back from a run of NewColumns.
+func TestFixedCostIsPinnedNotJustBalanced(t *testing.T) {
+	rows := testRows(strings.Repeat("x", 200), "short")
+	c := NewColumns(rows, 200, true, config.Default())
+
+	wantIndent, wantGap, wantID, wantType, wantStatus, wantPrio, wantTags := 0, 2, 10, 10, 11, 8, 24
+	if c.Indent != wantIndent {
+		t.Errorf("Indent = %d, want %d", c.Indent, wantIndent)
+	}
+	if c.Gap != wantGap {
+		t.Errorf("Gap = %d, want %d", c.Gap, wantGap)
+	}
+	if c.ID != wantID {
+		t.Errorf("ID = %d, want %d", c.ID, wantID)
+	}
+	if c.Type != wantType || !c.LongType {
+		t.Errorf("Type = %d (long=%v), want %d long", c.Type, c.LongType, wantType)
+	}
+	if c.Status != wantStatus || !c.LongStatus {
+		t.Errorf("Status = %d (long=%v), want %d long", c.Status, c.LongStatus, wantStatus)
+	}
+	if c.Prio != wantPrio || !c.LongPrio {
+		t.Errorf("Prio = %d (long=%v), want %d long", c.Prio, c.LongPrio, wantPrio)
+	}
+	if c.Tags != wantTags {
+		t.Errorf("Tags = %d, want %d", c.Tags, wantTags)
+	}
+
+	// Six gaps: before type, before ID, before title, before status, before
+	// prio, before tags. Title is what is left after every other pinned
+	// number is subtracted from the terminal width — a literal number, not a
+	// re-derivation of budget().
+	wantFixed := wantIndent + wantType + wantGap + wantID + wantGap + wantGap +
+		wantStatus + wantGap + wantPrio + wantGap + wantTags
+	wantTitle := 200 - wantFixed
+	if c.Title != wantTitle {
+		t.Errorf("Title = %d, want %d (200 minus the independently pinned fixed cost of %d)",
+			c.Title, wantTitle, wantFixed)
 	}
 }
 
