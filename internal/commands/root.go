@@ -7,6 +7,7 @@ import (
 
 	"github.com/hmans/beans/internal/gitutil"
 	"github.com/hmans/beans/internal/output"
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
@@ -58,6 +59,10 @@ a full view of your project.`,
 					return fmt.Errorf("loading config: %w", err)
 				}
 			}
+
+			// The theme is process wide and must be in force before anything
+			// renders, so this is the single place that applies it.
+			ui.SetTheme(cfg.GetTheme())
 
 			root, err := resolveBeansPath(beansPath, cfg)
 			if err != nil {
