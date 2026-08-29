@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRenderBeanRow_NarrowWidth(t *testing.T) {
 	// Test that RenderBeanRow doesn't panic with very small MaxTitleWidth values
@@ -157,6 +160,51 @@ func TestSetThemeRefreshesDerivedStyles(t *testing.T) {
 	SetTheme("latte")
 	if ColorPrimary == before {
 		t.Error("ColorPrimary did not follow the theme switch")
+	}
+}
+
+// Fix round 1: NamedColors used to be the set of colour names a user was
+// allowed to write in .beans.yml. green/yellow/red/blue kept working after
+// the Catppuccin switch because they happen to already be tone names; these
+// four did not, and needed an explicit alias so an existing "color: purple"
+// (or the literal "gray" several commands still pass as a sentinel) keeps
+// resolving instead of silently degrading.
+
+func TestLegacyColorAliasesResolveToTheirCatppuccinTone(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+
+	aliases := map[string]string{
+		"gray":   "overlay1",
+		"grey":   "overlay1",
+		"purple": "mauve",
+		"cyan":   "teal",
+	}
+	for alias, tone := range aliases {
+		want := ResolveColor(tone)
+		if got := ResolveColor(alias); got != want {
+			t.Errorf("ResolveColor(%q) = %q, want %q (alias for tone %q)", alias, got, want, tone)
+		}
+		upper := strings.ToUpper(alias)
+		if got := ResolveColor(upper); got != want {
+			t.Errorf("ResolveColor(%q) = %q, want %q (alias for tone %q)", upper, got, want, tone)
+		}
+	}
+}
+
+func TestLegacyColorAliasesAreValid(t *testing.T) {
+	for _, alias := range []string{"gray", "grey", "purple", "cyan", "GRAY", "Purple", "CYAN"} {
+		if !IsValidColor(alias) {
+			t.Errorf("IsValidColor(%q) = false, want true: it is a legacy alias", alias)
+		}
+	}
+}
+
+func TestUnknownColorNameIsNeitherAliasNorValid(t *testing.T) {
+	// The alias table must not become a catch-all: a genuine typo still
+	// falls through to the unknown-tone fallback and reports invalid.
+	if IsValidColor("chartreuse") {
+		t.Error(`IsValidColor("chartreuse") = true, want false`)
 	}
 }
 

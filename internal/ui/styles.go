@@ -12,6 +12,19 @@ import (
 // set once at startup from the config (see SetTheme).
 var activeTheme = DefaultTheme()
 
+// legacyColorAliases maps colour names that were valid .beans.yml values
+// before the Catppuccin switch to the tone that now carries their intent.
+// green/yellow/red/blue kept working by coincidence - they already are
+// Catppuccin tone names - but gray/grey/purple/cyan are not, so without this
+// table a config nobody touched would silently stop resolving those colours,
+// and IsValidColor would flip from true to false under it.
+var legacyColorAliases = map[string]string{
+	"gray":   "overlay1",
+	"grey":   "overlay1",
+	"purple": "mauve",
+	"cyan":   "teal",
+}
+
 // Chrome colours: the roles the UI itself needs, as opposed to the semantic
 // colours a bean carries. Kept as variables rather than constants so the
 // TUI's existing call sites (internal/tui) keep compiling while following
@@ -56,25 +69,34 @@ func ActiveTheme() Theme { return activeTheme }
 
 // ResolveColor converts a tone name or hex code to a lipgloss.Color. Hex
 // passes through untouched, which is what lets .beans.yml override a single
-// colour without replacing the whole theme.
+// colour without replacing the whole theme. A legacy colour name (see
+// legacyColorAliases) resolves through the tone it aliases.
 func ResolveColor(color string) lipgloss.Color {
 	if strings.HasPrefix(color, "#") {
 		return lipgloss.Color(color)
 	}
-	if hex := activeTheme.Hex(strings.ToLower(color)); hex != "" {
+	name := strings.ToLower(color)
+	if tone, ok := legacyColorAliases[name]; ok {
+		name = tone
+	}
+	if hex := activeTheme.Hex(name); hex != "" {
 		return lipgloss.Color(hex)
 	}
 	return lipgloss.Color(activeTheme.Hex("subtext0"))
 }
 
-// IsValidColor reports whether a colour is a hex code or a tone of the
-// active theme.
+// IsValidColor reports whether a colour is a hex code, a tone of the active
+// theme, or a legacy colour name aliased to one (see legacyColorAliases).
 func IsValidColor(color string) bool {
 	if strings.HasPrefix(color, "#") {
 		// Valid hex: #RGB or #RRGGBB
 		return len(color) == 4 || len(color) == 7
 	}
-	return activeTheme.Hex(strings.ToLower(color)) != ""
+	name := strings.ToLower(color)
+	if tone, ok := legacyColorAliases[name]; ok {
+		name = tone
+	}
+	return activeTheme.Hex(name) != ""
 }
 
 // Status badge styles (for inline use, like in show command)
