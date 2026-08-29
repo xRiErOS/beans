@@ -28,6 +28,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterScrapCmd(root)
 	RegisterShowCmd(root)
 	RegisterStartCmd(root)
+	RegisterTagCmd(root)
 	RegisterUpdateCmd(root)
 	RegisterVersionCmd(root)
 
