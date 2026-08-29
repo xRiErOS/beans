@@ -94,6 +94,11 @@ func runServer(port int, origins []string) error {
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
 
+	// Resource limits: bound each request body, and cap concurrent WebSocket
+	// connections across every upgrade endpoint.
+	router.Use(maxBodyMiddleware(maxRequestBodyBytes))
+	router.Use(newConnLimiter(maxWebSocketConnections).Middleware())
+
 	// CORS middleware
 	router.Use(func(c *gin.Context) {
 		origin := c.GetHeader("Origin")
@@ -397,13 +402,7 @@ func runServer(port int, origins []string) error {
 
 	// Create HTTP server
 	addr := fmt.Sprintf(":%d", port)
-	server := &http.Server{
-		Addr:         addr,
-		Handler:      router,
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
-	}
+	server := newHTTPServer(addr, router)
 
 	// Set up signal handling with context
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
