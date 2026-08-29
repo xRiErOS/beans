@@ -1876,3 +1876,36 @@ func TestConfigFile(t *testing.T) {
 		}
 	})
 }
+
+func TestGetThemeDefaultsToMocha(t *testing.T) {
+	if got := (&Config{}).GetTheme(); got != "mocha" {
+		t.Errorf(`GetTheme() = %q, want "mocha"`, got)
+	}
+}
+
+func TestGetThemeHonoursTheConfiguredValue(t *testing.T) {
+	c := &Config{Display: DisplayConfig{Theme: "latte"}}
+	if got := c.GetTheme(); got != "latte" {
+		t.Errorf(`GetTheme() = %q, want "latte"`, got)
+	}
+}
+
+func TestGetMaxWidthDefaultsTo110(t *testing.T) {
+	if got := (&Config{}).GetMaxWidth(); got != 110 {
+		t.Errorf("GetMaxWidth() = %d, want 110", got)
+	}
+}
+
+func TestGetMaxWidthHonoursTheConfiguredValue(t *testing.T) {
+	c := &Config{Display: DisplayConfig{MaxWidth: 140}}
+	if got := c.GetMaxWidth(); got != 140 {
+		t.Errorf("GetMaxWidth() = %d, want 140", got)
+	}
+}
+
+func TestGetMaxWidthMinusOneMeansUncapped(t *testing.T) {
+	c := &Config{Display: DisplayConfig{MaxWidth: -1}}
+	if got := c.GetMaxWidth(); got != -1 {
+		t.Errorf("GetMaxWidth() = %d, want -1", got)
+	}
+}

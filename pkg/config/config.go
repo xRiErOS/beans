@@ -164,6 +164,17 @@ type ServerConfig struct {
 	CORSOrigins []string `yaml:"cors_origins,omitempty"`
 }
 
+// DisplayConfig controls how the CLI renders to a terminal.
+type DisplayConfig struct {
+	// Theme names one of the bundled Catppuccin flavours: latte, frappe,
+	// macchiato or mocha. Empty means mocha.
+	Theme string `yaml:"theme,omitempty"`
+
+	// MaxWidth caps the rendered width. 0 means unset and yields 110;
+	// -1 disables the cap entirely.
+	MaxWidth int `yaml:"max_width,omitempty"`
+}
+
 // Config holds the beans configuration.
 // Note: Statuses are no longer stored in config - they are hardcoded like types.
 type Config struct {
@@ -172,6 +183,7 @@ type Config struct {
 	Worktree WorktreeConfig `yaml:"worktree,omitempty"`
 	Agent    AgentConfig    `yaml:"agent,omitempty"`
 	Server   ServerConfig   `yaml:"server,omitempty"`
+	Display  DisplayConfig  `yaml:"display,omitempty"`
 
 	// configDir is the directory containing the config file (not serialized)
 	// Used to resolve relative paths
@@ -978,4 +990,21 @@ func (c *Config) GetCORSOrigins() []string {
 		return c.Server.CORSOrigins
 	}
 	return []string{"http://localhost:*", "http://127.0.0.1:*"}
+}
+
+// GetTheme returns the configured theme name, or "mocha" when unset.
+func (c *Config) GetTheme() string {
+	if c.Display.Theme == "" {
+		return "mocha"
+	}
+	return c.Display.Theme
+}
+
+// GetMaxWidth returns the configured width cap: 110 when unset, -1 when the
+// cap is explicitly disabled.
+func (c *Config) GetMaxWidth() int {
+	if c.Display.MaxWidth == 0 {
+		return 110
+	}
+	return c.Display.MaxWidth
 }
