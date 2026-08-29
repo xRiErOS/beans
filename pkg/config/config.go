@@ -818,6 +818,11 @@ func mergeDefaults[T, O any](defaults []T, overrides []O, key func(T) string, na
 // the defaults do not carry is appended, so custom statuses are possible
 // without this being their dedicated feature.
 func (c *Config) StatusList() []StatusConfig {
+	if c == nil {
+		out := make([]StatusConfig, len(DefaultStatuses))
+		copy(out, DefaultStatuses)
+		return out
+	}
 	return mergeDefaults(DefaultStatuses, c.Statuses,
 		func(t StatusConfig) string { return t.Name },
 		func(o StatusOverride) string { return o.Name },
@@ -919,6 +924,11 @@ func (c *Config) IsValidType(typeName string) bool {
 // A config entry overrides its named type field by field; a name the
 // defaults do not carry is appended.
 func (c *Config) TypeList() []TypeConfig {
+	if c == nil {
+		out := make([]TypeConfig, len(DefaultTypes))
+		copy(out, DefaultTypes)
+		return out
+	}
 	return mergeDefaults(DefaultTypes, c.Types,
 		func(t TypeConfig) string { return t.Name },
 		func(o TypeOverride) string { return o.Name },
@@ -1008,6 +1018,11 @@ func (c *Config) IsValidPriority(priority string) bool {
 // applied. A config entry overrides its named priority field by field; a
 // name the defaults do not carry is appended.
 func (c *Config) PriorityList() []PriorityConfig {
+	if c == nil {
+		out := make([]PriorityConfig, len(DefaultPriorities))
+		copy(out, DefaultPriorities)
+		return out
+	}
 	return mergeDefaults(DefaultPriorities, c.Priorities,
 		func(t PriorityConfig) string { return t.Name },
 		func(o PriorityOverride) string { return o.Name },

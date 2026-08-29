@@ -2067,3 +2067,32 @@ func TestAnExplicitArchiveOverrideIsHonoured(t *testing.T) {
 		t.Error("IsArchiveStatus(\"completed\") = true, want false: an explicit archive: false must be honoured")
 	}
 }
+
+// Fix round 1, Commit 2: before Task 2b, GetStatus/GetType/GetPriority/
+// StatusNames/TypeNames read only the package-level Default* slices and
+// never dereferenced their receiver, so they tolerated a nil *Config. Routing
+// them through StatusList/TypeList/PriorityList (which read c.Statuses etc.)
+// would panic on nil without an explicit guard - this is latent (no known
+// call site passes a nil Config today), but it is a capability regression on
+// a shared API, so the guard and the covering test are added independent of
+// any live path.
+
+func TestGettersToleratePlainDefaultsOnANilConfig(t *testing.T) {
+	var c *Config
+
+	if got := c.GetStatus("todo"); got == nil {
+		t.Error("GetStatus(\"todo\") on a nil *Config = nil, want the built-in default")
+	}
+	if got := c.GetType("task"); got == nil {
+		t.Error("GetType(\"task\") on a nil *Config = nil, want the built-in default")
+	}
+	if got := c.GetPriority("normal"); got == nil {
+		t.Error("GetPriority(\"normal\") on a nil *Config = nil, want the built-in default")
+	}
+	if names := c.StatusNames(); len(names) != len(DefaultStatuses) {
+		t.Errorf("StatusNames() on a nil *Config has %d entries, want the %d defaults", len(names), len(DefaultStatuses))
+	}
+	if names := c.TypeNames(); len(names) != len(DefaultTypes) {
+		t.Errorf("TypeNames() on a nil *Config has %d entries, want the %d defaults", len(names), len(DefaultTypes))
+	}
+}
