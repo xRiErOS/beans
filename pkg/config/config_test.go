@@ -1778,8 +1778,8 @@ func TestSavePreservesFileMode(t *testing.T) {
 
 	cfg := &Config{
 		Beans: BeansConfig{
-			Path:        ".beans",
-			Prefix:      "test-",
+			Path:   ".beans",
+			Prefix: "test-",
 		},
 	}
 	cfg.SetConfigDir(tmpDir)
@@ -2241,5 +2241,112 @@ func TestSaveRoundTripsTypeEmphasisOverride(t *testing.T) {
 
 	if got := reloaded.GetType("feature"); got == nil || !got.Emphasis {
 		t.Errorf("reloaded GetType(\"feature\").Emphasis = %v, want the saved override", got)
+	}
+}
+
+// Plan task 1 of docs/topics/beans-type-profiles: the hierarchy moves off the
+// type names and onto a numeric rank per type.
+
+func TestRankOfReturnsTheBuiltInRanks(t *testing.T) {
+	c := &Config{}
+	for name, want := range map[string]int{
+		"milestone": 1,
+		"epic":      2,
+		"feature":   3,
+		"task":      4,
+		"bug":       4,
+	} {
+		if got := c.RankOf(name); got != want {
+			t.Errorf("RankOf(%q) = %d, want %d", name, got, want)
+		}
+	}
+}
+
+func TestRankOfFallsBackToLeafRankForUnknownTypes(t *testing.T) {
+	c := &Config{}
+	if got := c.RankOf("chore"); got != LeafRank {
+		t.Errorf("RankOf(\"chore\") = %d, want %d (LeafRank)", got, LeafRank)
+	}
+}
+
+func TestRankOfHonoursAConfiguredRank(t *testing.T) {
+	rank := 2
+	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}
+	if got := c.RankOf("package"); got != 2 {
+		t.Errorf("RankOf(\"package\") = %d, want 2", got)
+	}
+}
+
+func TestAppendedTypeWithoutRankLandsOnTheLeafRank(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore", Color: "peach"}}}
+	if got := c.RankOf("chore"); got != LeafRank {
+		t.Errorf("RankOf(\"chore\") = %d, want %d (LeafRank)", got, LeafRank)
+	}
+}
+
+// AC-4 is about the merged list itself, not just about what RankOf reports:
+// both getters normalise a zero rank to LeafRank on their own, so a test that
+// only asks RankOf stays green even when the merge leaves the entry at 0. A
+// rank-0 entry in TypeList outranks every container for every later reader.
+func TestAppendedTypeCarriesTheLeafRankInTheMergedList(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore", Color: "peach"}}}
+
+	for _, ty := range c.TypeList() {
+		if ty.Name != "chore" {
+			continue
+		}
+		if ty.Rank != LeafRank {
+			t.Errorf("TypeList() entry \"chore\".Rank = %d, want %d (LeafRank)", ty.Rank, LeafRank)
+		}
+		return
+	}
+	t.Fatal("TypeList() carries no \"chore\" entry, want the appended type")
+}
+
+func TestColourOnlyOverrideKeepsTheBuiltInRank(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "epic", Color: "red"}}}
+	if got := c.RankOf("epic"); got != 2 {
+		t.Errorf("RankOf(\"epic\") = %d, want 2 - a colour override must not reset the rank", got)
+	}
+}
+
+func TestTypesAtRankReturnsListOrder(t *testing.T) {
+	rank := 2
+	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}
+	got := c.TypesAtRank(2)
+	want := []string{"epic", "package"}
+	if len(got) != len(want) {
+		t.Fatalf("TypesAtRank(2) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("TypesAtRank(2)[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Save() builds the types: sequence node by node rather than by marshalling
+// the struct, so a yaml tag alone does not carry Rank through a write-and-read
+// cycle. Without this test the omission is invisible: the existing round-trip
+// test sets no rank.
+func TestSaveRoundTripsATypeRankOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	rank := 2
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "package", Rank: &rank}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.RankOf("package"); got != 2 {
+		t.Errorf("reloaded RankOf(\"package\") = %d, want 2 - the saved rank must survive", got)
 	}
 }

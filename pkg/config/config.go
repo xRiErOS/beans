@@ -28,6 +28,10 @@ const (
 	// DefaultCommitField is the front matter key used to record a commit SHA
 	// when beans.commit_field is not configured.
 	DefaultCommitField = "commit"
+	// LeafRank is the rank of a type that carries no children. A type without
+	// an explicit rank lands here, which keeps the old behaviour where an
+	// unknown type was treated like "task".
+	LeafRank = 4
 )
 
 // DefaultStatuses defines the built-in status table. Config.Statuses can
@@ -44,11 +48,11 @@ var DefaultStatuses = []StatusConfig{
 // DefaultTypes defines the built-in type table. Config.Types can override
 // individual entries; see (*Config).TypeList.
 var DefaultTypes = []TypeConfig{
-	{Name: "milestone", Color: "mauve", Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
-	{Name: "epic", Color: "blue", Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
-	{Name: "feature", Color: "sapphire", Description: "A user-facing capability or enhancement"},
-	{Name: "bug", Color: "maroon", Description: "Something that is broken and needs fixing"},
-	{Name: "task", Color: "", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
+	{Name: "milestone", Color: "mauve", Rank: 1, Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
+	{Name: "epic", Color: "blue", Rank: 2, Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
+	{Name: "feature", Color: "sapphire", Rank: 3, Description: "A user-facing capability or enhancement"},
+	{Name: "bug", Color: "maroon", Rank: LeafRank, Description: "Something that is broken and needs fixing"},
+	{Name: "task", Color: "", Rank: LeafRank, Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
 }
 
 // DefaultPriorities defines the built-in priority table. Config.Priorities
@@ -74,6 +78,10 @@ type StatusConfig struct {
 type TypeConfig struct {
 	Name  string `yaml:"name"`
 	Color string `yaml:"color"`
+	// Rank carries the hierarchy: a parent is valid when the child's rank is
+	// strictly greater. Ranks 1 to 3 are container ranks, 4 is the leaf rank.
+	// Ranks may be left unoccupied; the rule tolerates the gap.
+	Rank int `yaml:"rank,omitempty"`
 	// Emphasis renders this type bold across type word, id and title. It is
 	// what carries the hierarchy where hue alone cannot: Catppuccin tones are
 	// uniformly pastel, so a container would otherwise lose against a leaf.
@@ -106,8 +114,12 @@ type StatusOverride struct {
 // distinct from an explicit "emphasis: false", or a colour-only recolour of
 // e.g. "milestone" would silently clear its emphasis.
 type TypeOverride struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color,omitempty"`
+	Name  string `yaml:"name"`
+	Color string `yaml:"color,omitempty"`
+	// Rank is a pointer for the same reason Emphasis is: an omitted key must
+	// stay distinct from an explicit rank, or a colour-only override would
+	// pull its type down to rank 0 and outrank every container.
+	Rank        *int   `yaml:"rank,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Emphasis    *bool  `yaml:"emphasis,omitempty"`
 }
@@ -712,6 +724,9 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(t.Color))
 		}
+		if t.Rank != nil {
+			m.Content = append(m.Content, strNode("rank"), scalar(fmt.Sprintf("%d", *t.Rank), "!!int"))
+		}
 		if t.Emphasis != nil {
 			m.Content = append(m.Content, strNode("emphasis"), scalar(fmt.Sprintf("%t", *t.Emphasis), "!!bool"))
 		}
@@ -930,6 +945,31 @@ func (c *Config) GetType(name string) *TypeConfig {
 	return nil
 }
 
+// RankOf returns the hierarchy rank of a type name. An unknown type and a
+// type without an explicit rank both sit at LeafRank.
+func (c *Config) RankOf(typeName string) int {
+	if t := c.GetType(typeName); t != nil && t.Rank != 0 {
+		return t.Rank
+	}
+	return LeafRank
+}
+
+// TypesAtRank returns the names of every type on the given rank, in the order
+// the merged list carries them.
+func (c *Config) TypesAtRank(rank int) []string {
+	var names []string
+	for _, t := range c.TypeList() {
+		r := t.Rank
+		if r == 0 {
+			r = LeafRank
+		}
+		if r == rank {
+			names = append(names, t.Name)
+		}
+	}
+	return names
+}
+
 // TypeNames returns the names of the merged type list (see TypeList).
 func (c *Config) TypeNames() []string {
 	list := c.TypeList()
@@ -971,11 +1011,21 @@ func (c *Config) TypeList() []TypeConfig {
 			if o.Description != "" {
 				t.Description = o.Description
 			}
+			if o.Rank != nil {
+				t.Rank = *o.Rank
+			}
 			// Emphasis is a pointer: only an explicit emphasis: key (true or
 			// false) touches it, so a colour-only override cannot flip a
 			// type like "milestone" back to non-emphasised by accident.
 			if o.Emphasis != nil {
 				t.Emphasis = *o.Emphasis
+			}
+			// An appended type starts from a zero TypeConfig, so an entry
+			// without rank: would sit at rank 0 and outrank every container.
+			// Leaf rank is the safe default and matches the old behaviour for
+			// unknown types.
+			if t.Rank == 0 {
+				t.Rank = LeafRank
 			}
 		},
 	)
