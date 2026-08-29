@@ -97,3 +97,21 @@ func TestPrimeCmdDocumentsBatchAndFilters(t *testing.T) {
 		}
 	}
 }
+
+// A failure is the one output shape an agent cannot afford to guess at: it
+// decides whether the agent reads stdout or stderr, and whether it treats a
+// missing document as a crash. beans-ra75 shipped the shape without touching
+// this template.
+func TestPrimeCmdDocumentsFailureShape(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	for _, want := range []string{
+		"Run '<command> --help' for usage.",
+		`{"success": false`,
+		"exits 1",
+		"stderr stays empty",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prime output missing %q (failure shape undocumented)", want)
+		}
+	}
+}
