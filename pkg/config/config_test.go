@@ -80,10 +80,15 @@ func TestIsValidStatus(t *testing.T) {
 func TestStatusList(t *testing.T) {
 	cfg := Default()
 	got := cfg.StatusList()
-	want := "in-progress, todo, draft, completed, scrapped"
+	want := []string{"in-progress", "todo", "draft", "completed", "scrapped"}
 
-	if got != want {
-		t.Errorf("StatusList() = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("StatusList() has %d entries, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("StatusList()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
@@ -439,10 +444,15 @@ func TestIsValidType(t *testing.T) {
 func TestTypeList(t *testing.T) {
 	cfg := Default()
 	got := cfg.TypeList()
-	want := "milestone, epic, bug, feature, task"
+	want := []string{"milestone", "epic", "bug", "feature", "task"}
 
-	if got != want {
-		t.Errorf("TypeList() = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("TypeList() has %d entries, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("TypeList()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
@@ -551,13 +561,12 @@ func TestTypeDescriptions(t *testing.T) {
 		}
 	})
 
-	t.Run("types in config file are ignored", func(t *testing.T) {
-		// Even if a config file has custom types, they should be ignored
-		// and hardcoded types should be used instead
+	t.Run("types in config file extend the defaults", func(t *testing.T) {
+		// A type the config file names but the defaults do not know is
+		// appended, not ignored (Task 2b: types became overridable).
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, ConfigFileName)
 
-		// Config with custom types (should be ignored)
 		configYAML := `beans:
   prefix: "test-"
   id_length: 4
@@ -568,7 +577,7 @@ statuses:
 types:
   - name: custom-type
     color: pink
-    description: "This should be ignored"
+    description: "A configured type"
 `
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
 			t.Fatalf("WriteFile error = %v", err)
@@ -579,9 +588,9 @@ types:
 			t.Fatalf("Load() error = %v", err)
 		}
 
-		// Custom type should not be valid
-		if loaded.IsValidType("custom-type") {
-			t.Error("IsValidType(\"custom-type\") = true, want false (custom types should be ignored)")
+		// The configured type is now valid.
+		if !loaded.IsValidType("custom-type") {
+			t.Error("IsValidType(\"custom-type\") = false, want true (configured types are appended)")
 		}
 
 		// Hardcoded types should still work
@@ -615,20 +624,19 @@ func TestStatusDescriptions(t *testing.T) {
 		}
 	})
 
-	t.Run("statuses in config file are ignored", func(t *testing.T) {
-		// Even if a config file has custom statuses, they should be ignored
-		// and hardcoded statuses should be used instead
+	t.Run("statuses in config file extend the defaults", func(t *testing.T) {
+		// A status the config file names but the defaults do not know is
+		// appended, not ignored (Task 2b: statuses became overridable).
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, ConfigFileName)
 
-		// Config with custom statuses (should be ignored)
 		configYAML := `beans:
   prefix: "test-"
   id_length: 4
 statuses:
   - name: custom-status
     color: pink
-    description: "This should be ignored"
+    description: "A configured status"
 `
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
 			t.Fatalf("WriteFile error = %v", err)
@@ -639,9 +647,9 @@ statuses:
 			t.Fatalf("Load() error = %v", err)
 		}
 
-		// Custom status should not be valid
-		if loaded.IsValidStatus("custom-status") {
-			t.Error("IsValidStatus(\"custom-status\") = true, want false (custom statuses should be ignored)")
+		// The configured status is now valid.
+		if !loaded.IsValidStatus("custom-status") {
+			t.Error("IsValidStatus(\"custom-status\") = false, want true (configured statuses are appended)")
 		}
 
 		// Hardcoded statuses should still work
@@ -823,10 +831,15 @@ func TestIsValidPriority(t *testing.T) {
 func TestPriorityList(t *testing.T) {
 	cfg := Default()
 	got := cfg.PriorityList()
-	want := "critical, high, normal, low, deferred"
+	want := []string{"critical", "high", "normal", "low", "deferred"}
 
-	if got != want {
-		t.Errorf("PriorityList() = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("PriorityList() has %d entries, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("PriorityList()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
@@ -1907,5 +1920,120 @@ func TestGetMaxWidthMinusOneMeansUncapped(t *testing.T) {
 	c := &Config{Display: DisplayConfig{MaxWidth: -1}}
 	if got := c.GetMaxWidth(); got != -1 {
 		t.Errorf("GetMaxWidth() = %d, want -1", got)
+	}
+}
+
+// Task 2b: statuses, types and priorities become overridable from
+// Config.Statuses / Config.Types / Config.Priorities, merged entry by entry
+// against the built-in defaults.
+
+func TestTypeListFallsBackToTheDefaults(t *testing.T) {
+	c := Default()
+	if len(c.TypeList()) != len(DefaultTypes) {
+		t.Errorf("TypeList() has %d entries, want the %d defaults",
+			len(c.TypeList()), len(DefaultTypes))
+	}
+}
+
+func TestConfigOverridesASingleColour(t *testing.T) {
+	c := Default()
+	c.Types = []TypeConfig{{Name: "bug", Color: "#ff0000"}}
+
+	got := c.GetType("bug")
+	if got == nil || got.Color != "#ff0000" {
+		t.Fatalf("GetType(\"bug\").Color = %v, want the override", got)
+	}
+	// Everything not named keeps its default.
+	if other := c.GetType("epic"); other == nil || other.Color != "purple" {
+		t.Errorf("GetType(\"epic\").Color = %v, want the default \"purple\"", other)
+	}
+	if len(c.TypeList()) != len(DefaultTypes) {
+		t.Errorf("an override changed the list length to %d", len(c.TypeList()))
+	}
+}
+
+func TestAnOverrideKeepsUnsetFields(t *testing.T) {
+	c := Default()
+	c.Types = []TypeConfig{{Name: "epic", Color: "#00ff00"}}
+	got := c.GetType("epic")
+	if got == nil {
+		t.Fatal("GetType(\"epic\") = nil, want the merged entry")
+	}
+	// Overriding only the colour must not blank out fields the override
+	// left unset, such as the description.
+	if got.Description == "" {
+		t.Error("overriding only the colour dropped the description")
+	}
+}
+
+func TestAnUnknownNameIsAppended(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusConfig{{Name: "blocked", Color: "red"}}
+	if got := c.GetStatus("blocked"); got == nil {
+		t.Error("a status the defaults do not know should be appended")
+	}
+	if len(c.StatusList()) != len(DefaultStatuses)+1 {
+		t.Errorf("StatusList() has %d entries, want defaults plus one", len(c.StatusList()))
+	}
+}
+
+func TestStatusNamesFollowTheMergedList(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusConfig{{Name: "blocked", Color: "red"}}
+	found := false
+	for _, n := range c.StatusNames() {
+		if n == "blocked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("StatusNames() does not reflect the merged list")
+	}
+}
+
+func TestPriorityOverride(t *testing.T) {
+	c := Default()
+	c.Priorities = []PriorityConfig{{Name: "critical", Color: "#ff00ff"}}
+	if got := c.GetPriority("critical"); got == nil || got.Color != "#ff00ff" {
+		t.Errorf("GetPriority(\"critical\").Color = %v, want the override", got)
+	}
+}
+
+func TestGettersToleratePlainDefaults(t *testing.T) {
+	c := &Config{}
+	if got := c.GetType("task"); got == nil {
+		t.Error("a bare Config must still resolve the built-in types")
+	}
+}
+
+func TestSaveRoundTripsTypeStatusAndPriorityOverrides(t *testing.T) {
+	// Save() is called by more than `init` (e.g. `beans rename`). Without
+	// serializing these fields, a Save() on an already-loaded config would
+	// silently erase whatever the user configured.
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeConfig{{Name: "bug", Color: "#ff00ff"}}
+	cfg.Statuses = []StatusConfig{{Name: "blocked", Color: "red", Archive: true}}
+	cfg.Priorities = []PriorityConfig{{Name: "critical", Color: "#ff0000"}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetType("bug"); got == nil || got.Color != "#ff00ff" {
+		t.Errorf("reloaded GetType(\"bug\").Color = %v, want the saved override", got)
+	}
+	if got := reloaded.GetStatus("blocked"); got == nil || !got.Archive {
+		t.Errorf("reloaded GetStatus(\"blocked\") = %v, want the saved override", got)
+	}
+	if got := reloaded.GetPriority("critical"); got == nil || got.Color != "#ff0000" {
+		t.Errorf("reloaded GetPriority(\"critical\").Color = %v, want the saved override", got)
 	}
 }

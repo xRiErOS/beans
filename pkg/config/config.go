@@ -30,8 +30,8 @@ const (
 	DefaultCommitField = "commit"
 )
 
-// DefaultStatuses defines the hardcoded status configuration.
-// Statuses are not configurable - they are hardcoded like types.
+// DefaultStatuses defines the built-in status table. Config.Statuses can
+// override individual entries; see (*Config).StatusList.
 // Order determines sort priority: in-progress first (active work), then todo, draft, and done states last.
 var DefaultStatuses = []StatusConfig{
 	{Name: "in-progress", Color: "yellow", Description: "Currently being worked on"},
@@ -41,7 +41,8 @@ var DefaultStatuses = []StatusConfig{
 	{Name: "scrapped", Color: "gray", Archive: true, Description: "Will not be done"},
 }
 
-// DefaultTypes defines the default type configuration.
+// DefaultTypes defines the built-in type table. Config.Types can override
+// individual entries; see (*Config).TypeList.
 var DefaultTypes = []TypeConfig{
 	{Name: "milestone", Color: "cyan", Description: "A target release or checkpoint; group work that should ship together"},
 	{Name: "epic", Color: "purple", Description: "A thematic container for related work; should have child beans, not be worked on directly"},
@@ -50,7 +51,8 @@ var DefaultTypes = []TypeConfig{
 	{Name: "task", Color: "blue", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
 }
 
-// DefaultPriorities defines the hardcoded priority configuration.
+// DefaultPriorities defines the built-in priority table. Config.Priorities
+// can override individual entries; see (*Config).PriorityList.
 // Priorities are ordered from highest to lowest urgency.
 var DefaultPriorities = []PriorityConfig{
 	{Name: "critical", Color: "red", Description: "Urgent, blocking work. When possible, address immediately"},
@@ -176,7 +178,6 @@ type DisplayConfig struct {
 }
 
 // Config holds the beans configuration.
-// Note: Statuses are no longer stored in config - they are hardcoded like types.
 type Config struct {
 	Project  ProjectConfig  `yaml:"project,omitempty"`
 	Beans    BeansConfig    `yaml:"beans"`
@@ -184,6 +185,13 @@ type Config struct {
 	Agent    AgentConfig    `yaml:"agent,omitempty"`
 	Server   ServerConfig   `yaml:"server,omitempty"`
 	Display  DisplayConfig  `yaml:"display,omitempty"`
+
+	// Statuses, Types and Priorities override the built-in tables entry by
+	// entry: a config naming only "bug" keeps the other four types as they are.
+	// A name the defaults do not carry is appended.
+	Statuses   []StatusConfig   `yaml:"statuses,omitempty"`
+	Types      []TypeConfig     `yaml:"types,omitempty"`
+	Priorities []PriorityConfig `yaml:"priorities,omitempty"`
 
 	// configDir is the directory containing the config file (not serialized)
 	// Used to resolve relative paths
@@ -324,7 +332,9 @@ func Load(configPath string) (*Config, error) {
 		cfg.Beans.DefaultStatus = "todo"
 	}
 	if cfg.Beans.DefaultType == "" {
-		cfg.Beans.DefaultType = DefaultTypes[0].Name
+		// Read through the merged list so a config that overrides the first
+		// type still gets a fallback consistent with what it actually declared.
+		cfg.Beans.DefaultType = cfg.TypeList()[0].Name
 	}
 
 	// A misspelt anchor must not degrade into the default: that would silently
@@ -357,7 +367,7 @@ func ValidateAnchor(anchor string) error {
 func (c *Config) validateRequireFieldsOn() error {
 	for status, fields := range c.Beans.RequireFieldsOn {
 		if !c.IsValidStatus(status) {
-			return fmt.Errorf("unknown status %q in beans.require_fields_on (valid: %s)", status, c.StatusList())
+			return fmt.Errorf("unknown status %q in beans.require_fields_on (valid: %s)", status, strings.Join(c.StatusNames(), ", "))
 		}
 		for _, field := range fields {
 			if strings.TrimSpace(field) == "" {
@@ -557,7 +567,7 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		key := strNode("require_fields_on")
 		key.HeadComment = "Front matter keys that must be set when a bean enters a status"
 		mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		for _, s := range DefaultStatuses { // deterministic key order
+		for _, s := range c.StatusList() { // deterministic key order
 			fields := c.Beans.RequireFieldsOn[s.Name]
 			if len(fields) == 0 {
 				continue
@@ -621,6 +631,52 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		serverMapping.Content = append(serverMapping.Content, portKey, intNode(c.Server.Port))
 	}
 
+	// Build the statuses/types/priorities override sequences. These round-trip
+	// exactly what was configured (not the merged result) so that Save() -
+	// called by `beans rename`, for instance - never silently drops a user's
+	// overrides from the file.
+	statusesSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, s := range c.Statuses {
+		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		m.Content = append(m.Content, strNode("name"), strNode(s.Name))
+		if s.Color != "" {
+			m.Content = append(m.Content, strNode("color"), strNode(s.Color))
+		}
+		if s.Archive {
+			m.Content = append(m.Content, strNode("archive"), scalar("true", "!!bool"))
+		}
+		if s.Description != "" {
+			m.Content = append(m.Content, strNode("description"), strNode(s.Description))
+		}
+		statusesSeq.Content = append(statusesSeq.Content, m)
+	}
+
+	typesSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, t := range c.Types {
+		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		m.Content = append(m.Content, strNode("name"), strNode(t.Name))
+		if t.Color != "" {
+			m.Content = append(m.Content, strNode("color"), strNode(t.Color))
+		}
+		if t.Description != "" {
+			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
+		}
+		typesSeq.Content = append(typesSeq.Content, m)
+	}
+
+	prioritiesSeq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq"}
+	for _, p := range c.Priorities {
+		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		m.Content = append(m.Content, strNode("name"), strNode(p.Name))
+		if p.Color != "" {
+			m.Content = append(m.Content, strNode("color"), strNode(p.Color))
+		}
+		if p.Description != "" {
+			m.Content = append(m.Content, strNode("description"), strNode(p.Description))
+		}
+		prioritiesSeq.Content = append(prioritiesSeq.Content, m)
+	}
+
 	// Build the top-level mapping
 	topMapping := &yaml.Node{
 		Kind:        yaml.MappingNode,
@@ -645,6 +701,24 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		topMapping.Content = append(topMapping.Content, strNode("server"), serverMapping)
 	}
 
+	if len(statusesSeq.Content) > 0 {
+		key := strNode("statuses")
+		key.HeadComment = "Status overrides, merged entry by entry with the built-in defaults"
+		topMapping.Content = append(topMapping.Content, key, statusesSeq)
+	}
+
+	if len(typesSeq.Content) > 0 {
+		key := strNode("types")
+		key.HeadComment = "Type overrides, merged entry by entry with the built-in defaults"
+		topMapping.Content = append(topMapping.Content, key, typesSeq)
+	}
+
+	if len(prioritiesSeq.Content) > 0 {
+		key := strNode("priorities")
+		key.HeadComment = "Priority overrides, merged entry by entry with the built-in defaults"
+		topMapping.Content = append(topMapping.Content, key, prioritiesSeq)
+	}
+
 	// Wrap in a document node
 	return &yaml.Node{
 		Kind:    yaml.DocumentNode,
@@ -652,9 +726,10 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	}
 }
 
-// IsValidStatus returns true if the status is a valid hardcoded status.
+// IsValidStatus returns true if the status is a known status name, built-in
+// or configured.
 func (c *Config) IsValidStatus(status string) bool {
-	for _, s := range DefaultStatuses {
+	for _, s := range c.StatusList() {
 		if s.Name == status {
 			return true
 		}
@@ -676,32 +751,53 @@ func (c *Config) GetCommitField() string {
 	return DefaultCommitField
 }
 
-// StatusList returns a comma-separated list of valid statuses.
-// Statuses are hardcoded and not configurable.
-func (c *Config) StatusList() string {
-	names := make([]string, len(DefaultStatuses))
-	for i, s := range DefaultStatuses {
-		names[i] = s.Name
+// StatusList returns the built-in statuses with any configured overrides
+// applied. A config entry overrides its named status field by field; a name
+// the defaults do not carry is appended, so custom statuses are possible
+// without this being their dedicated feature.
+func (c *Config) StatusList() []StatusConfig {
+	out := make([]StatusConfig, len(DefaultStatuses))
+	copy(out, DefaultStatuses)
+	for _, override := range c.Statuses {
+		merged := false
+		for i := range out {
+			if out[i].Name != override.Name {
+				continue
+			}
+			if override.Color != "" {
+				out[i].Color = override.Color
+			}
+			if override.Description != "" {
+				out[i].Description = override.Description
+			}
+			out[i].Archive = override.Archive
+			merged = true
+			break
+		}
+		if !merged {
+			out = append(out, override)
+		}
 	}
-	return strings.Join(names, ", ")
+	return out
 }
 
-// StatusNames returns a slice of valid status names.
-// Statuses are hardcoded and not configurable.
+// StatusNames returns the names of the merged status list (see StatusList).
 func (c *Config) StatusNames() []string {
-	names := make([]string, len(DefaultStatuses))
-	for i, s := range DefaultStatuses {
+	list := c.StatusList()
+	names := make([]string, len(list))
+	for i, s := range list {
 		names[i] = s.Name
 	}
 	return names
 }
 
-// GetStatus returns the StatusConfig for a given status name, or nil if not found.
-// Statuses are hardcoded and not configurable.
+// GetStatus returns the StatusConfig for a status name from the merged list
+// (see StatusList), or nil if unknown.
 func (c *Config) GetStatus(name string) *StatusConfig {
-	for i := range DefaultStatuses {
-		if DefaultStatuses[i].Name == name {
-			return &DefaultStatuses[i]
+	list := c.StatusList()
+	for i := range list {
+		if list[i].Name == name {
+			return &list[i]
 		}
 	}
 	return nil
@@ -721,7 +817,6 @@ func (c *Config) GetDefaultType() string {
 }
 
 // IsArchiveStatus returns true if the given status is marked for archiving.
-// Statuses are hardcoded and not configurable.
 func (c *Config) IsArchiveStatus(name string) bool {
 	if s := c.GetStatus(name); s != nil {
 		return s.Archive
@@ -729,30 +824,32 @@ func (c *Config) IsArchiveStatus(name string) bool {
 	return false
 }
 
-// GetType returns the TypeConfig for a given type name, or nil if not found.
-// Types are hardcoded and not configurable.
+// GetType returns the TypeConfig for a type name from the merged list (see
+// TypeList), or nil if unknown.
 func (c *Config) GetType(name string) *TypeConfig {
-	for i := range DefaultTypes {
-		if DefaultTypes[i].Name == name {
-			return &DefaultTypes[i]
+	list := c.TypeList()
+	for i := range list {
+		if list[i].Name == name {
+			return &list[i]
 		}
 	}
 	return nil
 }
 
-// TypeNames returns a slice of valid type names.
-// Types are hardcoded and not configurable.
+// TypeNames returns the names of the merged type list (see TypeList).
 func (c *Config) TypeNames() []string {
-	names := make([]string, len(DefaultTypes))
-	for i, t := range DefaultTypes {
+	list := c.TypeList()
+	names := make([]string, len(list))
+	for i, t := range list {
 		names[i] = t.Name
 	}
 	return names
 }
 
-// IsValidType returns true if the type is a valid hardcoded type.
+// IsValidType returns true if the type is a known type name, built-in or
+// configured.
 func (c *Config) IsValidType(typeName string) bool {
-	for _, t := range DefaultTypes {
+	for _, t := range c.TypeList() {
 		if t.Name == typeName {
 			return true
 		}
@@ -760,13 +857,32 @@ func (c *Config) IsValidType(typeName string) bool {
 	return false
 }
 
-// TypeList returns a comma-separated list of valid types.
-func (c *Config) TypeList() string {
-	names := make([]string, len(DefaultTypes))
-	for i, t := range DefaultTypes {
-		names[i] = t.Name
+// TypeList returns the built-in types with any configured overrides applied.
+// A config entry overrides its named type field by field; a name the
+// defaults do not carry is appended.
+func (c *Config) TypeList() []TypeConfig {
+	out := make([]TypeConfig, len(DefaultTypes))
+	copy(out, DefaultTypes)
+	for _, override := range c.Types {
+		merged := false
+		for i := range out {
+			if out[i].Name != override.Name {
+				continue
+			}
+			if override.Color != "" {
+				out[i].Color = override.Color
+			}
+			if override.Description != "" {
+				out[i].Description = override.Description
+			}
+			merged = true
+			break
+		}
+		if !merged {
+			out = append(out, override)
+		}
 	}
-	return strings.Join(names, ", ")
+	return out
 }
 
 // BeanColors holds resolved color information for rendering a bean
@@ -802,32 +918,36 @@ func (c *Config) GetBeanColors(status, typeName, priority string) BeanColors {
 	return colors
 }
 
-// GetPriority returns the PriorityConfig for a given priority name, or nil if not found.
+// GetPriority returns the PriorityConfig for a priority name from the merged
+// list (see PriorityList), or nil if unknown.
 func (c *Config) GetPriority(name string) *PriorityConfig {
-	for i := range DefaultPriorities {
-		if DefaultPriorities[i].Name == name {
-			return &DefaultPriorities[i]
+	list := c.PriorityList()
+	for i := range list {
+		if list[i].Name == name {
+			return &list[i]
 		}
 	}
 	return nil
 }
 
-// PriorityNames returns a slice of valid priority names in order from highest to lowest.
+// PriorityNames returns the names of the merged priority list (see
+// PriorityList), in order from highest to lowest.
 func (c *Config) PriorityNames() []string {
-	names := make([]string, len(DefaultPriorities))
-	for i, p := range DefaultPriorities {
+	list := c.PriorityList()
+	names := make([]string, len(list))
+	for i, p := range list {
 		names[i] = p.Name
 	}
 	return names
 }
 
-// IsValidPriority returns true if the priority is a valid hardcoded priority.
-// Empty string is valid (means no priority set).
+// IsValidPriority returns true if the priority is a known priority name,
+// built-in or configured. Empty string is valid (means no priority set).
 func (c *Config) IsValidPriority(priority string) bool {
 	if priority == "" {
 		return true
 	}
-	for _, p := range DefaultPriorities {
+	for _, p := range c.PriorityList() {
 		if p.Name == priority {
 			return true
 		}
@@ -835,13 +955,32 @@ func (c *Config) IsValidPriority(priority string) bool {
 	return false
 }
 
-// PriorityList returns a comma-separated list of valid priorities.
-func (c *Config) PriorityList() string {
-	names := make([]string, len(DefaultPriorities))
-	for i, p := range DefaultPriorities {
-		names[i] = p.Name
+// PriorityList returns the built-in priorities with any configured overrides
+// applied. A config entry overrides its named priority field by field; a
+// name the defaults do not carry is appended.
+func (c *Config) PriorityList() []PriorityConfig {
+	out := make([]PriorityConfig, len(DefaultPriorities))
+	copy(out, DefaultPriorities)
+	for _, override := range c.Priorities {
+		merged := false
+		for i := range out {
+			if out[i].Name != override.Name {
+				continue
+			}
+			if override.Color != "" {
+				out[i].Color = override.Color
+			}
+			if override.Description != "" {
+				out[i].Description = override.Description
+			}
+			merged = true
+			break
+		}
+		if !merged {
+			out = append(out, override)
+		}
 	}
-	return strings.Join(names, ", ")
+	return out
 }
 
 // boolPtr returns a pointer to the given bool value.

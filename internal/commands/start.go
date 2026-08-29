@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"strings"
 
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
@@ -35,7 +36,7 @@ ID is resolved before the first bean is written.`,
 
 		// Validate the status
 		if !cfg.IsValidStatus("in-progress") {
-			return cmdError(startJSON, output.ErrValidation, "invalid status: in-progress (must be %s)", cfg.StatusList())
+			return cmdError(startJSON, output.ErrValidation, "invalid status: in-progress (must be %s)", strings.Join(cfg.StatusNames(), ", "))
 		}
 
 		// Build the update input

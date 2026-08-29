@@ -2,6 +2,7 @@ package commands
 
 import (
 	"context"
+	"strings"
 
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
@@ -40,7 +41,7 @@ the first bean is written, so an unknown ID leaves the whole batch alone.`,
 
 		// Validate the status
 		if !cfg.IsValidStatus("scrapped") {
-			return cmdError(scrapJSON, output.ErrValidation, "invalid status: scrapped (must be %s)", cfg.StatusList())
+			return cmdError(scrapJSON, output.ErrValidation, "invalid status: scrapped (must be %s)", strings.Join(cfg.StatusNames(), ", "))
 		}
 
 		// Build the update input

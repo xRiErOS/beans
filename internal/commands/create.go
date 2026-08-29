@@ -45,13 +45,13 @@ var createCmd = &cobra.Command{
 
 		// Validate inputs
 		if createStatus != "" && !cfg.IsValidStatus(createStatus) {
-			return cmdError(createJSON, output.ErrInvalidStatus, "invalid status: %s (must be %s)", createStatus, cfg.StatusList())
+			return cmdError(createJSON, output.ErrInvalidStatus, "invalid status: %s (must be %s)", createStatus, strings.Join(cfg.StatusNames(), ", "))
 		}
 		if createType != "" && !cfg.IsValidType(createType) {
-			return cmdError(createJSON, output.ErrValidation, "invalid type: %s (must be %s)", createType, cfg.TypeList())
+			return cmdError(createJSON, output.ErrValidation, "invalid type: %s (must be %s)", createType, strings.Join(cfg.TypeNames(), ", "))
 		}
 		if createPriority != "" && !cfg.IsValidPriority(createPriority) {
-			return cmdError(createJSON, output.ErrValidation, "invalid priority: %s (must be %s)", createPriority, cfg.PriorityList())
+			return cmdError(createJSON, output.ErrValidation, "invalid priority: %s (must be %s)", createPriority, strings.Join(cfg.PriorityNames(), ", "))
 		}
 		if err := validateExtraKeys(createSet, createUnset); err != nil {
 			return cmdError(createJSON, output.ErrValidation, "%s", err)

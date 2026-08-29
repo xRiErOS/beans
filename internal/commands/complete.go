@@ -3,6 +3,7 @@ package commands
 import (
 	"context"
 	"os"
+	"strings"
 
 	"github.com/hmans/beans/internal/gitutil"
 	"github.com/hmans/beans/internal/output"
@@ -41,7 +42,7 @@ written, so an unknown ID or a policy violation leaves the whole batch alone.`,
 
 		// Validate the status
 		if !cfg.IsValidStatus("completed") {
-			return cmdError(completeJSON, output.ErrValidation, "invalid status: completed (must be %s)", cfg.StatusList())
+			return cmdError(completeJSON, output.ErrValidation, "invalid status: completed (must be %s)", strings.Join(cfg.StatusNames(), ", "))
 		}
 
 		if err := validateExtraKeys(completeSet, nil); err != nil {
