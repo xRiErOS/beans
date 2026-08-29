@@ -21,3 +21,11 @@ install: build
 # Run the Go test suite, e.g. `just test ./internal/bean/...`
 test ARGS='./...':
     go test {{ARGS}}
+
+# Run the frontend unit tests, e.g. `just test-web --project server`
+test-web ARGS='':
+    cd frontend && npm test -- {{ARGS}}
+
+# Type- and a11y-check the frontend (svelte-check)
+check-web:
+    cd frontend && npm run check

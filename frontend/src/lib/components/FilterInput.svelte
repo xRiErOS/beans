@@ -1,8 +1,11 @@
 <script lang="ts">
+  import { browser } from '$app/environment';
   import { ui } from '$lib/uiState.svelte';
 
   let inputEl = $state<HTMLInputElement | null>(null);
-  const isMac = navigator.platform.startsWith('Mac');
+  // Guarded: without a browser there is no platform to detect, and reading
+  // navigator at render time breaks SSR and prerendering.
+  const isMac = browser && navigator.platform.startsWith('Mac');
   const shortcutHint = isMac ? '⌘/' : 'Ctrl+/';
 
   export function focus() {
