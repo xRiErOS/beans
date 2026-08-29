@@ -12,6 +12,10 @@ import (
 
 // CreateBean creates a new bean from the given input.
 func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInput, opts ...beancore.UpdateOption) (*bean.Bean, error) {
+	if err := r.validateCreateInput(input); err != nil {
+		return nil, err
+	}
+
 	b := &bean.Bean{
 		Slug:     bean.Slugify(input.Title),
 		Title:    input.Title,
@@ -110,6 +114,10 @@ func (r *CoreResolver) UpdateBean(ctx context.Context, id string, input model.Up
 		return nil, err
 	}
 
+	if err := r.validateUpdateInput(input); err != nil {
+		return nil, err
+	}
+
 	// Validate body and bodyMod are mutually exclusive
 	if input.Body != nil && input.BodyMod != nil {
 		return nil, fmt.Errorf("cannot specify both body and bodyMod")
@@ -159,6 +167,15 @@ func (r *CoreResolver) UpdateBean(ctx context.Context, id string, input model.Up
 		}
 
 		b.Body = workingBody
+	}
+	// The size limit applies to the body that is about to be written, not to
+	// the input: bodyMod appends to what is already stored, so only the grown
+	// result shows the true size. A bean whose body this update does not touch
+	// stays editable even if it was written before the limit existed.
+	if input.Body != nil || input.BodyMod != nil {
+		if err := ValidateBody(b.Body); err != nil {
+			return nil, err
+		}
 	}
 	// Handle tags
 	if input.Tags != nil {
