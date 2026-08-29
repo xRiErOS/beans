@@ -661,6 +661,22 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		serverMapping.Content = append(serverMapping.Content, portKey, intNode(c.Server.Port))
 	}
 
+	// Build the display mapping. Like Statuses/Types/Priorities, this must be
+	// round-tripped: Save() is called by `beans rename` on an already-loaded
+	// Config, and before this a configured theme/max_width was silently
+	// dropped on the next write.
+	displayMapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	if c.Display.Theme != "" {
+		key := strNode("theme")
+		key.HeadComment = "Catppuccin flavour: latte, frappe, macchiato or mocha (default: mocha)"
+		displayMapping.Content = append(displayMapping.Content, key, strNode(c.Display.Theme))
+	}
+	if c.Display.MaxWidth != 0 {
+		key := strNode("max_width")
+		key.HeadComment = "Caps the rendered width (default: 110); -1 disables the cap"
+		displayMapping.Content = append(displayMapping.Content, key, intNode(c.Display.MaxWidth))
+	}
+
 	// Build the statuses/types/priorities override sequences. These round-trip
 	// exactly what was configured (not the merged result) so that Save() -
 	// called by `beans rename`, for instance - never silently drops a user's
@@ -729,6 +745,10 @@ func (c *Config) toYAMLNode() *yaml.Node {
 
 	if len(serverMapping.Content) > 0 {
 		topMapping.Content = append(topMapping.Content, strNode("server"), serverMapping)
+	}
+
+	if len(displayMapping.Content) > 0 {
+		topMapping.Content = append(topMapping.Content, strNode("display"), displayMapping)
 	}
 
 	if len(statusesSeq.Content) > 0 {

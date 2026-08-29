@@ -2096,3 +2096,55 @@ func TestGettersToleratePlainDefaultsOnANilConfig(t *testing.T) {
 		t.Errorf("TypeNames() on a nil *Config has %d entries, want the %d defaults", len(names), len(DefaultTypes))
 	}
 }
+
+// Fix round 1, Commit 3: the same data-loss bug as Statuses/Types/Priorities,
+// one struct over. toYAMLNode() did not know about DisplayConfig either, so
+// Save() (e.g. via `beans rename`) silently dropped a configured theme/
+// max_width from .beans.yml.
+
+func TestSaveRoundTripsDisplaySettings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Display = DisplayConfig{Theme: "latte", MaxWidth: 140}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetTheme(); got != "latte" {
+		t.Errorf("reloaded GetTheme() = %q, want the saved \"latte\"", got)
+	}
+	if got := reloaded.GetMaxWidth(); got != 140 {
+		t.Errorf("reloaded GetMaxWidth() = %d, want the saved 140", got)
+	}
+}
+
+func TestSaveRoundTripsMaxWidthMinusOne(t *testing.T) {
+	// -1 is a meaningful, non-zero override (disables the cap) and must not
+	// be confused with "unset" the way omitempty would treat a plain 0.
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Display = DisplayConfig{MaxWidth: -1}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetMaxWidth(); got != -1 {
+		t.Errorf("reloaded GetMaxWidth() = %d, want the saved -1", got)
+	}
+}
