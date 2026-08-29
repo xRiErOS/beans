@@ -26,21 +26,49 @@ var legacyColorAliases = map[string]string{
 }
 
 // Chrome colours: the roles the UI itself needs, as opposed to the semantic
-// colours a bean carries. Kept as variables rather than constants so the
-// TUI's existing call sites (internal/tui) keep compiling while following
-// the theme through SetTheme.
+// colours a bean carries. Declared without initializers - and kept as vars,
+// not consts - so the TUI's existing call sites (internal/tui) keep
+// compiling while following the theme through SetTheme. Their values come
+// from chromeColorTones via applyChromeColors, the single place each
+// colour's tone is named; init and SetTheme both call it rather than each
+// repeating the ten assignments.
 var (
-	ColorPrimary   = ResolveColor("mauve")
-	ColorSecondary = ResolveColor("overlay1")
-	ColorSuccess   = ResolveColor("green")
-	ColorWarning   = ResolveColor("peach")
-	ColorDanger    = ResolveColor("red")
-	ColorMuted     = ResolveColor("overlay1")
-	ColorSubtle    = ResolveColor("surface2")
-	ColorBlue      = ResolveColor("blue")
-	ColorCyan      = ResolveColor("teal")
-	ColorID        = ResolveColor("subtext0")
+	ColorPrimary   lipgloss.Color
+	ColorSecondary lipgloss.Color
+	ColorSuccess   lipgloss.Color
+	ColorWarning   lipgloss.Color
+	ColorDanger    lipgloss.Color
+	ColorMuted     lipgloss.Color
+	ColorSubtle    lipgloss.Color
+	ColorBlue      lipgloss.Color
+	ColorCyan      lipgloss.Color
+	ColorID        lipgloss.Color
 )
+
+// chromeColorTones is the single declaration of which tone backs each
+// chrome colour above; applyChromeColors iterates it.
+var chromeColorTones = []struct {
+	target *lipgloss.Color
+	tone   string
+}{
+	{&ColorPrimary, "mauve"},
+	{&ColorSecondary, "overlay1"},
+	{&ColorSuccess, "green"},
+	{&ColorWarning, "peach"},
+	{&ColorDanger, "red"},
+	{&ColorMuted, "overlay1"},
+	{&ColorSubtle, "surface2"},
+	{&ColorBlue, "blue"},
+	{&ColorCyan, "teal"},
+	{&ColorID, "subtext0"},
+}
+
+// applyChromeColors resolves every chrome colour against the active theme.
+func applyChromeColors() {
+	for _, c := range chromeColorTones {
+		*c.target = ResolveColor(c.tone)
+	}
+}
 
 // SetTheme switches the active palette and refreshes everything derived from
 // it. An unknown name leaves the current theme in place, so a typo in
@@ -51,16 +79,7 @@ func SetTheme(name string) {
 		return
 	}
 	activeTheme = t
-	ColorPrimary = ResolveColor("mauve")
-	ColorSecondary = ResolveColor("overlay1")
-	ColorSuccess = ResolveColor("green")
-	ColorWarning = ResolveColor("peach")
-	ColorDanger = ResolveColor("red")
-	ColorMuted = ResolveColor("overlay1")
-	ColorSubtle = ResolveColor("surface2")
-	ColorBlue = ResolveColor("blue")
-	ColorCyan = ResolveColor("teal")
-	ColorID = ResolveColor("subtext0")
+	applyChromeColors()
 	rebuildStyles()
 }
 
@@ -122,7 +141,10 @@ var (
 	Header               lipgloss.Style
 )
 
-func init() { rebuildStyles() }
+func init() {
+	applyChromeColors()
+	rebuildStyles()
+}
 
 // rebuildStyles re-derives every style below from the colours currently in
 // force. Called once at init and again by SetTheme, since these used to be
