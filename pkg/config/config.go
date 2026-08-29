@@ -34,21 +34,21 @@ const (
 // override individual entries; see (*Config).StatusList.
 // Order determines sort priority: in-progress first (active work), then todo, draft, and done states last.
 var DefaultStatuses = []StatusConfig{
-	{Name: "in-progress", Color: "yellow", Description: "Currently being worked on"},
+	{Name: "in-progress", Color: "peach", Description: "Currently being worked on"},
 	{Name: "todo", Color: "green", Description: "Ready to be worked on"},
-	{Name: "draft", Color: "blue", Description: "Needs refinement before it can be worked on"},
-	{Name: "completed", Color: "gray", Archive: true, Description: "Finished successfully"},
-	{Name: "scrapped", Color: "gray", Archive: true, Description: "Will not be done"},
+	{Name: "draft", Color: "overlay2", Description: "Needs refinement before it can be worked on"},
+	{Name: "completed", Color: "overlay1", Archive: true, Description: "Finished successfully"},
+	{Name: "scrapped", Color: "surface2", Archive: true, Description: "Will not be done"},
 }
 
 // DefaultTypes defines the built-in type table. Config.Types can override
 // individual entries; see (*Config).TypeList.
 var DefaultTypes = []TypeConfig{
-	{Name: "milestone", Color: "cyan", Description: "A target release or checkpoint; group work that should ship together"},
-	{Name: "epic", Color: "purple", Description: "A thematic container for related work; should have child beans, not be worked on directly"},
-	{Name: "bug", Color: "red", Description: "Something that is broken and needs fixing"},
-	{Name: "feature", Color: "green", Description: "A user-facing capability or enhancement"},
-	{Name: "task", Color: "blue", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
+	{Name: "milestone", Color: "mauve", Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
+	{Name: "epic", Color: "blue", Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
+	{Name: "feature", Color: "sapphire", Description: "A user-facing capability or enhancement"},
+	{Name: "bug", Color: "maroon", Description: "Something that is broken and needs fixing"},
+	{Name: "task", Color: "", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
 }
 
 // DefaultPriorities defines the built-in priority table. Config.Priorities
@@ -57,9 +57,9 @@ var DefaultTypes = []TypeConfig{
 var DefaultPriorities = []PriorityConfig{
 	{Name: "critical", Color: "red", Description: "Urgent, blocking work. When possible, address immediately"},
 	{Name: "high", Color: "yellow", Description: "Important, should be done before normal work"},
-	{Name: "normal", Color: "white", Description: "Standard priority"},
-	{Name: "low", Color: "gray", Description: "Less important, can be delayed"},
-	{Name: "deferred", Color: "gray", Description: "Explicitly pushed back, avoid doing unless necessary"},
+	{Name: "normal", Color: "", Description: "Standard priority"},
+	{Name: "low", Color: "overlay0", Description: "Less important, can be delayed"},
+	{Name: "deferred", Color: "overlay0", Description: "Explicitly pushed back, avoid doing unless necessary"},
 }
 
 // StatusConfig defines a single status with its display color.
@@ -72,8 +72,12 @@ type StatusConfig struct {
 
 // TypeConfig defines a single bean type with its display color.
 type TypeConfig struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color"`
+	Name  string `yaml:"name"`
+	Color string `yaml:"color"`
+	// Emphasis renders this type bold across type word, id and title. It is
+	// what carries the hierarchy where hue alone cannot: Catppuccin tones are
+	// uniformly pastel, so a container would otherwise lose against a leaf.
+	Emphasis    bool   `yaml:"emphasis,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -97,11 +101,15 @@ type StatusOverride struct {
 }
 
 // TypeOverride is one entry of Config.Types: a type the config wants to
-// override (matched by Name) or add.
+// override (matched by Name) or add. Emphasis is a pointer for the same
+// reason StatusOverride.Archive is: an omitted key must stay structurally
+// distinct from an explicit "emphasis: false", or a colour-only recolour of
+// e.g. "milestone" would silently clear its emphasis.
 type TypeOverride struct {
 	Name        string `yaml:"name"`
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
+	Emphasis    *bool  `yaml:"emphasis,omitempty"`
 }
 
 // PriorityOverride is one entry of Config.Priorities: a priority the config
@@ -704,6 +712,9 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(t.Color))
 		}
+		if t.Emphasis != nil {
+			m.Content = append(m.Content, strNode("emphasis"), scalar(fmt.Sprintf("%t", *t.Emphasis), "!!bool"))
+		}
 		if t.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
 		}
@@ -959,6 +970,12 @@ func (c *Config) TypeList() []TypeConfig {
 			}
 			if o.Description != "" {
 				t.Description = o.Description
+			}
+			// Emphasis is a pointer: only an explicit emphasis: key (true or
+			// false) touches it, so a colour-only override cannot flip a
+			// type like "milestone" back to non-emphasised by accident.
+			if o.Emphasis != nil {
+				t.Emphasis = *o.Emphasis
 			}
 		},
 	)

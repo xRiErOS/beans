@@ -444,7 +444,7 @@ func TestIsValidType(t *testing.T) {
 func TestTypeList(t *testing.T) {
 	cfg := Default()
 	got := cfg.TypeList()
-	want := []string{"milestone", "epic", "bug", "feature", "task"}
+	want := []string{"milestone", "epic", "feature", "bug", "task"}
 
 	if len(got) != len(want) {
 		t.Fatalf("TypeList() has %d entries, want %d", len(got), len(want))
@@ -467,8 +467,8 @@ func TestGetType(t *testing.T) {
 		if typ.Name != "bug" {
 			t.Errorf("Name = %q, want \"bug\"", typ.Name)
 		}
-		if typ.Color != "red" {
-			t.Errorf("Color = %q, want \"red\"", typ.Color)
+		if typ.Color != "maroon" {
+			t.Errorf("Color = %q, want \"maroon\"", typ.Color)
 		}
 	})
 
@@ -1944,8 +1944,8 @@ func TestConfigOverridesASingleColour(t *testing.T) {
 		t.Fatalf("GetType(\"bug\").Color = %v, want the override", got)
 	}
 	// Everything not named keeps its default.
-	if other := c.GetType("epic"); other == nil || other.Color != "purple" {
-		t.Errorf("GetType(\"epic\").Color = %v, want the default \"purple\"", other)
+	if other := c.GetType("epic"); other == nil || other.Color != "blue" {
+		t.Errorf("GetType(\"epic\").Color = %v, want the default \"blue\"", other)
 	}
 	if len(c.TypeList()) != len(DefaultTypes) {
 		t.Errorf("an override changed the list length to %d", len(c.TypeList()))
@@ -2146,5 +2146,100 @@ func TestSaveRoundTripsMaxWidthMinusOne(t *testing.T) {
 
 	if got := reloaded.GetMaxWidth(); got != -1 {
 		t.Errorf("reloaded GetMaxWidth() = %d, want the saved -1", got)
+	}
+}
+
+// Task 3: the built-in tables now name Catppuccin tones instead of hand-rolled
+// colour words, so the mapping from status/type/priority to hue lives entirely
+// in this config and is resolved elsewhere (internal/ui) against the active
+// theme.
+
+func TestTypeDefaultsCarryCatppuccinTones(t *testing.T) {
+	want := map[string]string{
+		"milestone": "mauve", "epic": "blue", "feature": "sapphire",
+		"bug": "maroon", "task": "",
+	}
+	for _, tc := range DefaultTypes {
+		if w, ok := want[tc.Name]; ok && tc.Color != w {
+			t.Errorf("type %q colour = %q, want %q", tc.Name, tc.Color, w)
+		}
+	}
+}
+
+func TestOnlyContainersAreEmphasised(t *testing.T) {
+	want := map[string]bool{
+		"milestone": true, "epic": true,
+		"feature": false, "bug": false, "task": false,
+	}
+	for _, tc := range DefaultTypes {
+		if w, ok := want[tc.Name]; ok && tc.Emphasis != w {
+			t.Errorf("type %q emphasis = %v, want %v", tc.Name, tc.Emphasis, w)
+		}
+	}
+}
+
+func TestStatusDefaultsFormAMaturityRamp(t *testing.T) {
+	want := map[string]string{
+		"draft": "overlay2", "todo": "green", "in-progress": "peach",
+		"completed": "overlay1", "scrapped": "surface2",
+	}
+	for _, sc := range DefaultStatuses {
+		if w, ok := want[sc.Name]; ok && sc.Color != w {
+			t.Errorf("status %q colour = %q, want %q", sc.Name, sc.Color, w)
+		}
+	}
+}
+
+// Task 2b shipped, and had to fix, exactly this bug for StatusOverride.Archive:
+// an unconditional assignment in the apply closure means a colour-only
+// override silently clears a field the user never mentioned. TypeOverride.Emphasis
+// needs the same pointer-guarded treatment.
+
+func TestRecolouringATypePreservesItsEmphasisFlag(t *testing.T) {
+	c := Default()
+	c.Types = []TypeOverride{{Name: "milestone", Color: "#cba6f7"}}
+
+	got := c.GetType("milestone")
+	if got == nil {
+		t.Fatal(`GetType("milestone") = nil, want the merged entry`)
+	}
+	if got.Color != "#cba6f7" {
+		t.Errorf(`GetType("milestone").Color = %q, want the override`, got.Color)
+	}
+	if !got.Emphasis {
+		t.Error(`GetType("milestone").Emphasis = false, want true: a colour-only override must not touch Emphasis`)
+	}
+}
+
+func TestAnExplicitEmphasisOverrideIsHonoured(t *testing.T) {
+	c := Default()
+	c.Types = []TypeOverride{{Name: "milestone", Emphasis: boolPtr(false)}}
+
+	if c.GetType("milestone").Emphasis {
+		t.Error(`GetType("milestone").Emphasis = true, want false: an explicit emphasis: false must be honoured`)
+	}
+}
+
+func TestSaveRoundTripsTypeEmphasisOverride(t *testing.T) {
+	// Save() is called by more than `init` (e.g. `beans rename`). Without
+	// serializing Emphasis, a Save() on an already-loaded config would
+	// silently erase whatever the user configured.
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "feature", Emphasis: boolPtr(true)}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetType("feature"); got == nil || !got.Emphasis {
+		t.Errorf("reloaded GetType(\"feature\").Emphasis = %v, want the saved override", got)
 	}
 }
