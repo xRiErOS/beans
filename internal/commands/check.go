@@ -199,13 +199,7 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 
 			for _, b := range core.All() {
 				if fields := cfg.RequiredFieldsFor(b.Status); len(fields) > 0 {
-					var missing []string
-					for _, f := range fields {
-						v, ok := b.Extra[f]
-						if !ok || v == nil || strings.TrimSpace(fmt.Sprint(v)) == "" {
-							missing = append(missing, f)
-						}
-					}
+					missing := beancore.MissingRequiredFields(b, fields)
 					if len(missing) > 0 {
 						policyWarnings = append(policyWarnings, fmt.Sprintf("%s: status %q missing required field(s): %s", b.ID, b.Status, strings.Join(missing, ", ")))
 					}

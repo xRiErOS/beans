@@ -3,10 +3,11 @@ package beangraph
 import (
 	"context"
 	"fmt"
+	"sort"
 
 	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/hmans/beans/pkg/beancore"
+	"github.com/hmans/beans/pkg/beangraph/model"
 )
 
 // CreateBean creates a new bean from the given input.
@@ -183,11 +184,15 @@ func (r *CoreResolver) UpdateBean(ctx context.Context, id string, input model.Up
 			}
 		}
 
-		// Convert back to slice
+		// Convert back to slice. Map iteration order is random, so sort:
+		// without this every tag write can reshuffle the tags: list in the
+		// file, which produces diff noise and makes any assertion on the
+		// written order flaky.
 		newTags := make([]string, 0, len(tagSet))
 		for tag := range tagSet {
 			newTags = append(newTags, tag)
 		}
+		sort.Strings(newTags)
 		b.Tags = newTags
 	}
 
