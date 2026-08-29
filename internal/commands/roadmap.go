@@ -28,6 +28,8 @@ var (
 	roadmapNoStatus    []string
 	roadmapNoLinks     bool
 	roadmapLinkPrefix  string
+	roadmapDepth       int
+	roadmapTags        bool
 )
 
 // roadmapData holds the structured roadmap for JSON output.
@@ -85,7 +87,14 @@ var roadmapCmd = &cobra.Command{
 With no argument, renders the entire roadmap. With an ID argument (a milestone,
 epic, or feature), scopes the output to that item's subtree only.
 
-The --status and --no-status flags cannot be combined with an ID argument.`,
+The --status and --no-status flags cannot be combined with an ID argument.
+
+--depth limits how many levels below the roadmap root are rendered, following
+the tree -L n convention: the root itself never counts. Without an ID argument the root is
+the roadmap as a whole, so --depth 1 lists milestones only. With an ID
+argument the root is that item, so --depth 1 lists its direct children.
+
+--tags renders each item's tags on a line of their own beneath its title.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		// Query all beans via GraphQL resolver
@@ -95,9 +104,14 @@ The --status and --no-status flags cannot be combined with an ID argument.`,
 			return fmt.Errorf("querying beans: %w", err)
 		}
 
+		if err := validateRoadmapDepth(roadmapDepth, cmd.Flags().Changed("depth")); err != nil {
+			return err
+		}
+
 		// Build the roadmap
 		var data *roadmapData
-		if len(args) == 1 {
+		scoped := len(args) == 1
+		if scoped {
 			if len(roadmapStatus) > 0 || len(roadmapNoStatus) > 0 {
 				return fmt.Errorf("--status/--no-status cannot be combined with a roadmap root ID")
 			}
@@ -112,6 +126,7 @@ The --status and --no-status flags cannot be combined with an ID argument.`,
 		} else {
 			data = buildRoadmap(allBeans, roadmapIncludeDone, roadmapStatus, roadmapNoStatus)
 		}
+		pruneRoadmapDepth(data, roadmapDepth, scoped)
 
 		// JSON output
 		if roadmapJSON {
@@ -139,7 +154,7 @@ The --status and --no-status flags cannot be combined with an ID argument.`,
 			}
 		}
 
-		fmt.Print(roadmapOutput(data, isTTY, cols, links, linkPrefix))
+		fmt.Print(roadmapOutput(data, isTTY, cols, links, linkPrefix, roadmapTags))
 		return nil
 	},
 }
@@ -151,11 +166,11 @@ The --status and --no-status flags cannot be combined with an ID argument.`,
 // clamped via roadmapClampWidth regardless of what the caller passed in; a
 // caller that could not determine a terminal width passes 0, which lands on
 // the 80-column floor (D08).
-func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPrefix string) string {
+func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPrefix string, showTags bool) string {
 	if isTTY {
-		return renderRoadmapPretty(data, roadmapClampWidth(cols))
+		return renderRoadmapPretty(data, roadmapClampWidth(cols), showTags)
 	}
-	return renderRoadmapMarkdown(data, links, linkPrefix)
+	return renderRoadmapMarkdown(data, links, linkPrefix, showTags)
 }
 
 // buildRoadmap constructs the roadmap data structure from beans.
@@ -599,14 +614,17 @@ func sortFeatureGroups(groups []featureGroup, statusNames, priorityNames []strin
 }
 
 // renderRoadmapMarkdown renders the roadmap as Markdown using the template.
-func renderRoadmapMarkdown(data *roadmapData, links bool, linkPrefix string) string {
-	// Create template with closures that capture link settings
+func renderRoadmapMarkdown(data *roadmapData, links bool, linkPrefix string, showTags bool) string {
+	// Create template with closures that capture link and tag settings
 	tmpl := template.Must(
 		template.New("roadmap").Funcs(template.FuncMap{
 			"firstParagraph": firstParagraph,
 			"typeBadge":      typeBadge,
 			"beanRef": func(b *bean.Bean) string {
 				return renderBeanRef(b, links, linkPrefix)
+			},
+			"tagLine": func(b *bean.Bean, indent string) string {
+				return renderTagLine(b, indent, showTags)
 			},
 		}).Parse(roadmapTemplateContent),
 	)
@@ -651,6 +669,22 @@ func typeBadge(b *bean.Bean) string {
 		color = "gray"
 	}
 	return fmt.Sprintf("![%s](https://img.shields.io/badge/%s-%s?style=flat-square)", b.Type, b.Type, color)
+}
+
+// renderTagLine renders a bean's tags as their own Markdown line, mirroring
+// the TTY tag row: each tag as inline code, prefixed with "#". The returned
+// string starts with a newline so a template can append it directly to the
+// bean's line; indent keeps a leaf's tags inside its list item. Returns ""
+// when tags are off or the bean has none.
+func renderTagLine(b *bean.Bean, indent string, showTags bool) string {
+	if !showTags || len(b.Tags) == 0 {
+		return ""
+	}
+	tags := make([]string, len(b.Tags))
+	for i, t := range b.Tags {
+		tags[i] = "`#" + t + "`"
+	}
+	return "\n" + indent + strings.Join(tags, " ")
 }
 
 // defaultLinkPrefix returns the relative path from cwd to the .beans directory.
@@ -703,5 +737,7 @@ func RegisterRoadmapCmd(root *cobra.Command) {
 	roadmapCmd.Flags().StringArrayVar(&roadmapNoStatus, "no-status", nil, "Exclude milestones by status (can be repeated)")
 	roadmapCmd.Flags().BoolVar(&roadmapNoLinks, "no-links", false, "Don't render bean IDs as markdown links")
 	roadmapCmd.Flags().StringVar(&roadmapLinkPrefix, "link-prefix", "", "URL prefix for links")
+	roadmapCmd.Flags().IntVar(&roadmapDepth, "depth", 0, "Limit output to n levels below the roadmap root (default: no limit)")
+	roadmapCmd.Flags().BoolVar(&roadmapTags, "tags", false, "Render each item's tags")
 	root.AddCommand(roadmapCmd)
 }

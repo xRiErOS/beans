@@ -41,9 +41,12 @@ func setupRoadmapCmdTest(t *testing.T) *beancore.Core {
 func resetRoadmapFlags(t *testing.T) {
 	t.Helper()
 	oldStatus, oldNoStatus, oldJSON := roadmapStatus, roadmapNoStatus, roadmapJSON
+	oldDepth, oldTags := roadmapDepth, roadmapTags
 	roadmapStatus, roadmapNoStatus, roadmapJSON = nil, nil, false
+	roadmapDepth, roadmapTags = 0, false
 	t.Cleanup(func() {
 		roadmapStatus, roadmapNoStatus, roadmapJSON = oldStatus, oldNoStatus, oldJSON
+		roadmapDepth, roadmapTags = oldDepth, oldTags
 		roadmapCmd.SetOut(nil)
 	})
 }
