@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { pointerClick } from '$lib/actions/pointerClick';
   import type { Bean } from '$lib/beans.svelte';
   import { beansStore } from '$lib/beans.svelte';
   import { backlogDrag } from '$lib/backlogDrag.svelte';
@@ -41,7 +42,7 @@
   }
 </script>
 
-<div class="bean-item my-1" data-bean-id={bean.id}>
+<div class="bean-item my-1" role="listitem" data-bean-id={bean.id}>
   <!-- Drop indicator before this card -->
   <div
     class={[
@@ -50,8 +51,7 @@
     ]}
   ></div>
 
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <!-- Drag wrapper; the card inside it is the focusable control. -->
   <div
     class={[
       'rounded transition-all',
@@ -62,7 +62,8 @@
     ondragstart={(e) => backlogDrag.startDrag(e, bean)}
     ondragend={() => backlogDrag.endDrag()}
     ondragover={(e) => backlogDrag.hoverCard(e, parentId, index, bean.id, sectionStatus)}
-    onclick={handleClick}
+    use:pointerClick={handleClick}
+    role="presentation"
   >
     <BeanCard
       {bean}

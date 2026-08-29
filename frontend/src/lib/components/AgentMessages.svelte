@@ -1,10 +1,9 @@
 <script lang="ts">
   import type { AgentMessage, SubagentActivity } from '$lib/agentChat.svelte';
-  import { beansStore } from '$lib/beans.svelte';
-  import { ui } from '$lib/uiState.svelte';
   import { renderMarkdown, linkifyBeanIds, escapeHtml } from '$lib/markdown';
   import { fade } from 'svelte/transition';
   import { decryptText } from '$lib/actions/decryptText';
+  import { beanLinks } from '$lib/actions/beanLinks';
 
   interface Props {
     messages: AgentMessage[];
@@ -104,14 +103,6 @@
     return renderedMessages.get(key) ?? null;
   }
 
-  function handleBeanLinkClick(e: MouseEvent) {
-    const target = (e.target as HTMLElement).closest<HTMLElement>('[data-bean-id]');
-    if (!target) return;
-    e.preventDefault();
-    const linkedBean = beansStore.get(target.dataset.beanId!);
-    if (linkedBean) ui.selectBean(linkedBean);
-  }
-
   // Force scroll to bottom when triggered externally (e.g. action buttons, composer send)
   $effect(() => {
     if (scrollToBottomTrigger > 0) {
@@ -128,12 +119,10 @@
 </script>
 
 <div class="relative min-h-0 flex-1">
-  <!-- svelte-ignore a11y_click_events_have_key_events -->
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div
     bind:this={messagesEl}
     class="h-full space-y-3 overflow-y-auto p-4"
-    onclick={handleBeanLinkClick}
+    use:beanLinks
     onscroll={handleMessagesScroll}
   >
     {#if setupRunning}

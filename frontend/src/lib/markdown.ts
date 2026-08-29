@@ -200,7 +200,9 @@ function shikiExtension(hl: HighlighterCore): MarkedExtension {
 
 /**
  * Marked extension that auto-links bean IDs (e.g. beans-s1m0) in inline text.
- * Renders as <a data-bean-id="beans-xxxx"> so click handlers can navigate.
+ * Renders as <a href="?bean=beans-xxxx" data-bean-id="beans-xxxx">: a real link,
+ * so it is focusable and openable in a new tab, which the beanLinks action
+ * upgrades to in-app navigation.
  */
 function beanLinkExtension(): MarkedExtension {
   return {
@@ -224,7 +226,7 @@ function beanLinkExtension(): MarkedExtension {
         },
         renderer(token) {
           const beanId = (token as Record<string, unknown>).beanId as string;
-          return `<a data-bean-id="${beanId}" class="bean-link">${beanId}</a>`;
+          return `<a href="?bean=${beanId}" data-bean-id="${beanId}" class="bean-link">${beanId}</a>`;
         }
       }
     ]
@@ -305,7 +307,10 @@ export function linkifyBeanIds(text: string): string | undefined {
   if (!pattern.test(text)) return undefined;
   pattern.lastIndex = 0;
   const escaped = escapeHtml(text);
-  return escaped.replace(pattern, (match) => `<a data-bean-id="${match}" class="bean-link">${match}</a>`);
+  return escaped.replace(
+    pattern,
+    (match) => `<a href="?bean=${match}" data-bean-id="${match}" class="bean-link">${match}</a>`
+  );
 }
 
 /**

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { pointerClick } from '$lib/actions/pointerClick';
   import { beansStore } from '$lib/beans.svelte';
   import { ui } from '$lib/uiState.svelte';
 
@@ -84,9 +85,8 @@
     {#snippet backlogBoard()}
         <div class="flex h-full flex-col bg-surface">
           {#if planningView === 'backlog'}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <!-- svelte-ignore a11y_no_static_element_interactions -->
-            <div class="min-h-0 flex-1 overflow-auto bg-surface-alt" onclick={handlePlanningClick}>
+            <!-- Clicking empty space clears the selection; Escape does the same. -->
+            <div class="min-h-0 flex-1 overflow-auto bg-surface-alt" use:pointerClick={handlePlanningClick}>
               {#snippet backlogSection(beans: typeof filteredTodoBeans, status: string, label: string)}
                 <div
                   class="p-3"
