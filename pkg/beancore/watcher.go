@@ -284,7 +284,7 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 			if _, exists := c.beans[id]; exists {
 				// Only delete if it was in our map and file is actually gone
 				if !c.fileExists(path) {
-					delete(c.beans, id)
+					c.removeBeanLocked(id)
 					delete(c.mainPaths, id)
 
 					// Update search index
@@ -317,7 +317,7 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 			}
 
 			_, existed := c.beans[newBean.ID]
-			c.beans[newBean.ID] = newBean
+			c.setBeanLocked(newBean.ID, newBean)
 			c.mainPaths[newBean.ID] = newBean.Path
 			delete(c.dirty, newBean.ID) // Disk is now up-to-date
 

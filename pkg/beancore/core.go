@@ -65,6 +65,13 @@ type Core struct {
 	dirty          map[string]bool       // IDs of beans modified in runtime but not yet persisted to disk
 	worktreeLinks  map[string]string     // bean ID -> worktree path (beans linked to a worktree)
 
+	// incoming is the reverse link index: target bean ID -> the links pointing
+	// at it. Derived state, rebuilt lazily from beans — every mutation of beans
+	// has to clear incomingValid, so go through setBeanLocked and
+	// removeBeanLocked, or call invalidateIncomingLocked for in-place edits.
+	incoming      map[string][]IncomingLink
+	incomingValid bool
+
 	// mainPaths maps a bean ID to its file path relative to root, for beans
 	// backed by a file in the main store. A worktree overlay replaces the entry
 	// in beans but never touches this map, so it still answers "which file in
@@ -122,6 +129,27 @@ func (c *Core) logWarn(format string, args ...any) {
 	if c.warnWriter != nil {
 		fmt.Fprintf(c.warnWriter, "warning: "+format+"\n", args...)
 	}
+}
+
+// setBeanLocked stores b under id and invalidates the derived indexes.
+// Must be called with c.mu held for writing.
+func (c *Core) setBeanLocked(id string, b *bean.Bean) {
+	c.beans[id] = b
+	c.incomingValid = false
+}
+
+// removeBeanLocked drops the bean under id and invalidates the derived indexes.
+// Must be called with c.mu held for writing.
+func (c *Core) removeBeanLocked(id string) {
+	delete(c.beans, id)
+	c.incomingValid = false
+}
+
+// invalidateIncomingLocked marks the reverse link index stale. Needed wherever
+// bean link fields are edited in place, without a store write.
+// Must be called with c.mu held for writing.
+func (c *Core) invalidateIncomingLocked() {
+	c.incomingValid = false
 }
 
 // Root returns the absolute path to the .beans directory.
@@ -252,6 +280,7 @@ func (c *Core) loadFromDisk() error {
 	c.beans = make(map[string]*bean.Bean)
 	c.dirty = make(map[string]bool)
 	c.mainPaths = make(map[string]string)
+	c.invalidateIncomingLocked()
 	err := filepath.WalkDir(c.root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -276,7 +305,7 @@ func (c *Core) loadFromDisk() error {
 			return fmt.Errorf("loading %s: %w", path, loadErr)
 		}
 
-		c.beans[b.ID] = b
+		c.setBeanLocked(b.ID, b)
 		c.mainPaths[b.ID] = b.Path
 		return nil
 	})
@@ -723,7 +752,7 @@ func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
 	}
 
 	// Add to in-memory map
-	c.beans[b.ID] = b
+	c.setBeanLocked(b.ID, b)
 
 	// Update search index if active (best-effort, don't fail create)
 	if c.searchIndex != nil {
@@ -829,7 +858,7 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 	}
 
 	// Update in-memory map
-	c.beans[b.ID] = b
+	c.setBeanLocked(b.ID, b)
 
 	// Update search index if active (best-effort, don't fail update)
 	if c.searchIndex != nil {
@@ -930,7 +959,7 @@ func (c *Core) Delete(id string) error {
 	}
 
 	// Remove from in-memory map
-	delete(c.beans, targetID)
+	c.removeBeanLocked(targetID)
 	delete(c.mainPaths, targetID)
 
 	// Update search index if active (best-effort, don't fail delete)
@@ -980,7 +1009,7 @@ func (c *Core) Archive(id string) error {
 
 	// Update bean's path in store and notify subscribers
 	targetBean.Path = newRelPath
-	c.beans[targetID] = targetBean
+	c.setBeanLocked(targetID, targetBean)
 	c.mainPaths[targetID] = newRelPath
 	c.mu.Unlock()
 
@@ -1021,7 +1050,7 @@ func (c *Core) Unarchive(id string) error {
 
 	// Update bean's path
 	targetBean.Path = newRelPath
-	c.beans[targetID] = targetBean
+	c.setBeanLocked(targetID, targetBean)
 	c.mainPaths[targetID] = newRelPath
 
 	return nil
@@ -1135,7 +1164,7 @@ func (c *Core) LoadAndUnarchive(id string) (*bean.Bean, error) {
 
 	// Update bean's path
 	b.Path = newRelPath
-	c.beans[targetID] = b
+	c.setBeanLocked(targetID, b)
 
 	return b, nil
 }

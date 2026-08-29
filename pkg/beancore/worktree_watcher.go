@@ -120,7 +120,7 @@ func (c *Core) loadWorktreeBeansInitial(wt *worktreeWatcher) {
 			}
 		}
 
-		c.beans[newBean.ID] = newBean
+		c.setBeanLocked(newBean.ID, newBean)
 		c.dirty[newBean.ID] = true
 		c.worktreeLinks[newBean.ID] = wt.worktreePath
 
@@ -269,7 +269,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 					continue
 				}
 				// Bean exists in main — revert to that version
-				c.beans[id] = mainBean
+				c.setBeanLocked(id, mainBean)
 				delete(c.dirty, id)
 				delete(c.worktreeLinks, id)
 
@@ -284,7 +284,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 				})
 			} else if _, existed := c.beans[id]; existed {
 				// Bean was worktree-only — remove from runtime
-				delete(c.beans, id)
+				c.removeBeanLocked(id)
 				delete(c.dirty, id)
 				delete(c.worktreeLinks, id)
 
@@ -324,7 +324,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 			if mainErr == nil && mainBean.ETag() == newBean.ETag() {
 				// Worktree version matches main — clear any stale link
 				if _, wasLinked := c.worktreeLinks[newBean.ID]; wasLinked {
-					c.beans[newBean.ID] = mainBean
+					c.setBeanLocked(newBean.ID, mainBean)
 					delete(c.dirty, newBean.ID)
 					delete(c.worktreeLinks, newBean.ID)
 					if c.searchIndex != nil {
@@ -341,7 +341,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 		}
 
 		_, existed := c.beans[newBean.ID]
-		c.beans[newBean.ID] = newBean
+		c.setBeanLocked(newBean.ID, newBean)
 		c.dirty[newBean.ID] = true // Mark as dirty — came from worktree, not persisted to main
 		c.worktreeLinks[newBean.ID] = wt.worktreePath
 
