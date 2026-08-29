@@ -482,8 +482,8 @@ func CalculateResponsiveColumns(totalWidth int, hasTags bool) ResponsiveColumns 
 	available := totalWidth - baseWidth
 
 	// Reserve generous space for title, then allocate remaining to tags
-	minTitleWidth := 50
-	spaceForTags := available - minTitleWidth
+	tuiMinTitleWidth := 50
+	spaceForTags := available - tuiMinTitleWidth
 
 	if spaceForTags >= ColWidthTags {
 		cols.ShowTags = true

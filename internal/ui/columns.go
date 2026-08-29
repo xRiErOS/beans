@@ -22,6 +22,9 @@ type Progress struct {
 // past this row or stops. Index 0 corresponds to the root and is never
 // consulted by Connector or Stem — roots draw nothing, so the stem starts one
 // level in.
+//
+// Invariant: a Row with Depth > 0 must carry AncestorsLast of length Depth —
+// Connector and Stem index AncestorsLast[1:] and panic on a shorter slice.
 type Row struct {
 	Bean          *bean.Bean
 	Depth         int
@@ -130,6 +133,12 @@ const progressBarWidth = 6
 // giving up tags costs the reader far less than giving up a long-form column.
 const tagsCrushWidth = 25
 
+// minRenderableTitle is the absolute floor the title column is clamped up to
+// after every other adjustment. It is the one place this layout can still
+// overflow its terminal width — an ID wide enough to eat the whole budget
+// forces the title back up past what was actually available.
+const minRenderableTitle = 12
+
 // Columns holds the resolved widths for one rendering.
 //
 // Short and long forms are decided here and nowhere else. Cell renderers ask
@@ -185,7 +194,7 @@ func NewColumns(rows []Row, width int, showTags bool, cfg *config.Config) Column
 	c.ID = idWidth
 	if hasProgress {
 		c.Counter = counter
-		c.ProgressWidth = progressBarWidth + 2 + counter
+		c.ProgressWidth = progressBarWidth + c.Gap + counter
 	}
 	if showTags {
 		if width >= 120 {
@@ -231,15 +240,24 @@ func NewColumns(rows []Row, width int, showTags bool, cfg *config.Config) Column
 
 	c.Title = budget()
 	if c.Title < tagsCrushWidth && c.Tags > 0 {
-		// Tags give way before the title is crushed: the title is content, the
-		// tags are metadata. This floor is deliberately below minTitleWidth —
-		// dropping tags is a much cheaper trade than denying a long-form
-		// upgrade, so it kicks in earlier.
+		// Tags outrank the long forms, not the other way round: the purchase
+		// loop above already ran with tags still occupying their share of the
+		// budget, so a narrow terminal denies status/type/prio their long
+		// form before it ever touches tags. This check only fires afterwards,
+		// when the title is still crushed even with every upgrade declined —
+		// which is why tagsCrushWidth sits below minTitleWidth: by the time
+		// tags are on the table, no upgrade ever was. Dropping tags is the
+		// last resort here, not the first.
 		c.Tags = 0
 		c.Title = budget()
 	}
-	if c.Title < 12 {
-		c.Title = 12
+	if c.Title < minRenderableTitle {
+		// Below this, the title column cannot show even a truncation
+		// ellipsis meaningfully. It is a last-resort floor, not a purchase
+		// criterion like minTitleWidth: it can still be violated upward by a
+		// pathologically wide ID, which is the one overflow this layout
+		// accepts rather than guards against.
+		c.Title = minRenderableTitle
 	}
 	return c
 }
