@@ -109,6 +109,57 @@ func TestShortType(t *testing.T) {
 	}
 }
 
+// Task 3: colour names now resolve against the active Catppuccin theme
+// instead of a hand-rolled hex palette.
+
+func TestResolveColorUsesTheActiveTheme(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+
+	SetTheme("mocha")
+	if got := string(ResolveColor("mauve")); got != "#cba6f7" {
+		t.Errorf(`mocha mauve = %q, want "#cba6f7"`, got)
+	}
+
+	SetTheme("latte")
+	if got := string(ResolveColor("mauve")); got != "#8839ef" {
+		t.Errorf(`latte mauve = %q, want "#8839ef"`, got)
+	}
+}
+
+func TestResolveColorPassesHexThrough(t *testing.T) {
+	if got := string(ResolveColor("#ff0000")); got != "#ff0000" {
+		t.Errorf(`ResolveColor("#ff0000") = %q, want passthrough`, got)
+	}
+}
+
+func TestSetThemeIgnoresUnknownNames(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+	SetTheme("nonesuch")
+	if got := ActiveTheme().Name; got != "mocha" {
+		t.Errorf(`ActiveTheme() = %q after an unknown name, want "mocha"`, got)
+	}
+}
+
+func TestUnknownToneFallsBackToSubtext0(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+	// An unknown tone must stay legible rather than vanish into the background.
+	if got := string(ResolveColor("chartreuse")); got != "#a6adc8" {
+		t.Errorf(`unknown tone = %q, want mocha subtext0 "#a6adc8"`, got)
+	}
+}
+
+func TestSetThemeRefreshesDerivedStyles(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+	before := ColorPrimary
+	SetTheme("latte")
+	if ColorPrimary == before {
+		t.Error("ColorPrimary did not follow the theme switch")
+	}
+}
+
 func TestShortStatus(t *testing.T) {
 	tests := []struct {
 		input    string

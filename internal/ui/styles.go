@@ -7,84 +7,132 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// Color palette
+// activeTheme is the palette every colour name resolves against. It is
+// process wide because rendering has no other channel to carry it, and it is
+// set once at startup from the config (see SetTheme).
+var activeTheme = DefaultTheme()
+
+// Chrome colours: the roles the UI itself needs, as opposed to the semantic
+// colours a bean carries. Kept as variables rather than constants so the
+// TUI's existing call sites (internal/tui) keep compiling while following
+// the theme through SetTheme.
 var (
-	ColorPrimary   = lipgloss.Color("#7C3AED") // Purple
-	ColorSecondary = lipgloss.Color("#6B7280") // Gray
-	ColorSuccess   = lipgloss.Color("#10B981") // Green
-	ColorWarning   = lipgloss.Color("#F59E0B") // Amber
-	ColorDanger    = lipgloss.Color("#EF4444") // Red
-	ColorMuted     = lipgloss.Color("#9CA3AF") // Light gray
-	ColorSubtle    = lipgloss.Color("#555555") // Dark gray (for tree lines)
-	ColorBlue      = lipgloss.Color("#3B82F6") // Blue
-	ColorCyan      = lipgloss.Color("14")      // Bright Cyan (ANSI)
+	ColorPrimary   = ResolveColor("mauve")
+	ColorSecondary = ResolveColor("overlay1")
+	ColorSuccess   = ResolveColor("green")
+	ColorWarning   = ResolveColor("peach")
+	ColorDanger    = ResolveColor("red")
+	ColorMuted     = ResolveColor("overlay1")
+	ColorSubtle    = ResolveColor("surface2")
+	ColorBlue      = ResolveColor("blue")
+	ColorCyan      = ResolveColor("teal")
+	ColorID        = ResolveColor("subtext0")
 )
 
-// NamedColors maps color names to lipgloss colors.
-var NamedColors = map[string]lipgloss.Color{
-	"green":  ColorSuccess,
-	"yellow": ColorWarning,
-	"red":    ColorDanger,
-	"gray":   ColorSecondary,
-	"grey":   ColorSecondary,
-	"blue":   ColorBlue,
-	"purple": ColorPrimary,
-	"cyan":   ColorCyan,
+// SetTheme switches the active palette and refreshes everything derived from
+// it. An unknown name leaves the current theme in place, so a typo in
+// .beans.yml degrades to the default instead of stripping all colour.
+func SetTheme(name string) {
+	t, ok := ThemeByName(name)
+	if !ok {
+		return
+	}
+	activeTheme = t
+	ColorPrimary = ResolveColor("mauve")
+	ColorSecondary = ResolveColor("overlay1")
+	ColorSuccess = ResolveColor("green")
+	ColorWarning = ResolveColor("peach")
+	ColorDanger = ResolveColor("red")
+	ColorMuted = ResolveColor("overlay1")
+	ColorSubtle = ResolveColor("surface2")
+	ColorBlue = ResolveColor("blue")
+	ColorCyan = ResolveColor("teal")
+	ColorID = ResolveColor("subtext0")
+	rebuildStyles()
 }
 
-// ResolveColor converts a color name or hex code to a lipgloss.Color.
+// ActiveTheme returns the palette currently in force.
+func ActiveTheme() Theme { return activeTheme }
+
+// ResolveColor converts a tone name or hex code to a lipgloss.Color. Hex
+// passes through untouched, which is what lets .beans.yml override a single
+// colour without replacing the whole theme.
 func ResolveColor(color string) lipgloss.Color {
 	if strings.HasPrefix(color, "#") {
 		return lipgloss.Color(color)
 	}
-	if c, ok := NamedColors[strings.ToLower(color)]; ok {
-		return c
+	if hex := activeTheme.Hex(strings.ToLower(color)); hex != "" {
+		return lipgloss.Color(hex)
 	}
-	return ColorMuted
+	return lipgloss.Color(activeTheme.Hex("subtext0"))
 }
 
-// IsValidColor returns true if the color is a valid named color or hex code.
+// IsValidColor reports whether a colour is a hex code or a tone of the
+// active theme.
 func IsValidColor(color string) bool {
 	if strings.HasPrefix(color, "#") {
 		// Valid hex: #RGB or #RRGGBB
 		return len(color) == 4 || len(color) == 7
 	}
-	_, ok := NamedColors[strings.ToLower(color)]
-	return ok
+	return activeTheme.Hex(strings.ToLower(color)) != ""
 }
 
 // Status badge styles (for inline use, like in show command)
 var (
-	StatusOpen = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#fff")).
-			Background(ColorSuccess).
-			Padding(0, 1).
-			Bold(true)
-
-	StatusDone = lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#fff")).
-			Background(ColorSecondary).
-			Padding(0, 1)
-
-	StatusInProgress = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#fff")).
-				Background(ColorWarning).
-				Padding(0, 1).
-				Bold(true)
+	StatusOpen           lipgloss.Style
+	StatusDone           lipgloss.Style
+	StatusInProgress     lipgloss.Style
+	StatusOpenText       lipgloss.Style
+	StatusDoneText       lipgloss.Style
+	StatusInProgressText lipgloss.Style
+	TagBadge             lipgloss.Style
+	Bold                 lipgloss.Style
+	Muted                lipgloss.Style
+	Primary              lipgloss.Style
+	Success              lipgloss.Style
+	Warning              lipgloss.Style
+	Danger               lipgloss.Style
+	Secondary            lipgloss.Style
+	ID                   lipgloss.Style
+	TreeLine             lipgloss.Style
+	Title                lipgloss.Style
+	Path                 lipgloss.Style
+	Header               lipgloss.Style
 )
 
-// Status text styles (for table use, no background/padding)
-var (
-	StatusOpenText       = lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true)
-	StatusDoneText       = lipgloss.NewStyle().Foreground(ColorSecondary)
+func init() { rebuildStyles() }
+
+// rebuildStyles re-derives every style below from the colours currently in
+// force. Called once at init and again by SetTheme, since these used to be
+// package-level var initializers computed once from a hardcoded palette and
+// would otherwise not follow a theme switch.
+func rebuildStyles() {
+	white := lipgloss.Color("#fff")
+
+	StatusOpen = lipgloss.NewStyle().Foreground(white).Background(ColorSuccess).Padding(0, 1).Bold(true)
+	StatusDone = lipgloss.NewStyle().Foreground(white).Background(ColorSecondary).Padding(0, 1)
+	StatusInProgress = lipgloss.NewStyle().Foreground(white).Background(ColorWarning).Padding(0, 1).Bold(true)
+
+	StatusOpenText = lipgloss.NewStyle().Foreground(ColorSuccess).Bold(true)
+	StatusDoneText = lipgloss.NewStyle().Foreground(ColorSecondary)
 	StatusInProgressText = lipgloss.NewStyle().Foreground(ColorWarning).Bold(true)
-)
 
-// Tag badge style - black text on gray background
-var TagBadge = lipgloss.NewStyle().
-	Foreground(lipgloss.Color("#000")).
-	Background(ColorMuted).
-	Padding(0, 1)
+	TagBadge = lipgloss.NewStyle().Foreground(lipgloss.Color("#000")).Background(ColorMuted).Padding(0, 1)
+
+	Bold = lipgloss.NewStyle().Bold(true)
+	Muted = lipgloss.NewStyle().Foreground(ColorMuted)
+	Primary = lipgloss.NewStyle().Foreground(ColorPrimary)
+	Success = lipgloss.NewStyle().Foreground(ColorSuccess)
+	Warning = lipgloss.NewStyle().Foreground(ColorWarning)
+	Danger = lipgloss.NewStyle().Foreground(ColorDanger)
+	Secondary = lipgloss.NewStyle().Foreground(ColorSecondary)
+
+	ID = lipgloss.NewStyle().Foreground(ColorID).Bold(true)
+	TreeLine = lipgloss.NewStyle().Foreground(ColorSubtle)
+	Title = lipgloss.NewStyle().Bold(true)
+	Path = lipgloss.NewStyle().Foreground(ColorMuted)
+	Header = lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).MarginBottom(1)
+}
 
 // RenderTag renders a single tag as a badge
 func RenderTag(tag string) string {
@@ -137,37 +185,6 @@ func RenderTagsCompact(tags []string, maxTags int) string {
 	}
 	return result
 }
-
-// Text styles
-var (
-	Bold      = lipgloss.NewStyle().Bold(true)
-	Muted     = lipgloss.NewStyle().Foreground(ColorMuted)
-	Primary   = lipgloss.NewStyle().Foreground(ColorPrimary)
-	Success   = lipgloss.NewStyle().Foreground(ColorSuccess)
-	Warning   = lipgloss.NewStyle().Foreground(ColorWarning)
-	Danger    = lipgloss.NewStyle().Foreground(ColorDanger)
-	Secondary = lipgloss.NewStyle().Foreground(ColorSecondary)
-)
-
-// ID style - distinctive for bean IDs
-var ID = lipgloss.NewStyle().
-	Foreground(ColorPrimary).
-	Bold(true)
-
-// TreeLine style - subtle for tree connectors
-var TreeLine = lipgloss.NewStyle().Foreground(ColorSubtle)
-
-// Title style
-var Title = lipgloss.NewStyle().Bold(true)
-
-// Path style - subdued
-var Path = lipgloss.NewStyle().Foreground(ColorMuted)
-
-// Header style for section headers
-var Header = lipgloss.NewStyle().
-	Foreground(ColorPrimary).
-	Bold(true).
-	MarginBottom(1)
 
 // RenderStatus returns a styled status badge based on the status string (legacy, uses hardcoded colors)
 func RenderStatus(status string) string {

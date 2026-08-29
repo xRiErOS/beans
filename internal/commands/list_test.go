@@ -138,10 +138,10 @@ func TestSortBeans(t *testing.T) {
 		}
 		sortBeans(beans, "", false, testCfg)
 
-		// Should be: non-archive first (sorted by type order from DefaultTypes: milestone, epic, bug, feature, task),
+		// Should be: non-archive first (sorted by type order from DefaultTypes: milestone, epic, feature, bug, task),
 		// then archive (sorted by type)
-		// DefaultTypes order: milestone, epic, bug, feature, task
-		expected := []string{"todo-bug", "todo-feature", "todo-task", "completed-bug", "completed-task"}
+		// DefaultTypes order: milestone, epic, feature, bug, task
+		expected := []string{"todo-feature", "todo-bug", "todo-task", "completed-bug", "completed-task"}
 		for i, want := range expected {
 			if beans[i].ID != want {
 				t.Errorf("default sort[%d]: got %q, want %q", i, beans[i].ID, want)
