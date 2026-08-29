@@ -107,3 +107,21 @@ func TestCheckStaysAReportNotATable(t *testing.T) {
 		t.Errorf("check must keep its tick lines:\n%s", out)
 	}
 }
+
+// TestCheckReportsNoConfigIssueForDefaultTables guards the regression this
+// fix round exists for: config.DefaultTypes deliberately leaves "task"
+// uncoloured (Color: "", task 3's ranked type scale), and an empty colour
+// means "no explicit colour, fall back to the muted default" -- the same
+// thing it means to ui.ResolveColor and to a StatusOverride's merge. Before
+// this fix, check.go's colour-validation loops ran ui.IsValidColor("") and
+// got false, so `beans check` reported "invalid color '' for type 'task'"
+// and exited 1 on every repository, including a freshly created empty one.
+func TestCheckReportsNoConfigIssueForDefaultTables(t *testing.T) {
+	out := stripANSITest(runCheckInTestStore(t))
+	if strings.Contains(out, "invalid color") {
+		t.Errorf("check reported an invalid colour for the default tables:\n%s", out)
+	}
+	if !strings.Contains(out, "All checks passed") {
+		t.Errorf("expected a clean check for a fresh store, got:\n%s", out)
+	}
+}
