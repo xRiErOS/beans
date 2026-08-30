@@ -228,7 +228,7 @@ func TestRoadmapOutputFormatAutoPreservesDetection(t *testing.T) {
 	cfg := config.Default()
 
 	if got, want := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false, ui.FormTree, cfg),
-		ui.Render(roadmapRows(data), ui.FormTree, "Roadmap", roadmapClampWidth(80), false, cfg); got != want {
+		ui.Render(roadmapRows(data), ui.FormTree, "Roadmap", 80, false, cfg); got != want {
 		t.Errorf("roadmapFormatAuto with isTTY=true diverged from ui.Render:\ngot:  %q\nwant: %q", got, want)
 	}
 	if got, want := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false, ui.FormTree, cfg),
