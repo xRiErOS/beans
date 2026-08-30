@@ -440,3 +440,47 @@ func (b *Bean) SetContentETag(content []byte) {
 	b.contentETag = ETagOf(content)
 }
 
+
+// Clone returns an independent copy of the bean, safe to hand to a reader
+// that outlives the lock the original is protected by. The struct copy
+// carries every scalar field including the unexported content etag; the
+// slices and the Extra map are rebuilt so a caller cannot write through
+// them into the original.
+//
+// Values nested inside Extra are copied by reference: front matter parses
+// into scalars, slices and maps, and a caller that reaches into a nested
+// container still shares it with the original. Callers that mutate Extra
+// replace whole keys, which the rebuilt map already isolates.
+func (b *Bean) Clone() *Bean {
+	if b == nil {
+		return nil
+	}
+
+	clone := *b
+
+	if b.Tags != nil {
+		clone.Tags = append([]string(nil), b.Tags...)
+	}
+	if b.Blocking != nil {
+		clone.Blocking = append([]string(nil), b.Blocking...)
+	}
+	if b.BlockedBy != nil {
+		clone.BlockedBy = append([]string(nil), b.BlockedBy...)
+	}
+	if b.Extra != nil {
+		clone.Extra = make(map[string]any, len(b.Extra))
+		for k, v := range b.Extra {
+			clone.Extra[k] = v
+		}
+	}
+	if b.CreatedAt != nil {
+		createdAt := *b.CreatedAt
+		clone.CreatedAt = &createdAt
+	}
+	if b.UpdatedAt != nil {
+		updatedAt := *b.UpdatedAt
+		clone.UpdatedAt = &updatedAt
+	}
+
+	return &clone
+}

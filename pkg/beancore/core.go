@@ -434,20 +434,27 @@ func (c *Core) Search(query string) ([]*bean.Bean, error) {
 	result := make([]*bean.Bean, 0, len(ids))
 	for _, id := range ids {
 		if b, ok := c.beans[id]; ok {
-			result = append(result, b)
+			result = append(result, b.Clone())
 		}
 	}
 	return result, nil
 }
 
-// All returns a slice of all beans.
+// All returns a snapshot of all beans, copied under the read lock.
+//
+// The copies are what makes the result safe to use: callers read the slice
+// long after the lock is gone — the GraphQL query resolver and the
+// subscription snapshot both serialize it outside the lock — while writers
+// mutate the stored structs in place under the write lock (RemoveLinksTo,
+// FixBrokenLinks, applyRenameSlug). Handing out the live pointers let a
+// reader serialize a bean mid-write.
 func (c *Core) All() []*bean.Bean {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	result := make([]*bean.Bean, 0, len(c.beans))
 	for _, b := range c.beans {
-		result = append(result, b)
+		result = append(result, b.Clone())
 	}
 	return result
 }
