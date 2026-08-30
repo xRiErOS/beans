@@ -189,18 +189,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	}
 
 	children := childrenIndex(allBeans)
-
-	// A type that opted out of the aggregate views takes its whole subtree
-	// with it: the roadmap shows planned work, and a parking lot is not
-	// that. hidden also catches a container nested under another hidden
-	// container -- markSubtree walks every descendant regardless of type,
-	// so a visible-typed epic under a hidden milestone is hidden too.
-	hidden := make(map[string]bool)
-	for _, b := range allBeans {
-		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
-			markSubtree(b.ID, children, hidden)
-		}
-	}
+	hidden := hiddenSubtrees(allBeans, children)
 
 	// Find milestones, applying status filters
 	var milestones []*bean.Bean
@@ -403,27 +392,58 @@ func markSubtree(id string, children map[string][]*bean.Bean, seen map[string]bo
 	}
 }
 
+// hiddenSubtrees returns the set of bean IDs that must vanish from an
+// aggregate view (D15): every container-ranked bean whose type opted out
+// via cfg.IsRoadmapType, plus everything beneath it, at any depth --
+// markSubtree walks every descendant regardless of its own type, so a
+// visible-typed epic under a hidden milestone is hidden too.
+func hiddenSubtrees(allBeans []*bean.Bean, children map[string][]*bean.Bean) map[string]bool {
+	return hiddenSubtreesExcept(allBeans, children, "")
+}
+
+// hiddenSubtreesExcept is hiddenSubtrees but never seeds hiding from the
+// bean whose ID is exempt, even if that bean's own type opted out. Used by
+// buildScopedRoadmap: a direct-by-ID lookup exempts only the named root
+// itself -- exempt's own children are not swept into hiding merely because
+// exempt opted out, but a hidden container nested anywhere beneath exempt
+// still seeds normally and takes its own subtree with it.
+func hiddenSubtreesExcept(allBeans []*bean.Bean, children map[string][]*bean.Bean, exempt string) map[string]bool {
+	hidden := make(map[string]bool)
+	for _, b := range allBeans {
+		if b.ID == exempt {
+			continue
+		}
+		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
+			markSubtree(b.ID, children, hidden)
+		}
+	}
+	return hidden
+}
+
 // buildScopedRoadmap builds a roadmapData scoped to a single milestone,
 // epic, or feature root. Callers must have already validated root's type
 // via validateRoadmapRootType; any other type panics, since that would be a
 // caller bug, not user input.
 //
 // The roadmap-visibility flag (cfg.IsRoadmapType, D15) governs the aggregate
-// views -- the unscoped roadmap and beans milestones -- not a direct-by-ID
-// lookup of a container the user named here. All three branches therefore
-// pass a nil hidden set to the build*Group functions: a scoped root, and
-// everything beneath it, renders in full regardless of any hidden type
-// found in its subtree.
+// views -- the unscoped roadmap and beans milestones -- but a direct-by-ID
+// lookup of a container the user named here bypasses hiding for the named
+// root only: hiddenSubtreesExcept exempts root from seeding hiding (root's
+// own children are not swept into hiding merely because root itself opted
+// out), while a hidden container nested anywhere beneath root still seeds
+// normally and is suppressed exactly as in the unscoped roadmap.
 func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData {
+	children := childrenIndex(allBeans)
+	hidden := hiddenSubtreesExcept(allBeans, children, root.ID)
 	switch cfg.RankOf(root.Type) {
 	case 1:
-		group := buildMilestoneGroup(root, childrenIndex(allBeans), includeDone, nil)
+		group := buildMilestoneGroup(root, children, includeDone, hidden)
 		return &roadmapData{Milestones: []milestoneGroup{group}}
 	case 2:
-		eg := buildEpicGroup(root, childrenIndex(allBeans), includeDone, nil)
+		eg := buildEpicGroup(root, children, includeDone, hidden)
 		return &roadmapData{Root: &rootGroup{Epic: &eg}}
 	case 3:
-		fg := buildFeatureGroup(root, childrenIndex(allBeans), includeDone, nil)
+		fg := buildFeatureGroup(root, children, includeDone, hidden)
 		return &roadmapData{Root: &rootGroup{Feature: &fg}}
 	default:
 		// validateRoadmapRootType is checked by every caller before this

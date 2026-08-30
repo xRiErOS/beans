@@ -1279,14 +1279,14 @@ func TestHiddenContainerNestedUnderVisibleParentVanishesEntirely(t *testing.T) {
 	}
 }
 
-// TestScopedRoadmapBypassesHidingForTheNamedRoot covers Ruling 2 of the fix
-// round: the roadmap-visibility flag governs the aggregate views (the
-// overview, and beans milestones), not a direct-by-ID lookup of a container
-// the user named. A scoped root of a hidden type must still render its full
-// content, exactly like a visible root would -- consistent with the rank-2/3
-// scoped branches, which never consulted visibility at all.
-func TestScopedRoadmapBypassesHidingForTheNamedRoot(t *testing.T) {
-	rank := 1
+// TestScopedRoadmapBypassesHidingOnlyForTheNamedRootItself pins the refined
+// Ruling 2 (fix round 2): the scoped-by-ID bypass is root-only, not total. A
+// user who names a container directly has asked for that container -- not
+// for whatever is hidden beneath it. Both halves share one bean fixture so
+// the boundary is visible in one place: m1 (visible milestone) -> b1
+// (hidden-type rank-2 bucket) -> t1 (leaf).
+func TestScopedRoadmapBypassesHidingOnlyForTheNamedRootItself(t *testing.T) {
+	rank := 2
 	visible := false
 	prev := cfg
 	cfg = &config.Config{Types: []config.TypeOverride{
@@ -1294,24 +1294,127 @@ func TestScopedRoadmapBypassesHidingForTheNamedRoot(t *testing.T) {
 	}}
 	defer func() { cfg = prev }()
 
-	root := &bean.Bean{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"}
+	m1 := &bean.Bean{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"}
+	b1 := &bean.Bean{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot", Parent: "m1"}
+	t1 := &bean.Bean{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"}
+	beans := []*bean.Bean{m1, b1, t1}
+
+	t.Run("scoped to the visible parent, the hidden child's subtree is suppressed", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, m1)
+		if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
+			t.Fatalf("expected the named root m1 to render, got %+v", data.Milestones)
+		}
+		group := data.Milestones[0]
+		for _, eg := range group.Epics {
+			if eg.Epic.ID == "b1" {
+				t.Fatal("a hidden rank-2 container below the scoped root must not render as one of its Epics")
+			}
+		}
+		for _, o := range group.Other {
+			if o.ID == "b1" || o.ID == "t1" {
+				t.Fatalf("a hidden container's subtree below the scoped root must not fold into Other, got %q", o.ID)
+			}
+		}
+	})
+
+	t.Run("scoped directly to the hidden container, it renders in full", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, b1)
+		if data.Root == nil || data.Root.Epic == nil || data.Root.Epic.Epic.ID != "b1" {
+			t.Fatalf("a scoped hidden root must still render as its own container, got %+v", data.Root)
+		}
+		found := false
+		for _, o := range data.Root.Epic.Items {
+			if o.ID == "t1" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a scoped hidden root must render its own full content -- the bypass covers the named root")
+		}
+	})
+}
+
+// TestHiddenRank3ContainerVanishesWithItsLeaf closes a coverage gap the
+// reviewer flagged: rank 3, directly opting out (not via an ancestor), had
+// no test of its own alongside the existing rank-1/rank-2 cases.
+func TestHiddenRank3ContainerVanishesWithItsLeaf(t *testing.T) {
+	rank := 3
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "drawer", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "e1", Type: "epic", Status: "todo", Title: "Auth", Parent: "m1"},
+		{ID: "t2", Type: "task", Status: "todo", Title: "Planned", Parent: "e1"},
+		{ID: "d1", Type: "drawer", Status: "todo", Title: "Hidden drawer", Parent: "e1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "d1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if len(data.Milestones) != 1 {
+		t.Fatalf("got %d milestone groups, want 1", len(data.Milestones))
+	}
+	group := data.Milestones[0]
+	if len(group.Epics) != 1 || group.Epics[0].Epic.ID != "e1" {
+		t.Fatalf("expected epic e1 to still render (it has a visible sibling task), got %+v", group.Epics)
+	}
+	eg := group.Epics[0]
+	for _, fg := range eg.Features {
+		if fg.Feature.ID == "d1" {
+			t.Fatal("a hidden rank-3 container must not render as one of its epic's Features")
+		}
+	}
+	foundT1, foundT2 := false, false
+	for _, item := range eg.Items {
+		if item.ID == "t1" {
+			foundT1 = true
+		}
+		if item.ID == "t2" {
+			foundT2 = true
+		}
+	}
+	if foundT1 {
+		t.Error("a leaf under a hidden rank-3 container must not fold into the epic's Items")
+	}
+	if !foundT2 {
+		t.Error("the epic's own visible leaf must still render")
+	}
+}
+
+// TestScopedRoadmapRank3RootBypassesItsOwnHiddenType mirrors the rank-1/
+// rank-2 scoped-bypass coverage for rank 3, per the reviewer's note.
+func TestScopedRoadmapRank3RootBypassesItsOwnHiddenType(t *testing.T) {
+	rank := 3
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "drawer", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	root := &bean.Bean{ID: "d1", Type: "drawer", Status: "todo", Title: "Hidden drawer"}
 	beans := []*bean.Bean{
 		root,
-		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "d1"},
 	}
 
 	data := buildScopedRoadmap(beans, false, root)
 
-	if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "b1" {
-		t.Fatalf("a scoped hidden root must still render as its own container, got %+v", data.Milestones)
+	if data.Root == nil || data.Root.Feature == nil || data.Root.Feature.Feature.ID != "d1" {
+		t.Fatalf("a scoped hidden rank-3 root must still render as its own container, got %+v", data.Root)
 	}
 	found := false
-	for _, o := range data.Milestones[0].Other {
-		if o.ID == "t1" {
+	for _, item := range data.Root.Feature.Items {
+		if item.ID == "t1" {
 			found = true
 		}
 	}
 	if !found {
-		t.Error("a scoped hidden root must render its full content -- hiding is bypassed for a direct-by-ID lookup")
+		t.Error("a scoped hidden rank-3 root must render its own full content")
 	}
 }
