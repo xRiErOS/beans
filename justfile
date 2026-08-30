@@ -24,13 +24,17 @@ test ARGS='./...':
 
 # Run the frontend unit tests, e.g. `just test-web --project server`
 test-web ARGS='':
-    cd frontend && pnpm test {{ARGS}}
+    cd frontend && mise exec -- pnpm test {{ARGS}}
 
 # Type- and a11y-check the frontend (svelte-check)
 check-web:
-    cd frontend && pnpm check
+    cd frontend && mise exec -- pnpm check
 
 # Run the frontend end-to-end suite, e.g. `just test-e2e e2e/filter.spec.ts`
 test-e2e ARGS='':
     mise run build:embed
-    cd frontend && pnpm test:e2e {{ARGS}}
+    cd frontend && mise exec -- pnpm test:e2e {{ARGS}}
+
+# Run the Go test suite under the race detector
+test-race ARGS='./...':
+    go test -race {{ARGS}}

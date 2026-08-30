@@ -627,7 +627,23 @@ func (m *Manager) readOutput(beanID string, stdout io.Reader, workDir string, pr
 	// pipe failed, or a single line outgrew the buffer. Without this the read
 	// just ended and the session sat in RUNNING with nothing explaining it.
 	if err := scanner.Err(); err != nil {
-		m.setError(beanID, fmt.Sprintf("agent output stream failed: %v", err))
+		// Nobody is draining stdout any more. On an oversized line the child is
+		// still alive and still writing, so spawnAndRun's cmd.Wait() would block
+		// forever on a full pipe and never run its cleanup. Terminate the child
+		// here. signal() not kill(): kill() waits on proc.done, which
+		// spawnAndRun only closes after this function returns.
+		proc.signal()
+
+		// Only report the failure if this stream still belongs to the current
+		// process — same guard spawnAndRun uses below. A torn-down predecessor
+		// (Stop, then a new message) must not flip a freshly spawned, healthy
+		// session to ERROR.
+		m.mu.RLock()
+		current := m.processes[beanID] == proc
+		m.mu.RUnlock()
+		if current {
+			m.setError(beanID, fmt.Sprintf("agent output stream failed: %v", err))
+		}
 	}
 }
 

@@ -7,9 +7,11 @@ import (
 )
 
 // TestManagerConcurrentSessionAccess hammers one session from several
-// goroutines at once. Run under -race it covers the paths a live server takes:
-// a subscription reading state while messages arrive and the mode is toggled,
-// and a clear landing in the middle of it.
+// goroutines at once. It covers the paths a live server takes: a subscription
+// reading state while messages arrive and the mode is toggled, and a clear
+// landing in the middle of it. Plain `just test` only trips Go's built-in
+// concurrent-map detector here — run it under `just test-race` for the
+// slice-append and struct-field races.
 func TestManagerConcurrentSessionAccess(t *testing.T) {
 	m := NewManager("", nil)
 	defer m.Shutdown()
@@ -49,8 +51,8 @@ func TestManagerConcurrentSessionAccess(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	// The session must still be coherent: readable, and its snapshot must be a
-	// copy the caller can hold without racing the manager.
+	// The session must still be coherent: readable, with no message left
+	// half-written by a concurrent append.
 	if s := m.GetSession(beanID); s != nil {
 		for _, msg := range s.Messages {
 			if msg.Role == "" {
