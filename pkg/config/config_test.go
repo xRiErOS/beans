@@ -250,6 +250,53 @@ func TestLoadAndSave(t *testing.T) {
 	}
 }
 
+// toYAMLNode() built the agent, worktree and server mappings without three
+// of their fields - agent.default_effort, worktree.fetch_timeout and
+// server.cors_origins were all readable via their Get*/GetWorktree* getters
+// but never written back out, so a Save() (e.g. via `beans rename`) on an
+// already-loaded Config silently dropped them.
+func TestSaveRoundTripsAgentServerAndWorktreeExtras(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fetchTimeout := 30
+	cfg := &Config{
+		Beans: BeansConfig{
+			Path:     ".beans",
+			Prefix:   "test-",
+			IDLength: 4,
+		},
+		Agent: AgentConfig{
+			DefaultEffort: "high",
+		},
+		Server: ServerConfig{
+			CORSOrigins: []string{"https://example.com", "https://example.org"},
+		},
+		Worktree: WorktreeConfig{
+			FetchTimeout: &fetchTimeout,
+		},
+	}
+	cfg.SetConfigDir(tmpDir)
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := loaded.GetDefaultEffort(); got != "high" {
+		t.Errorf("GetDefaultEffort() = %q, want \"high\"", got)
+	}
+	if got := loaded.GetCORSOrigins(); len(got) != 2 || got[0] != "https://example.com" || got[1] != "https://example.org" {
+		t.Errorf("GetCORSOrigins() = %v, want [https://example.com https://example.org]", got)
+	}
+	if got := loaded.GetWorktreeFetchTimeout(); got != 30*time.Second {
+		t.Errorf("GetWorktreeFetchTimeout() = %v, want 30s", got)
+	}
+}
+
 func TestLoadAppliesDefaults(t *testing.T) {
 	// Create temp directory with minimal config
 	tmpDir := t.TempDir()

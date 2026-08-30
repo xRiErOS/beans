@@ -723,6 +723,12 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	integrateKey.HeadComment = "Integration strategy: \"local\" (squash-merge locally) or \"pr\" (push and create PRs)"
 	worktreeMapping.Content = append(worktreeMapping.Content, integrateKey, strNode(string(c.GetWorktreeIntegrate())))
 
+	if c.Worktree.FetchTimeout != nil {
+		key := strNode("fetch_timeout")
+		key.HeadComment = "Timeout in seconds for the fetch before creating a worktree (default: 10; 0 disables it)"
+		worktreeMapping.Content = append(worktreeMapping.Content, key, intNode(*c.Worktree.FetchTimeout))
+	}
+
 	// Build the agent mapping
 	agentMapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if c.Agent.Enabled != nil {
@@ -735,12 +741,26 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		key.HeadComment = "Default mode for agent sessions (act, plan)"
 		agentMapping.Content = append(agentMapping.Content, key, strNode(string(c.Agent.DefaultMode)))
 	}
+	if c.Agent.DefaultEffort != "" {
+		key := strNode("default_effort")
+		key.HeadComment = "Default thinking effort level for new agent sessions (low, medium, high, max)"
+		agentMapping.Content = append(agentMapping.Content, key, strNode(c.Agent.DefaultEffort))
+	}
 	// Build the server mapping
 	serverMapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if c.Server.Port != 0 {
 		portKey := strNode("port")
 		portKey.HeadComment = "Port for the web UI (used by `beans-serve`)"
 		serverMapping.Content = append(serverMapping.Content, portKey, intNode(c.Server.Port))
+	}
+	if len(c.Server.CORSOrigins) > 0 {
+		key := strNode("cors_origins")
+		key.HeadComment = "Allowed origins for CORS and WebSocket (default: http://localhost:*, http://127.0.0.1:*)"
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
+		for _, origin := range c.Server.CORSOrigins {
+			seq.Content = append(seq.Content, strNode(origin))
+		}
+		serverMapping.Content = append(serverMapping.Content, key, seq)
 	}
 
 	// Build the display mapping. Like Statuses/Types/Priorities, this must be
