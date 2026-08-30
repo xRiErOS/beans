@@ -6,12 +6,15 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
+	"github.com/spf13/cobra"
 )
 
 func TestSortBeans(t *testing.T) {
@@ -513,4 +516,145 @@ func idsOf(beans []*bean.Bean) []string {
 		ids[i] = b.ID
 	}
 	return ids
+}
+
+// seedListTree creates a parent and two children so a test can tell a flat
+// table (peers, no connectors) apart from an indented tree (connectors,
+// no header). The parent's title carries a non-ASCII character ("über") on
+// purpose — an ASCII-only fixture cannot distinguish DisplayWidth (cells)
+// from len (bytes), which is exactly the class of bug the width plumbing in
+// this task must not have.
+func seedListTree(t *testing.T) {
+	t.Helper()
+	parent := &bean.Bean{
+		ID:     "beans-par1",
+		Slug:   bean.Slugify("Parent über"),
+		Title:  "Parent über",
+		Status: "todo",
+		Type:   "epic",
+	}
+	if err := core.Create(parent); err != nil {
+		t.Fatalf("core.Create(parent) error = %v", err)
+	}
+	for _, suffix := range []string{"a", "b"} {
+		c := &bean.Bean{
+			ID:     "beans-chd" + suffix,
+			Slug:   bean.Slugify("Child " + suffix),
+			Title:  "Child " + suffix,
+			Status: "todo",
+			Type:   "task",
+			Parent: parent.ID,
+		}
+		if err := core.Create(c); err != nil {
+			t.Fatalf("core.Create(child %s) error = %v", suffix, err)
+		}
+	}
+}
+
+// resetListViewFlags restores listView/listMaxWidth to their zero state.
+// listCmd's flags are registered exactly once (idempotent Lookup guard in
+// RegisterListCmd, so tests can call it repeatedly into throwaway roots),
+// and pflag.FlagSet.Parse never resets a flag's Value or Changed bit for a
+// flag absent from the current argv — so without this reset, a --view or
+// --max-width value set by one test would silently leak into the next.
+func resetListViewFlags(t *testing.T) {
+	t.Helper()
+	oldView, oldWidth := listView, listMaxWidth
+	listView, listMaxWidth = "table", 0
+	t.Cleanup(func() { listView, listMaxWidth = oldView, oldWidth })
+}
+
+// runListThroughRoot drives listCmd via a real cobra root.Execute() rather
+// than calling listCmd.RunE directly, because --view's rejection and
+// cmd.Flags().Changed("max-width") only behave correctly under real flag
+// parsing (the same reasoning as TestOrderCmdMutuallyExclusiveFlags).
+func runListThroughRoot(t *testing.T, args []string) (stdout string, runErr error) {
+	t.Helper()
+	setupListTest(t)
+	resetListViewFlags(t)
+	seedListTree(t)
+
+	out := captureListStdout(t, func() {
+		root := &cobra.Command{Use: "beans"}
+		RegisterListCmd(root)
+		root.SetArgs(append([]string{"list"}, args...))
+		root.SetOut(io.Discard)
+		root.SetErr(io.Discard)
+		runErr = root.Execute()
+	})
+	return string(out), runErr
+}
+
+// runListInTestStore runs list against a throwaway store with one parent
+// and two children, and fails the test on any error — for the happy path.
+func runListInTestStore(t *testing.T, args []string) string {
+	t.Helper()
+	out, err := runListThroughRoot(t, args)
+	if err != nil {
+		t.Fatalf("list %v: %v", args, err)
+	}
+	return out
+}
+
+// runListExpectingError is runListInTestStore's counterpart for the
+// rejection path: the caller asserts on the returned error itself.
+func runListExpectingError(t *testing.T, args []string) error {
+	t.Helper()
+	_, err := runListThroughRoot(t, args)
+	return err
+}
+
+// TestListDefaultsToTheTableForm is the brief's guard for AC "default is
+// table": no tree connectors, and the header row (the table's defining
+// trait per ui.Render) is present.
+func TestListDefaultsToTheTableForm(t *testing.T) {
+	out := runListInTestStore(t, []string{})
+	if strings.Contains(out, "├─") {
+		t.Errorf("list defaults to table and must be flat:\n%s", out)
+	}
+	if !strings.Contains(out, "TITLE") {
+		t.Errorf("table form must carry a header:\n%s", out)
+	}
+}
+
+// TestListViewTreeDrawsTheTree is the brief's guard for --view tree.
+func TestListViewTreeDrawsTheTree(t *testing.T) {
+	out := runListInTestStore(t, []string{"--view", "tree"})
+	if !strings.Contains(out, "├─") && !strings.Contains(out, "└─") {
+		t.Errorf("--view tree must draw connectors:\n%s", out)
+	}
+}
+
+// TestListRejectsAnUnknownView is the brief's guard for --view validation.
+func TestListRejectsAnUnknownView(t *testing.T) {
+	if err := runListExpectingError(t, []string{"--view", "grid"}); err == nil {
+		t.Error("--view grid should be rejected")
+	}
+}
+
+// TestListMaxWidthCapsRenderedWidth is the companion the brief's own three
+// tests do not cover: --view is exercised there, but --max-width never is,
+// even though it is part of this task's produced interface. renderTable
+// draws its separator as exactly `width` dashes (internal/ui/render.go) and,
+// being a rule rather than content, is never right-trimmed the way a short
+// title's trailing padding is — so its rendered width is a direct,
+// unambiguous readout of the value resolveWidth actually received, not a
+// coincidence of column packing. This also proves list.go passes
+// cmd.Flags().Changed("max-width") rather than a literal true/false: a
+// hardcoded false would make resolveWidth ignore --max-width 95 and fall
+// back to the config default (110), which this test would catch as a width
+// mismatch.
+func TestListMaxWidthCapsRenderedWidth(t *testing.T) {
+	out := runListInTestStore(t, []string{"--max-width", "95"})
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least a title and a separator line, got %d lines:\n%s", len(lines), out)
+	}
+	separator := lines[1]
+	if !strings.Contains(separator, "─") {
+		t.Fatalf("expected line 2 to be the dash separator, got %q", separator)
+	}
+	if w := ui.DisplayWidth(separator); w != 95 {
+		t.Errorf("separator width = %d, want 95 (from --max-width): %q", w, separator)
+	}
 }
