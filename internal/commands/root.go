@@ -65,6 +65,7 @@ a full view of your project.`,
 			ui.SetTheme(cfg.GetTheme())
 
 			feedTypeTables(cfg)
+			feedStatusPriorityTables(cfg)
 
 			root, err := resolveBeansPath(beansPath, cfg)
 			if err != nil {
@@ -105,6 +106,24 @@ func feedTypeTables(c *config.Config) {
 	// One trailing space keeps the column from touching the next one, which is
 	// what the old literal 10 did for "milestone" at nine characters.
 	ui.SetTypeColumnWidths(3, longest+1)
+}
+
+// feedStatusPriorityTables fills internal/ui's process-wide status-short and
+// priority-symbol tables from the merged status/priority lists. Same
+// reasoning as feedTypeTables: internal/ui must not import pkg/config, so
+// this is where the config-derived values cross into it.
+func feedStatusPriorityTables(c *config.Config) {
+	shorts := make(map[string]string, len(c.StatusList()))
+	for _, s := range c.StatusList() {
+		shorts[s.Name] = c.ShortOfStatus(s.Name)
+	}
+	ui.SetStatusShorts(shorts)
+
+	symbols := make(map[string]string, len(c.PriorityList()))
+	for _, p := range c.PriorityList() {
+		symbols[p.Name] = p.Symbol
+	}
+	ui.SetPrioritySymbols(symbols)
 }
 
 // resolveBeansPath determines the beans data directory path.

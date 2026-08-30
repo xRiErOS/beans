@@ -45,11 +45,11 @@ const (
 // override individual entries; see (*Config).StatusList.
 // Order determines sort priority: in-progress first (active work), then todo, draft, and done states last.
 var DefaultStatuses = []StatusConfig{
-	{Name: "in-progress", Color: "peach", Description: "Currently being worked on"},
-	{Name: "todo", Color: "green", Description: "Ready to be worked on"},
-	{Name: "draft", Color: "overlay2", Description: "Needs refinement before it can be worked on"},
-	{Name: "completed", Color: "overlay1", Archive: true, Description: "Finished successfully"},
-	{Name: "scrapped", Color: "surface2", Archive: true, Description: "Will not be done"},
+	{Name: "in-progress", Color: "peach", Short: "I", Description: "Currently being worked on"},
+	{Name: "todo", Color: "green", Short: "T", Description: "Ready to be worked on"},
+	{Name: "draft", Color: "overlay2", Short: "D", Description: "Needs refinement before it can be worked on"},
+	{Name: "completed", Color: "overlay1", Archive: true, Short: "C", Description: "Finished successfully"},
+	{Name: "scrapped", Color: "surface2", Archive: true, Short: "S", Description: "Will not be done"},
 }
 
 // DefaultTypes defines the built-in type table. Config.Types can override
@@ -66,18 +66,21 @@ var DefaultTypes = []TypeConfig{
 // can override individual entries; see (*Config).PriorityList.
 // Priorities are ordered from highest to lowest urgency.
 var DefaultPriorities = []PriorityConfig{
-	{Name: "critical", Color: "red", Description: "Urgent, blocking work. When possible, address immediately"},
-	{Name: "high", Color: "yellow", Description: "Important, should be done before normal work"},
+	{Name: "critical", Color: "red", Symbol: "\u203c", Description: "Urgent, blocking work. When possible, address immediately"},
+	{Name: "high", Color: "yellow", Symbol: "!", Description: "Important, should be done before normal work"},
 	{Name: "normal", Color: "", Description: "Standard priority"},
-	{Name: "low", Color: "overlay0", Description: "Less important, can be delayed"},
-	{Name: "deferred", Color: "overlay0", Description: "Explicitly pushed back, avoid doing unless necessary"},
+	{Name: "low", Color: "overlay0", Symbol: "\u2193", Description: "Less important, can be delayed"},
+	{Name: "deferred", Color: "overlay0", Symbol: "\u2192", Description: "Explicitly pushed back, avoid doing unless necessary"},
 }
 
 // StatusConfig defines a single status with its display color.
 type StatusConfig struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color"`
-	Archive     bool   `yaml:"archive,omitempty"`
+	Name    string `yaml:"name"`
+	Color   string `yaml:"color"`
+	Archive bool   `yaml:"archive,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means "?" - see internal/ui.ShortStatus.
+	Short       string `yaml:"short,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -107,8 +110,11 @@ type TypeConfig struct {
 
 // PriorityConfig defines a single priority level with its display color.
 type PriorityConfig struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color"`
+	Name  string `yaml:"name"`
+	Color string `yaml:"color"`
+	// Symbol is the compact glyph the legend and narrow views render for
+	// this priority. Empty means no symbol - see internal/ui.GetPrioritySymbol.
+	Symbol      string `yaml:"symbol,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -122,19 +128,23 @@ type StatusOverride struct {
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Archive     *bool  `yaml:"archive,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means "?" - see internal/ui.ShortStatus.
+	Short string `yaml:"short,omitempty"`
 
-	// colorSet and descriptionSet record whether "color"/"description" were
-	// named in the YAML source at all, so a merge can tell an explicit
-	// "color: ''" apart from color simply never being named. Color and
-	// Description are not pointers like Archive because an empty string is
+	// colorSet, descriptionSet and shortSet record whether "color"/
+	// "description"/"short" were named in the YAML source at all, so a merge
+	// can tell an explicit "color: ''" apart from color simply never being
+	// named. These are not pointers like Archive because an empty string is
 	// a legitimate value in their own right (an uncoloured/undescribed
-	// status) - a pointer would only move the ambiguity onto every
-	// Go-constructed StatusOverride elsewhere in the codebase, which never
-	// populates the field and would then look identically "unset". These
-	// flags are populated by UnmarshalYAML below and default to false for
-	// any override built directly in Go, which keeps that existing
+	// status, or a status that deliberately renders no short code) - a
+	// pointer would only move the ambiguity onto every Go-constructed
+	// StatusOverride elsewhere in the codebase, which never populates the
+	// field and would then look identically "unset". These flags are
+	// populated by UnmarshalYAML below and default to false for any
+	// override built directly in Go, which keeps that existing
 	// non-empty-always-applies behaviour unchanged.
-	colorSet, descriptionSet bool
+	colorSet, descriptionSet, shortSet bool
 }
 
 // UnmarshalYAML decodes a StatusOverride while recording which optional
@@ -148,6 +158,7 @@ func (o *StatusOverride) UnmarshalYAML(value *yaml.Node) error {
 	*o = StatusOverride(raw)
 	o.colorSet = yamlNodeHasKey(value, "color")
 	o.descriptionSet = yamlNodeHasKey(value, "description")
+	o.shortSet = yamlNodeHasKey(value, "short")
 	return nil
 }
 
@@ -202,10 +213,13 @@ type PriorityOverride struct {
 	Name        string `yaml:"name"`
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
+	// Symbol is the compact glyph the legend and narrow views render for
+	// this priority. Empty means no symbol - see internal/ui.GetPrioritySymbol.
+	Symbol string `yaml:"symbol,omitempty"`
 
-	// colorSet and descriptionSet record whether their YAML keys were named
-	// at all - see StatusOverride.colorSet.
-	colorSet, descriptionSet bool
+	// colorSet, descriptionSet and symbolSet record whether their YAML keys
+	// were named at all - see StatusOverride.colorSet.
+	colorSet, descriptionSet, symbolSet bool
 }
 
 // UnmarshalYAML decodes a PriorityOverride while recording which optional
@@ -219,6 +233,7 @@ func (o *PriorityOverride) UnmarshalYAML(value *yaml.Node) error {
 	*o = PriorityOverride(raw)
 	o.colorSet = yamlNodeHasKey(value, "color")
 	o.descriptionSet = yamlNodeHasKey(value, "description")
+	o.symbolSet = yamlNodeHasKey(value, "symbol")
 	return nil
 }
 
@@ -1066,6 +1081,9 @@ func (c *Config) StatusList() []StatusConfig {
 			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
 			}
+			if o.shortSet || o.Short != "" {
+				t.Short = o.Short
+			}
 			// Archive is a pointer: only an explicit archive: key (true or
 			// false) touches it, so a colour-only override cannot flip a
 			// status like "completed" back to non-archiving by accident.
@@ -1161,6 +1179,24 @@ func (c *Config) ShortOf(typeName string) string {
 	// First RUNE, not first byte: a type named "Änderung" would otherwise
 	// yield half a rune and render as U+FFFD.
 	r, _ := utf8.DecodeRuneInString(t.Name)
+	return strings.ToUpper(string(r))
+}
+
+// ShortOfStatus returns the single-character code for a status: the
+// configured one, otherwise the upper-cased first letter, and "?" for an
+// unknown status. Mirrors ShortOf.
+func (c *Config) ShortOfStatus(name string) string {
+	s := c.GetStatus(name)
+	if s == nil {
+		return "?"
+	}
+	if s.Short != "" {
+		return s.Short
+	}
+	if s.Name == "" {
+		return "?"
+	}
+	r, _ := utf8.DecodeRuneInString(s.Name)
 	return strings.ToUpper(string(r))
 }
 
@@ -1359,6 +1395,9 @@ func (c *Config) PriorityList() []PriorityConfig {
 			}
 			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
+			}
+			if o.symbolSet || o.Symbol != "" {
+				t.Symbol = o.Symbol
 			}
 		},
 	)
