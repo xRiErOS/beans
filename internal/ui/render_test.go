@@ -461,8 +461,35 @@ func TestProgressCounterNeverWraps(t *testing.T) {
 	}
 }
 
+// TestTagCellIsAlwaysASingleLine carries what the brief's
+// TestLongTagsNeverBreakMidWord was aiming at, in the form the current
+// implementation makes provable. The defect it guards was real: against the
+// 759-bean store, tags were torn mid-word across three lines. That is
+// impossible now for a structural reason — tagCell truncates and never
+// wraps — and this test pins exactly that structure, so a future switch to
+// WrapText inside the cell is caught here rather than in someone's terminal.
+// Mutation: give tagCell's `cell` closure a WrapText-based body joined with
+// "\n" and this goes red; the brief's version stays green.
+func TestTagCellIsAlwaysASingleLine(t *testing.T) {
+	tagSets := [][]string{
+		{"slug-tailwind-upgrade"},
+		{"note-intern", "slug-tailwind-upgrade"},
+		{"a-very-long-tag-that-cannot-possibly-fit", "b", "c", "d"},
+		{"kurz", "auch-kurz"},
+	}
+	for _, tags := range tagSets {
+		for w := 1; w <= 40; w++ {
+			got := stripANSI(tagCell(tags, w))
+			if strings.Contains(got, "\n") {
+				t.Errorf("tagCell(%v, %d) spans more than one line: %q", tags, w, got)
+			}
+		}
+	}
+}
+
 // TestLongTagsNeverBreakMidWord from the brief is deliberately not shipped
-// here — see task-21-report.md. Given richRows() and widths {80,110,160},
+// here — see task-21-report.md, and TestTagCellIsAlwaysASingleLine above for
+// the property it was reaching for. Given richRows() and widths {80,110,160},
 // tagCell (render.go) is structurally binary for any tag past the first:
 // it renders the tag in full or collapses it behind a "+N" marker, never a
 // partial/wrapped form, because its overflow check compares a fully-sized
