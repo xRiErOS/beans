@@ -197,6 +197,20 @@ func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 		sb.WriteString(rel + "\n")
 	}
 
+	// created/updated: presentation-only metadata the old header carried as
+	// muted text. Dropping glamour is the plan's only authorised behaviour
+	// change; this stays, just moved under the reordered attribute header.
+	var stamps []string
+	if b.CreatedAt != nil {
+		stamps = append(stamps, "created "+b.CreatedAt.Format("2006-01-02 15:04 UTC"))
+	}
+	if b.UpdatedAt != nil {
+		stamps = append(stamps, "updated "+b.UpdatedAt.Format("2006-01-02 15:04 UTC"))
+	}
+	if len(stamps) > 0 {
+		sb.WriteString(ui.Muted.Render(strings.Join(stamps, "  ")) + "\n")
+	}
+
 	sb.WriteString(ui.TreeLine.Render(strings.Repeat("─", width)) + "\n\n")
 
 	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {

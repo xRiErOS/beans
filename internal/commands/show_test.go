@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
@@ -316,5 +317,34 @@ func TestShowUsesNoBackgroundBadges(t *testing.T) {
 	out := runShowInTestStore(t, "a bean with a body")
 	if strings.Contains(out, "\x1b[48;") {
 		t.Error("detail view still paints background badges")
+	}
+}
+
+// TestShowHeaderCarriesCreatedAndUpdatedTimestamps guards against silently
+// dropping user-visible information under this rewrite: the plan's only
+// authorised behaviour change is removing glamour, everything else is
+// presentation. The old header carried created/updated timestamps as muted
+// text; the new attribute header must still carry them somewhere sensible.
+func TestShowHeaderCarriesCreatedAndUpdatedTimestamps(t *testing.T) {
+	setupShowTest(t)
+	created := time.Date(2026, 1, 2, 15, 4, 0, 0, time.UTC)
+	updated := time.Date(2026, 3, 4, 9, 30, 0, 0, time.UTC)
+	b := showTestBean("beans-detail2", "A timestamped bean", "body text")
+	b.CreatedAt = &created
+	b.UpdatedAt = &updated
+
+	out, err := showOutput(b, true)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	plain := stripANSITest(out)
+
+	for _, want := range []string{
+		"created 2026-01-02 15:04 UTC",
+		"updated 2026-03-04 09:30 UTC",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("detail header is missing %q:\n%s", want, plain)
+		}
 	}
 }
