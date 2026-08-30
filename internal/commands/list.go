@@ -190,7 +190,23 @@ Search Syntax (--search/-S):
 		}
 
 		width := resolveWidth(listMaxWidth, cmd.Flags().Changed("max-width"), cfg)
-		rows := ui.RowsFromFlatItems(ui.FlattenTree(tree))
+
+		// The row source differs by form, not just by what Render does with
+		// it afterwards: BuildTree deliberately widens `tree` beyond `beans`
+		// with unmatched ancestors for context (ui.TreeNode.Matched), which
+		// is correct for --view tree but wrong for --view table — a filtered
+		// table promising comparable peers must not grow rows the filter
+		// rejected. RowsFromFlatItems(FlattenTree(tree)) would carry that
+		// leak through even though Render's table path re-flattens depth to
+		// 0, because flattening depth does not drop the extra beans. FlatRows
+		// on the already-filtered `beans` avoids both the leak and computing
+		// tree depth Render would then discard.
+		var rows []ui.Row
+		if form == ui.FormTree {
+			rows = ui.RowsFromFlatItems(ui.FlattenTree(tree))
+		} else {
+			rows = ui.FlatRows(beans)
+		}
 		fmt.Print(ui.Render(rows, form, "Beans", width, hasTags, cfg))
 		return nil
 	},

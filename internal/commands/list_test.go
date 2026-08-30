@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -562,15 +563,17 @@ func seedListTree(t *testing.T) {
 // absent from the current argv. Without this, a --view/--max-width value —
 // or just its Changed bit — set by one test leaks into the next.
 //
-// listView's reset value is read back from the flag's own registered
-// DefValue rather than hardcoded to "table": an earlier, hardcoded version
-// of this helper masked a mutated default (RegisterListCmd's "table"
-// literal changed to "tree") because it forced listView back to "table"
-// regardless of what RegisterListCmd actually registered — the mutation
-// proof for TestListDefaultsToTheTableForm caught this. Deriving the reset
-// from DefValue means that test now actually exercises the registered
-// default instead of one this helper invented independently. Requires
-// RegisterListCmd(root) to have already run so Lookup succeeds.
+// Both reset values are read back from each flag's own registered DefValue
+// rather than hardcoded: an earlier, hardcoded version of this helper (just
+// listView) masked a mutated default (RegisterListCmd's "table" literal
+// changed to "tree") because it forced listView back to "table" regardless
+// of what RegisterListCmd actually registered — the mutation proof for
+// TestListDefaultsToTheTableForm caught this. listMaxWidth carried the same
+// defect one line down (a hardcoded 0) until fix-round-1 review pointed out
+// the pattern, not just the instance, needed fixing. Deriving both resets
+// from DefValue means a test exercises the registered default instead of
+// one this helper invented independently. Requires RegisterListCmd(root) to
+// have already run so Lookup succeeds.
 func resetListViewFlags(t *testing.T, root *cobra.Command) {
 	t.Helper()
 	oldView, oldWidth := listView, listMaxWidth
@@ -581,8 +584,12 @@ func resetListViewFlags(t *testing.T, root *cobra.Command) {
 	if viewFlag == nil || widthFlag == nil {
 		t.Fatalf("--view/--max-width not registered; call RegisterListCmd(root) first")
 	}
+	defWidth, err := strconv.Atoi(widthFlag.DefValue)
+	if err != nil {
+		t.Fatalf("--max-width DefValue %q is not an int: %v", widthFlag.DefValue, err)
+	}
 	listView = viewFlag.DefValue
-	listMaxWidth = 0
+	listMaxWidth = defWidth
 	viewFlag.Changed = false
 	widthFlag.Changed = false
 }
@@ -680,5 +687,72 @@ func TestListMaxWidthCapsRenderedWidth(t *testing.T) {
 	}
 	if w := ui.DisplayWidth(separator); w != 95 {
 		t.Errorf("separator width = %d, want 95 (from --max-width): %q", w, separator)
+	}
+}
+
+// TestListTableOmitsUnmatchedAncestors is a regression test for a real
+// correctness bug found while proving this task's mutation coverage:
+// BuildTree deliberately widens the tree beyond the filtered `beans` slice
+// with unmatched ancestors kept for context (ui.TreeNode.Matched), which is
+// right for --view tree but was leaking into --view table too, because the
+// old code built table rows from the same tree via
+// ui.RowsFromFlatItems(ui.FlattenTree(tree)) regardless of form. Verified
+// against a real store (SPF_sproutling, `list --status completed --view
+// table` vs `--json`): 513 table rows against 496 matched beans, an 18-row
+// leak of unmatched ancestors. list.go now builds table rows from
+// ui.FlatRows(beans) — the already-filtered slice — instead.
+func TestListTableOmitsUnmatchedAncestors(t *testing.T) {
+	setupListTest(t)
+
+	oldStatus, oldView, oldWidth := listStatus, listView, listMaxWidth
+	listStatus, listView, listMaxWidth = []string{"todo"}, "table", 0
+	t.Cleanup(func() { listStatus, listView, listMaxWidth = oldStatus, oldView, oldWidth })
+
+	parent := &bean.Bean{
+		ID: "beans-anc1", Slug: bean.Slugify("Ancestor"), Title: "Ancestor",
+		Status: "draft", Type: "epic",
+	}
+	child := &bean.Bean{
+		ID: "beans-anc2", Slug: bean.Slugify("Matching child"), Title: "Matching child",
+		Status: "todo", Type: "task", Parent: parent.ID,
+	}
+	for _, b := range []*bean.Bean{parent, child} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	out := string(captureListStdout(t, func() {
+		if err := listCmd.RunE(listCmd, nil); err != nil {
+			t.Fatalf("listCmd.RunE() error = %v", err)
+		}
+	}))
+
+	if strings.Contains(out, parent.ID) {
+		t.Errorf("--view table with --status todo must not show the unmatched ancestor %s (context leak):\n%s", parent.ID, out)
+	}
+	if !strings.Contains(out, child.ID) {
+		t.Errorf("expected matched child %s in table output:\n%s", child.ID, out)
+	}
+}
+
+// TestListDefaultMaxWidthFallsBackToConfig depends specifically on
+// listMaxWidth's registered default (0, "uncapped by the flag") rather than
+// any other value: with 0 and cmd.Flags().Changed("max-width") false,
+// resolveWidth falls through to cfg.GetMaxWidth() (110, config.Default()).
+// This is the companion the fix-round-1 review asked for: without it,
+// resetListViewFlags's listMaxWidth reset could regress to a hardcoded
+// literal (exactly the defect just fixed for listView) and nothing here
+// would notice.
+func TestListDefaultMaxWidthFallsBackToConfig(t *testing.T) {
+	out := runListInTestStore(t, []string{})
+	lines := strings.Split(out, "\n")
+	if len(lines) < 2 {
+		t.Fatalf("expected at least a title and a separator line, got %d lines:\n%s", len(lines), out)
+	}
+	separator := lines[1]
+	want := config.Default().GetMaxWidth()
+	if w := ui.DisplayWidth(separator); w != want {
+		t.Errorf("separator width = %d, want %d (config default, since --max-width was not given): %q", w, want, separator)
 	}
 }
