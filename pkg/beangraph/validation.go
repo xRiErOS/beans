@@ -126,13 +126,13 @@ func (r *CoreResolver) validationConfig() *config.Config {
 func (r *CoreResolver) validateEnums(status, typeName, priority *string) error {
 	cfg := r.validationConfig()
 	if status != nil && *status != "" && !cfg.IsValidStatus(*status) {
-		return fmt.Errorf("invalid status %q: must be one of %s", *status, cfg.StatusList())
+		return fmt.Errorf("invalid status %q: must be one of %s", *status, cfg.StatusNames())
 	}
 	if typeName != nil && *typeName != "" && !cfg.IsValidType(*typeName) {
-		return fmt.Errorf("invalid type %q: must be one of %s", *typeName, cfg.TypeList())
+		return fmt.Errorf("invalid type %q: must be one of %s", *typeName, cfg.TypeNames())
 	}
 	if priority != nil && *priority != "" && !cfg.IsValidPriority(*priority) {
-		return fmt.Errorf("invalid priority %q: must be one of %s", *priority, cfg.PriorityList())
+		return fmt.Errorf("invalid priority %q: must be one of %s", *priority, cfg.PriorityNames())
 	}
 	return nil
 }
