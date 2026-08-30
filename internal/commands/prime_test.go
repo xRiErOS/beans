@@ -162,12 +162,27 @@ func TestRankLinesListEveryOccupiedRank(t *testing.T) {
 	}
 }
 
+// A rank left genuinely unoccupied (TypesExclusive turns the merge with
+// DefaultTypes off, so ranks 2 and 3 have nothing on them here) must produce
+// no line at all -- not an empty "rank N: " line -- while the ranks that are
+// occupied still render, in order, on either side of the gap.
 func TestRankLinesSkipAnEmptyRank(t *testing.T) {
-	rank := 1
-	c := &config.Config{Types: []config.TypeOverride{{Name: "release", Rank: &rank}}}
-	for _, line := range rankLines(c) {
-		if strings.HasPrefix(line, "rank 3:") && !strings.Contains(line, "feature") {
-			t.Errorf("empty rank rendered: %q", line)
+	milestoneRank, taskRank := 1, config.LeafRank
+	c := &config.Config{
+		TypesExclusive: true,
+		Types: []config.TypeOverride{
+			{Name: "milestone", Rank: &milestoneRank},
+			{Name: "task", Rank: &taskRank},
+		},
+	}
+	got := rankLines(c)
+	want := []string{"rank 1: milestone", "rank 4: task"}
+	if len(got) != len(want) {
+		t.Fatalf("rankLines() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("rankLines()[%d] = %q, want %q", i, got[i], want[i])
 		}
 	}
 }
