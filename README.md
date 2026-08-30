@@ -94,7 +94,7 @@ Profiles are expanded into the repository's `.beans.yml` when `beans init --prof
 
 ## Installation
 
-Tagged versions publish binaries on the fork's [Releases page](https://github.com/xRiErOS/beans/releases). To build the current checkout instead, use the repository's `mise` pipeline, which generates the frontend assets required by the embedded web UI and stamps all three binaries with version metadata.
+The fork publishes no downloadable release artifacts yet. Build the checkout with the repository's `mise` pipeline, which generates the frontend assets required by the embedded web UI and stamps all three binaries with version metadata.
 
 ````sh
 git clone https://github.com/xRiErOS/beans.git

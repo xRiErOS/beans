@@ -8,7 +8,7 @@ Beans was originally created by [hmans](https://github.com/hmans/beans); this fo
 
 The fork's `go.mod` still declares its module path as `github.com/hmans/beans`, so `go install github.com/xRiErOS/beans/cmd/beans@latest` does not work: Go's module resolver would fetch the fork's source under a path that does not match its own module declaration and fail. Build from a local clone instead, as shown below.
 
-The repository's `.goreleaser.yaml` builds all three binaries for Linux, macOS, and Windows and publishes them as GitHub Release artifacts of this fork whenever a tag is pushed; it configures no Homebrew tap. If the fork's [Releases page](https://github.com/xRiErOS/beans/releases) carries no artifact for the version you want, build from source as described below.
+The repository's `.goreleaser.yaml` builds all three binaries for Linux, macOS, and Windows and configures no Homebrew tap; a tag push runs that pipeline through GitHub Actions and attaches the archives to a GitHub Release of this fork. The fork's [Releases page](https://github.com/xRiErOS/beans/releases) carries no artifacts yet, so building from source as described below is currently the only installation path.
 
 ## Prerequisites
 
