@@ -635,15 +635,12 @@ func (m *Manager) readOutput(beanID string, stdout io.Reader, workDir string, pr
 		proc.signal()
 
 		// Only report the failure if this stream still belongs to the current
-		// process — same guard spawnAndRun uses below. A torn-down predecessor
-		// (Stop, then a new message) must not flip a freshly spawned, healthy
-		// session to ERROR.
-		m.mu.RLock()
-		current := m.processes[beanID] == proc
-		m.mu.RUnlock()
-		if current {
-			m.setError(beanID, fmt.Sprintf("agent output stream failed: %v", err))
-		}
+		// process: a torn-down predecessor (Stop, then a new message) must not
+		// flip a freshly spawned, healthy session to ERROR. The check and the
+		// write share one lock — see setErrorIfCurrent — because between a
+		// released read lock and setError's write lock the successor can be
+		// installed and the failure would land on it after all.
+		m.setErrorIfCurrent(beanID, proc, fmt.Sprintf("agent output stream failed: %v", err))
 	}
 }
 
@@ -695,6 +692,31 @@ func (m *Manager) setError(beanID, errMsg string) {
 	}
 	m.mu.Unlock()
 	m.notify(beanID)
+}
+
+// setErrorIfCurrent sets the session to error state, but only while proc is
+// still the process registered for the bean. Check and write happen under a
+// single write lock, the way spawnAndRun's own ownership check does: a
+// check-then-act guard that releases the lock in between leaves a window in
+// which StopSession can drop the process and a new SendMessage can install a
+// healthy successor, so the dead stream's error would flip the successor to
+// ERROR. Subscribers are notified outside the lock, and only if anything was
+// actually written. Format errMsg at the call site, never inside the lock.
+func (m *Manager) setErrorIfCurrent(beanID string, proc *runningProcess, errMsg string) {
+	m.mu.Lock()
+	wrote := false
+	if m.processes[beanID] == proc {
+		if s, ok := m.sessions[beanID]; ok {
+			s.Status = StatusError
+			s.Error = errMsg
+			wrote = true
+		}
+	}
+	m.mu.Unlock()
+
+	if wrote {
+		m.notify(beanID)
+	}
 }
 
 // blockingInteraction returns a PendingInteraction if the tool name is a blocking
