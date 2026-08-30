@@ -157,7 +157,7 @@ Beans ships built-in tables for statuses, types, and priorities. `.beans.yml` ca
 | `completed` | `overlay1` | yes | `C` | Finished successfully |
 | `scrapped` | `surface2` | yes | `S` | Will not be done |
 
-`short` is the single-character code narrow terminal views and legends render; a status without one renders `?`. An entry in `statuses` overrides `color`, `description`, `archive`, and `short` on the named status, or defines a new status if the name is not one of the five above:
+`short` is the single-character code narrow terminal views and legends render; when a status has none, the status name's first letter is upper-cased instead, and only an unknown status renders `?`. An entry in `statuses` overrides `color`, `description`, `archive`, and `short` on the named status, or defines a new status if the name is not one of the five above:
 
 ```yaml
 statuses:
