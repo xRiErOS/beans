@@ -367,7 +367,7 @@ func TestCollectLeafDescendants(t *testing.T) {
 	}
 
 	t.Run("flattens through nested features, excludes done by default", func(t *testing.T) {
-		got := collectLeafDescendants("feat1", children, false)
+		got := collectLeafDescendants("feat1", children, false, nil)
 		if len(got) != 2 {
 			t.Fatalf("got %d leafs, want 2 (t1, t2)", len(got))
 		}
@@ -378,14 +378,14 @@ func TestCollectLeafDescendants(t *testing.T) {
 	})
 
 	t.Run("includes done when requested", func(t *testing.T) {
-		got := collectLeafDescendants("feat1", children, true)
+		got := collectLeafDescendants("feat1", children, true, nil)
 		if len(got) != 3 {
 			t.Fatalf("got %d leafs, want 3 (t1, t2, t3)", len(got))
 		}
 	})
 
 	t.Run("no children returns empty, not nil panic", func(t *testing.T) {
-		got := collectLeafDescendants("nonexistent", children, false)
+		got := collectLeafDescendants("nonexistent", children, false, nil)
 		if len(got) != 0 {
 			t.Errorf("got %d leafs, want 0", len(got))
 		}
@@ -405,7 +405,7 @@ func TestCollectLeafDescendants(t *testing.T) {
 				{ID: "t1", Type: "task", Title: "Reachable leaf", Status: "todo", Parent: "featB"},
 			},
 		}
-		got := collectLeafDescendants("featA", cyclic, false)
+		got := collectLeafDescendants("featA", cyclic, false, nil)
 		if len(got) != 1 || got[0].ID != "t1" {
 			t.Errorf("got %v, want exactly [t1]", got)
 		}
@@ -1228,5 +1228,90 @@ func TestHiddenContainerHidesEveryRankBeneathIt(t *testing.T) {
 	}
 	if len(data.Milestones) != 0 {
 		t.Errorf("got %d milestone groups, want 0 — the hidden bucket is the only rank-1 bean", len(data.Milestones))
+	}
+}
+
+// TestHiddenContainerNestedUnderVisibleParentVanishesEntirely covers Ruling 1
+// of the fix round (D15): hiding removes, it does not reclassify. A
+// hidden-type rank-2 container underneath a *visible* rank-1 milestone must
+// vanish together with its whole subtree -- it must not render as one of the
+// milestone's Epics, and its leaf must not fold up into the milestone's flat
+// "Other" list either (that fold-up is exactly the "unassigned items"
+// failure mode D15 names).
+func TestHiddenContainerNestedUnderVisibleParentVanishesEntirely(t *testing.T) {
+	rank := 2
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "t0", Type: "task", Status: "todo", Title: "Planned", Parent: "m1"},
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot", Parent: "m1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
+		t.Fatalf("the visible milestone must still render, got %+v", data.Milestones)
+	}
+	group := data.Milestones[0]
+	for _, eg := range group.Epics {
+		if eg.Epic.ID == "b1" {
+			t.Fatal("a hidden rank-2 container under a visible milestone must not render as one of its Epics")
+		}
+	}
+	for _, o := range group.Other {
+		if o.ID == "t1" || o.ID == "b1" {
+			t.Fatalf("a hidden container's leaf must not fold up into the parent's flat Other list, got %q", o.ID)
+		}
+	}
+	if data.Unscheduled != nil {
+		for _, o := range data.Unscheduled.Other {
+			if o.ID == "t1" || o.ID == "b1" {
+				t.Fatalf("a hidden container's leaf must not resurface as unscheduled either, got %q", o.ID)
+			}
+		}
+	}
+}
+
+// TestScopedRoadmapBypassesHidingForTheNamedRoot covers Ruling 2 of the fix
+// round: the roadmap-visibility flag governs the aggregate views (the
+// overview, and beans milestones), not a direct-by-ID lookup of a container
+// the user named. A scoped root of a hidden type must still render its full
+// content, exactly like a visible root would -- consistent with the rank-2/3
+// scoped branches, which never consulted visibility at all.
+func TestScopedRoadmapBypassesHidingForTheNamedRoot(t *testing.T) {
+	rank := 1
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	root := &bean.Bean{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"}
+	beans := []*bean.Bean{
+		root,
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"},
+	}
+
+	data := buildScopedRoadmap(beans, false, root)
+
+	if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "b1" {
+		t.Fatalf("a scoped hidden root must still render as its own container, got %+v", data.Milestones)
+	}
+	found := false
+	for _, o := range data.Milestones[0].Other {
+		if o.ID == "t1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a scoped hidden root must render its full content -- hiding is bypassed for a direct-by-ID lookup")
 	}
 }

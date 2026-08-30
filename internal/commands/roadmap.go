@@ -227,7 +227,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Build milestone groups
 	var milestoneGroups []milestoneGroup
 	for _, m := range milestones {
-		group := buildMilestoneGroup(m, children, includeDone)
+		group := buildMilestoneGroup(m, children, includeDone, hidden)
 		// Only include milestones that have visible content
 		if len(group.Epics) > 0 || len(group.Features) > 0 || len(group.Other) > 0 {
 			milestoneGroups = append(milestoneGroups, group)
@@ -262,7 +262,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		if underMilestone[b.ID] {
 			continue
 		}
-		eg := buildEpicGroup(b, children, includeDone)
+		eg := buildEpicGroup(b, children, includeDone, hidden)
 		if len(eg.Items) > 0 || len(eg.Features) > 0 {
 			unscheduledEpics = append(unscheduledEpics, eg)
 		}
@@ -295,7 +295,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 				continue
 			}
 		}
-		fg := buildFeatureGroup(b, children, includeDone)
+		fg := buildFeatureGroup(b, children, includeDone, hidden)
 		if len(fg.Items) > 0 {
 			unscheduledFeatures = append(unscheduledFeatures, fg)
 		}
@@ -321,7 +321,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 			// here to avoid double-rendering. Childless epics (beans-36fa)
 			// are not containers -- fall through and treat them as a flat
 			// leaf like any other orphan item below.
-			if eg, _ := classifyEpicChild(b, children, includeDone); eg != nil {
+			if eg, _ := classifyEpicChild(b, children, includeDone, hidden); eg != nil {
 				continue
 			}
 		}
@@ -331,7 +331,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 			// here to avoid double-rendering. Childless features (D01,
 			// beans-n8zw) are not containers -- fall through and treat
 			// them as a flat leaf like any other orphan item below.
-			if fg, _ := classifyFeatureChild(b, children, includeDone); fg != nil {
+			if fg, _ := classifyFeatureChild(b, children, includeDone, hidden); fg != nil {
 				continue
 			}
 		}
@@ -407,24 +407,23 @@ func markSubtree(id string, children map[string][]*bean.Bean, seen map[string]bo
 // epic, or feature root. Callers must have already validated root's type
 // via validateRoadmapRootType; any other type panics, since that would be a
 // caller bug, not user input.
+//
+// The roadmap-visibility flag (cfg.IsRoadmapType, D15) governs the aggregate
+// views -- the unscoped roadmap and beans milestones -- not a direct-by-ID
+// lookup of a container the user named here. All three branches therefore
+// pass a nil hidden set to the build*Group functions: a scoped root, and
+// everything beneath it, renders in full regardless of any hidden type
+// found in its subtree.
 func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData {
 	switch cfg.RankOf(root.Type) {
 	case 1:
-		data := buildRoadmap(allBeans, includeDone, nil, nil)
-		for _, mg := range data.Milestones {
-			if mg.Milestone.ID == root.ID {
-				return &roadmapData{Milestones: []milestoneGroup{mg}}
-			}
-		}
-		// buildRoadmap drops milestones with zero visible children -- the
-		// root was still found and matched by type/ID, so render it as an
-		// empty container rather than silently returning nothing.
-		return &roadmapData{Milestones: []milestoneGroup{{Milestone: root}}}
+		group := buildMilestoneGroup(root, childrenIndex(allBeans), includeDone, nil)
+		return &roadmapData{Milestones: []milestoneGroup{group}}
 	case 2:
-		eg := buildEpicGroup(root, childrenIndex(allBeans), includeDone)
+		eg := buildEpicGroup(root, childrenIndex(allBeans), includeDone, nil)
 		return &roadmapData{Root: &rootGroup{Epic: &eg}}
 	case 3:
-		fg := buildFeatureGroup(root, childrenIndex(allBeans), includeDone)
+		fg := buildFeatureGroup(root, childrenIndex(allBeans), includeDone, nil)
 		return &roadmapData{Root: &rootGroup{Feature: &fg}}
 	default:
 		// validateRoadmapRootType is checked by every caller before this
@@ -448,12 +447,23 @@ func validateRoadmapRootType(b *bean.Bean) error {
 		strings.Join(containers, ", "), b.Type, b.ID)
 }
 
-// buildMilestoneGroup builds a milestone group with its epics and other items.
-func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, includeDone bool) milestoneGroup {
+// buildMilestoneGroup builds a milestone group with its epics and other
+// items. hidden marks every bean whose whole subtree opted out of the
+// aggregate views (D15): such a child is dropped outright, not folded into
+// Other -- hiding removes, it does not reclassify. Pass nil to render
+// unfiltered (buildScopedRoadmap's direct-by-ID lookup bypasses hiding).
+func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) milestoneGroup {
 	group := milestoneGroup{Milestone: m}
 
-	// Get direct children of this milestone
-	directChildren := children[m.ID]
+	// Get direct children of this milestone, dropping any whose subtree is
+	// hidden before they can be classified as an epic or folded into Other.
+	var directChildren []*bean.Bean
+	for _, child := range children[m.ID] {
+		if hidden[child.ID] {
+			continue
+		}
+		directChildren = append(directChildren, child)
+	}
 
 	// Separate epics from other items
 	var epics []*bean.Bean
@@ -468,7 +478,7 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 
 	// Build epic groups
 	for _, epic := range epics {
-		eg := buildEpicGroup(epic, children, includeDone)
+		eg := buildEpicGroup(epic, children, includeDone, hidden)
 		if len(eg.Items) > 0 || len(eg.Features) > 0 {
 			group.Epics = append(group.Epics, eg)
 		}
@@ -479,7 +489,7 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 	other, featureChildren := splitByContainerType(rest)
 
 	for _, feature := range featureChildren {
-		fg, leaf := classifyFeatureChild(feature, children, includeDone)
+		fg, leaf := classifyFeatureChild(feature, children, includeDone, hidden)
 		if fg != nil {
 			group.Features = append(group.Features, *fg)
 		}
@@ -510,13 +520,23 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 }
 
 // buildEpicGroup builds an epic group: its direct leaf children plus a
-// recursively-resolved featureGroup for each direct feature child.
-func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) epicGroup {
-	leafs, featureChildren := splitByContainerType(children[epic.ID])
+// recursively-resolved featureGroup for each direct feature child. hidden is
+// as in buildMilestoneGroup: a hidden child's whole subtree is dropped, not
+// folded into Items. Pass nil to render unfiltered (buildScopedRoadmap's
+// direct-by-ID lookup bypasses hiding).
+func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) epicGroup {
+	var visibleChildren []*bean.Bean
+	for _, child := range children[epic.ID] {
+		if hidden[child.ID] {
+			continue
+		}
+		visibleChildren = append(visibleChildren, child)
+	}
+	leafs, featureChildren := splitByContainerType(visibleChildren)
 
 	eg := epicGroup{Epic: epic}
 	for _, feature := range featureChildren {
-		fg, leaf := classifyFeatureChild(feature, children, includeDone)
+		fg, leaf := classifyFeatureChild(feature, children, includeDone, hidden)
 		if fg != nil {
 			eg.Features = append(eg.Features, *fg)
 		}
@@ -543,8 +563,8 @@ func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDo
 // as leaf so the caller can fold it into its own flat-leaf list -- and go
 // through the exact same archive-status filtering every other leaf in that
 // list goes through, instead of being silently dropped.
-func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) (fg *featureGroup, leaf *bean.Bean) {
-	built := buildFeatureGroup(feature, children, includeDone)
+func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) (fg *featureGroup, leaf *bean.Bean) {
+	built := buildFeatureGroup(feature, children, includeDone, hidden)
 	if len(built.Items) > 0 {
 		return &built, nil
 	}
@@ -559,8 +579,8 @@ func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, 
 // its own flat-leaf list -- and go through the exact same archive-status
 // filtering every other leaf in that list goes through, instead of being
 // silently dropped.
-func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) (eg *epicGroup, leaf *bean.Bean) {
-	built := buildEpicGroup(epic, children, includeDone)
+func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) (eg *epicGroup, leaf *bean.Bean) {
+	built := buildEpicGroup(epic, children, includeDone, hidden)
 	if len(built.Items) > 0 || len(built.Features) > 0 {
 		return &built, nil
 	}
@@ -569,9 +589,12 @@ func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includ
 
 
 // buildFeatureGroup builds a feature group: all leaf descendants found
-// anywhere beneath the feature, flattened and sorted.
-func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) featureGroup {
-	items := collectLeafDescendants(feature.ID, children, includeDone)
+// anywhere beneath the feature, flattened and sorted. hidden is as in
+// buildMilestoneGroup: a hidden descendant, and everything beneath it, is
+// dropped rather than flattened into Items. Pass nil to render unfiltered
+// (buildScopedRoadmap's direct-by-ID lookup bypasses hiding).
+func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) featureGroup {
+	items := collectLeafDescendants(feature.ID, children, includeDone, hidden)
 	bean.SortRoadmapLeaves(items, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 	return featureGroup{Feature: feature, Items: items}
 }
@@ -610,16 +633,19 @@ func splitByContainerType(beans []*bean.Bean) (leafs []*bean.Bean, features []*b
 // collectLeafDescendants recursively walks everything below parentID and
 // returns the leaf beans found at any depth, flattened. Feature-typed
 // descendants are transparent containers: their own children are walked
-// too, but the feature bean itself is never included in the result.
+// too, but the feature bean itself is never included in the result. hidden
+// is as in buildMilestoneGroup: a hidden descendant, and everything beneath
+// it, is dropped rather than flattened in. Pass nil to render unfiltered
+// (buildScopedRoadmap's direct-by-ID lookup bypasses hiding).
 // beans.yml's ValidateParent forbids feature-under-feature via the CLI, so
 // this only recurses more than one level on hand-edited data -- the
 // visited guard exists purely so a hand-authored parent cycle can't crash
 // roadmap with a stack overflow (the old, non-recursive code was immune).
-func collectLeafDescendants(parentID string, children map[string][]*bean.Bean, includeDone bool) []*bean.Bean {
-	return collectLeafDescendantsVisited(parentID, children, includeDone, map[string]bool{})
+func collectLeafDescendants(parentID string, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) []*bean.Bean {
+	return collectLeafDescendantsVisited(parentID, children, includeDone, hidden, map[string]bool{})
 }
 
-func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.Bean, includeDone bool, visited map[string]bool) []*bean.Bean {
+func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool, visited map[string]bool) []*bean.Bean {
 	if visited[parentID] {
 		return nil
 	}
@@ -627,8 +653,11 @@ func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.
 
 	var leafs []*bean.Bean
 	for _, child := range children[parentID] {
+		if hidden[child.ID] {
+			continue
+		}
 		if isRank(child, 3) {
-			leafs = append(leafs, collectLeafDescendantsVisited(child.ID, children, includeDone, visited)...)
+			leafs = append(leafs, collectLeafDescendantsVisited(child.ID, children, includeDone, hidden, visited)...)
 			continue
 		}
 		if !includeDone && cfg.IsArchiveStatus(child.Status) {
