@@ -153,3 +153,62 @@ func TestEveryProfileTypeCarriesADescription(t *testing.T) {
 		}
 	}
 }
+
+// TestClassicProfileMatchesDefaultTypes pins the product owner's
+// exclusivity decision: `beans init --profile classic` must yield a
+// project indistinguishable from `beans init`. The data was verified field
+// by field in review, but nothing guarded it before this test, and this
+// area's whole failure mode has been hand-transcribed tables drifting.
+// Compare the merged TypeList() of an exclusive classic config against
+// DefaultTypes field by field -- name, rank, short, colour, emphasis,
+// description, roadmap -- and also by position, so a name landing on the
+// wrong rank or a reordered list is caught too.
+func TestClassicProfileMatchesDefaultTypes(t *testing.T) {
+	list, ok := ProfileTypes("classic")
+	if !ok {
+		t.Fatal(`ProfileTypes("classic") not found`)
+	}
+
+	c := &Config{TypesExclusive: true, Types: list}
+	got := c.TypeList()
+
+	if len(got) != len(DefaultTypes) {
+		t.Fatalf("classic TypeList() has %d types, want %d (DefaultTypes): %+v", len(got), len(DefaultTypes), got)
+	}
+
+	roadmapValue := func(r *bool) string {
+		if r == nil {
+			return "nil (visible)"
+		}
+		if *r {
+			return "true"
+		}
+		return "false"
+	}
+
+	for i, want := range DefaultTypes {
+		g := got[i]
+		if g.Name != want.Name {
+			t.Errorf("position %d: Name = %q, want %q (order/name mismatch)", i, g.Name, want.Name)
+			continue
+		}
+		if g.Rank != want.Rank {
+			t.Errorf("%s: Rank = %d, want %d", want.Name, g.Rank, want.Rank)
+		}
+		if g.Short != want.Short {
+			t.Errorf("%s: Short = %q, want %q", want.Name, g.Short, want.Short)
+		}
+		if g.Color != want.Color {
+			t.Errorf("%s: Color = %q, want %q", want.Name, g.Color, want.Color)
+		}
+		if g.Emphasis != want.Emphasis {
+			t.Errorf("%s: Emphasis = %v, want %v", want.Name, g.Emphasis, want.Emphasis)
+		}
+		if g.Description != want.Description {
+			t.Errorf("%s: Description = %q, want %q", want.Name, g.Description, want.Description)
+		}
+		if gv, wv := roadmapValue(g.Roadmap), roadmapValue(want.Roadmap); gv != wv {
+			t.Errorf("%s: Roadmap = %s, want %s", want.Name, gv, wv)
+		}
+	}
+}
