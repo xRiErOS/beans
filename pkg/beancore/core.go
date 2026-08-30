@@ -459,23 +459,29 @@ func (c *Core) All() []*bean.Bean {
 	return result
 }
 
-// Get finds a bean by exact ID match.
-// If a prefix is configured and the query doesn't include it, the prefix is automatically prepended.
-// For example, with prefix "beans-", Get("abc") will match "beans-abc" but Get("ab") will not.
+// Get finds a bean by exact ID match and returns a copy, safe to use after
+// the lock is gone. If a prefix is configured and the query doesn't include
+// it, the prefix is automatically prepended. For example, with prefix
+// "beans-", Get("abc") will match "beans-abc" but Get("ab") will not.
+//
+// The copy is the contract: writers mutate the stored structs in place
+// under the write lock (RemoveLinksTo, FixBrokenLinks, applyRenameSlug), so
+// handing out the live pointer would let a caller observe a bean mid-write
+// or silently write through it into the store.
 func (c *Core) Get(id string) (*bean.Bean, error) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
 	// Try exact match
 	if b, ok := c.beans[id]; ok {
-		return b, nil
+		return b.Clone(), nil
 	}
 
 	// If not found and we have a configured prefix that isn't already in the query,
 	// try with the prefix prepended (allows short IDs like "abc" to match "beans-abc")
 	if c.config != nil && c.config.Beans.Prefix != "" && !strings.HasPrefix(id, c.config.Beans.Prefix) {
 		if b, ok := c.beans[c.config.Beans.Prefix+id]; ok {
-			return b, nil
+			return b.Clone(), nil
 		}
 	}
 
@@ -765,7 +771,7 @@ func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
 	}
 
 	// Add to in-memory map
-	c.setBeanLocked(b.ID, b)
+	c.setBeanLocked(b.ID, b.Clone())
 
 	// Update search index if active (best-effort, don't fail create)
 	if c.searchIndex != nil {
@@ -831,10 +837,12 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 	}
 
 	if wantsETagFromDisk {
-		// The etag has to come from the file, not from the in-memory bean: Go
-		// passes the bean by pointer, so the caller's edits already landed in
-		// c.beans[id] and its etag describes the new state, not the one being
-		// replaced.
+		// storedBean is the pre-update stored copy: Get()/Create()/Update() now
+		// clone on both ingress and egress, so the caller's mutations on b never
+		// land in c.beans[id] until the setBeanLocked call below. storedBean.ETag()
+		// therefore already describes the state being replaced — the definition
+		// If-Match is checked against — without needing to re-read the file,
+		// except where mainContent was read above for a different reason.
 		currentETag := storedBean.ETag()
 		if haveMainContent {
 			// Same definition bean.ETag uses.
@@ -889,7 +897,7 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 	}
 
 	// Update in-memory map
-	c.setBeanLocked(b.ID, b)
+	c.setBeanLocked(b.ID, b.Clone())
 
 	// Update search index if active (best-effort, don't fail update)
 	if c.searchIndex != nil {
@@ -1042,11 +1050,14 @@ func (c *Core) Archive(id string) error {
 	targetBean.Path = newRelPath
 	c.setBeanLocked(targetID, targetBean)
 	c.mainPaths[targetID] = newRelPath
+	// Copy while the write lock is still held: fanOut runs unlocked, so a
+	// copy taken there would race the writers it exists to protect.
+	eventBean := targetBean.Clone()
 	c.mu.Unlock()
 
 	c.fanOut([]BeanEvent{{
 		Type:   EventUpdated,
-		Bean:   targetBean,
+		Bean:   eventBean,
 		BeanID: targetID,
 	}})
 
@@ -1181,7 +1192,7 @@ func (c *Core) LoadAndUnarchive(id string) (*bean.Bean, error) {
 
 	// If already in main directory, just return it
 	if !c.isArchivedPath(b.Path) {
-		return b, nil
+		return b.Clone(), nil
 	}
 
 	// Move file from archive to main directory
@@ -1198,7 +1209,7 @@ func (c *Core) LoadAndUnarchive(id string) (*bean.Bean, error) {
 	c.mainPaths[targetID] = newRelPath
 	c.setBeanLocked(targetID, b)
 
-	return b, nil
+	return b.Clone(), nil
 }
 
 // Init creates the .beans directory if it doesn't exist,

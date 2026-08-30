@@ -51,6 +51,32 @@ func (r *LinkCheckResult) TotalIssues() int {
 	return len(r.BrokenLinks) + len(r.SelfLinks) + len(r.Cycles)
 }
 
+// cloneIncomingLinks copies the index entries and the beans behind them. The
+// reverse index stores the live pointers on purpose — it is rebuilt from the
+// map — so the copy has to happen where the lock is still held.
+func cloneIncomingLinks(links []IncomingLink) []IncomingLink {
+	if links == nil {
+		return nil
+	}
+	out := make([]IncomingLink, len(links))
+	for i, l := range links {
+		out[i] = IncomingLink{FromBean: l.FromBean.Clone(), LinkType: l.LinkType}
+	}
+	return out
+}
+
+// cloneBeans copies a slice of beans taken from the store.
+func cloneBeans(beans []*bean.Bean) []*bean.Bean {
+	if beans == nil {
+		return nil
+	}
+	out := make([]*bean.Bean, len(beans))
+	for i, b := range beans {
+		out[i] = b.Clone()
+	}
+	return out
+}
+
 // FindIncomingLinks returns all beans that link TO the given bean ID.
 // It answers from a reverse index built once per mutation, so a caller walking
 // many beans (children, blocked-by and blocking resolvers do exactly that)
@@ -58,7 +84,7 @@ func (r *LinkCheckResult) TotalIssues() int {
 func (c *Core) FindIncomingLinks(targetID string) []IncomingLink {
 	c.mu.RLock()
 	if c.incomingValid {
-		links := append([]IncomingLink(nil), c.incoming[targetID]...)
+		links := cloneIncomingLinks(c.incoming[targetID])
 		c.mu.RUnlock()
 		return links
 	}
@@ -67,7 +93,7 @@ func (c *Core) FindIncomingLinks(targetID string) []IncomingLink {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rebuildIncomingLocked()
-	return append([]IncomingLink(nil), c.incoming[targetID]...)
+	return cloneIncomingLinks(c.incoming[targetID])
 }
 
 // rebuildIncomingLocked recomputes the reverse link index from beans.
@@ -527,13 +553,17 @@ func isResolvedStatus(status string) bool {
 // IsBlocked returns true if the bean is blocked, either explicitly (direct
 // blockers) or implicitly (an ancestor in the parent chain is blocked).
 func (c *Core) IsBlocked(beanID string) bool {
-	return len(c.FindAllBlockers(beanID)) > 0
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.findAllBlockersLocked(beanID)) > 0
 }
 
 // IsExplicitlyBlocked returns true if the bean has direct active blockers
 // (via blocked_by field or incoming blocking links).
 func (c *Core) IsExplicitlyBlocked(beanID string) bool {
-	return len(c.FindActiveBlockers(beanID)) > 0
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return len(c.findActiveBlockersLocked(beanID, nil)) > 0
 }
 
 // IsImplicitlyBlocked returns true if an ancestor of the bean (via the parent
@@ -563,7 +593,7 @@ func (c *Core) FindActiveBlockers(beanID string) []*bean.Bean {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.findActiveBlockersLocked(beanID, nil)
+	return cloneBeans(c.findActiveBlockersLocked(beanID, nil))
 }
 
 // FindAllBlockers returns all beans blocking the given bean, both explicitly
@@ -572,6 +602,13 @@ func (c *Core) FindAllBlockers(beanID string) []*bean.Bean {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
+	return cloneBeans(c.findAllBlockersLocked(beanID))
+}
+
+// findAllBlockersLocked finds all beans blocking beanID, both explicitly
+// (direct blockers) and implicitly (blockers on ancestors in the parent
+// chain). Must be called with c.mu held.
+func (c *Core) findAllBlockersLocked(beanID string) []*bean.Bean {
 	seen := make(map[string]bool)
 	var allBlockers []*bean.Bean
 

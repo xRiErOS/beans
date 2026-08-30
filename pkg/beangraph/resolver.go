@@ -67,7 +67,7 @@ func (r *CoreResolver) ValidateAndSetParent(b *bean.Bean, parentID string) error
 func (r *CoreResolver) ValidateAndAddBlocking(b *bean.Bean, targetIDs []string) error {
 	for _, targetID := range targetIDs {
 		// Normalise short ID to full ID
-		normalizedTargetID, _ := r.Core.NormalizeID(targetID)
+		normalizedTargetID, ok := r.Core.NormalizeID(targetID)
 
 		// Validate: cannot block itself
 		if normalizedTargetID == b.ID {
@@ -75,7 +75,7 @@ func (r *CoreResolver) ValidateAndAddBlocking(b *bean.Bean, targetIDs []string) 
 		}
 
 		// Validate: target must exist
-		if _, err := r.Core.Get(normalizedTargetID); err != nil {
+		if !ok {
 			return fmt.Errorf("blocking target bean not found: %s", targetID)
 		}
 
@@ -104,7 +104,7 @@ func (r *CoreResolver) RemoveBlockingRelationships(b *bean.Bean, targetIDs []str
 func (r *CoreResolver) ValidateAndAddBlockedBy(b *bean.Bean, targetIDs []string) error {
 	for _, targetID := range targetIDs {
 		// Normalise short ID to full ID
-		normalizedTargetID, _ := r.Core.NormalizeID(targetID)
+		normalizedTargetID, ok := r.Core.NormalizeID(targetID)
 
 		// Validate: cannot be blocked by itself
 		if normalizedTargetID == b.ID {
@@ -112,7 +112,7 @@ func (r *CoreResolver) ValidateAndAddBlockedBy(b *bean.Bean, targetIDs []string)
 		}
 
 		// Validate: blocker must exist
-		if _, err := r.Core.Get(normalizedTargetID); err != nil {
+		if !ok {
 			return fmt.Errorf("blocker bean not found: %s", targetID)
 		}
 

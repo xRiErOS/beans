@@ -55,9 +55,9 @@ func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInp
 		// Normalise short IDs to full IDs
 		normalizedBlocking := make([]string, len(input.Blocking))
 		for i, id := range input.Blocking {
-			normalizedBlocking[i], _ = r.Core.NormalizeID(id)
-			// Verify target exists
-			if _, err := r.Core.Get(normalizedBlocking[i]); err != nil {
+			var ok bool
+			normalizedBlocking[i], ok = r.Core.NormalizeID(id)
+			if !ok {
 				return nil, fmt.Errorf("target bean not found: %s", id)
 			}
 		}
@@ -69,9 +69,9 @@ func (r *CoreResolver) CreateBean(ctx context.Context, input model.CreateBeanInp
 		// Normalise short IDs to full IDs
 		normalizedBlockedBy := make([]string, len(input.BlockedBy))
 		for i, id := range input.BlockedBy {
-			normalizedBlockedBy[i], _ = r.Core.NormalizeID(id)
-			// Verify blocker exists
-			if _, err := r.Core.Get(normalizedBlockedBy[i]); err != nil {
+			var ok bool
+			normalizedBlockedBy[i], ok = r.Core.NormalizeID(id)
+			if !ok {
 				return nil, fmt.Errorf("blocker bean not found: %s", id)
 			}
 		}
@@ -252,9 +252,8 @@ func (r *CoreResolver) UpdateBean(ctx context.Context, id string, input model.Up
 // DeleteBean removes a bean and its incoming links.
 func (r *CoreResolver) DeleteBean(ctx context.Context, id string) (bool, error) {
 	// Verify bean exists
-	_, err := r.Core.Get(id)
-	if err != nil {
-		return false, err
+	if _, ok := r.Core.NormalizeID(id); !ok {
+		return false, beancore.ErrNotFound
 	}
 
 	// Remove incoming links first
@@ -310,14 +309,14 @@ func (r *CoreResolver) AddBlocking(ctx context.Context, id string, targetID stri
 	}
 
 	// Normalise short ID to full ID
-	normalizedTargetID, _ := r.Core.NormalizeID(targetID)
+	normalizedTargetID, ok := r.Core.NormalizeID(targetID)
 
 	if normalizedTargetID == b.ID {
 		return nil, fmt.Errorf("bean cannot block itself")
 	}
 
 	// Check target exists
-	if _, err := r.Core.Get(normalizedTargetID); err != nil {
+	if !ok {
 		return nil, fmt.Errorf("target bean not found: %s", targetID)
 	}
 
@@ -359,14 +358,14 @@ func (r *CoreResolver) AddBlockedBy(ctx context.Context, id string, targetID str
 		return nil, err
 	}
 
-	normalizedTargetID, _ := r.Core.NormalizeID(targetID)
+	normalizedTargetID, ok := r.Core.NormalizeID(targetID)
 
 	if normalizedTargetID == b.ID {
 		return nil, fmt.Errorf("bean cannot be blocked by itself")
 	}
 
 	// Check target exists
-	if _, err := r.Core.Get(normalizedTargetID); err != nil {
+	if !ok {
 		return nil, fmt.Errorf("blocker bean not found: %s", targetID)
 	}
 

@@ -369,13 +369,13 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 			if existed {
 				events = append(events, BeanEvent{
 					Type:   EventUpdated,
-					Bean:   newBean,
+					Bean:   newBean.Clone(),
 					BeanID: newBean.ID,
 				})
 			} else {
 				events = append(events, BeanEvent{
 					Type:   EventCreated,
-					Bean:   newBean,
+					Bean:   newBean.Clone(),
 					BeanID: newBean.ID,
 				})
 			}
