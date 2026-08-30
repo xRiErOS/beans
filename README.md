@@ -1,168 +1,223 @@
-![beans](https://github.com/user-attachments/assets/776f094c-f2c4-4724-9a0b-5b87e88bc50d)
+# beans
 
-[![License](https://img.shields.io/github/license/hmans/beans?style=for-the-badge)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/hmans/beans?style=for-the-badge)](https://github.com/hmans/beans/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/hmans/beans/test.yml?branch=main&label=tests&style=for-the-badge)](https://github.com/hmans/beans/actions/workflows/test.yml)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/hmans/beans?style=for-the-badge)](https://go.dev/)
-[![Go Report Card](https://goreportcard.com/badge/github.com/hmans/beans?style=for-the-badge)](https://goreportcard.com/report/github.com/hmans/beans)
+[![License](https://img.shields.io/github/license/xRiErOS/beans?style=for-the-badge)](LICENSE)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/xRiErOS/beans?style=for-the-badge)](https://go.dev/)
 
-**Beans is an issue tracker for you, your team, and your coding agents.** Instead of tracking tasks in a separate application, Beans stores them right alongside your code. You can use the `beans` CLI to interact with your tasks, but more importantly, so can your favorite coding agent!
+**A file-based issue tracker for developers, product teams, and AI coding agents.**
 
-This gives your robot friends a juicy upgrade: now they get a complete view of your project, make suggestions for what to work on next, track their progress, create bug issues for problems they find, and more.
+Beans stores work as Markdown files beside the code it describes. Humans, scripts, and coding agents share one Git-versioned source of truth instead of synchronizing a second task system.
 
-You've been programming all your life; now you get to be a product manager. Let's go! 🚀
+This repository is an actively maintained independent fork of [hmans/beans](https://github.com/hmans/beans). It preserves the original local-first, agent-first idea and extends it for richer planning models, safer automation, and presentation-ready terminal workflows.
 
-## Announcement Trailer ✨
+![A scoped beans roadmap rendered in a terminal](wiki/assets/roadmap.webp)
 
-https://github.com/user-attachments/assets/dbe45408-d3ed-4681-a436-a5e3046163da
+[Install](#installation) · [Quick start](#quick-start) · [Choose a profile](#choose-a-project-profile) · [Browse the documentation](wiki/index.md)
 
-## Stability Warning ⚠️
+## Why this fork
 
-Beans is still under heavy development, and its features and APIs may still change significantly. If you decide to use it now, please follow the release notes closely.
+Hannes' original beans project established the core idea: issues should be plain files that live with the repository and remain equally accessible to people and coding agents. This fork builds on that Apache-2.0 codebase with clear attribution to [hmans/beans](https://github.com/hmans/beans).
 
-Since Beans emits its own prompt instructions for your coding agent, most changes will "just work"; but sometimes, we modify the schema of the underlying data files, which may require some manual migration steps. If you get caught by one of these changes, your agent will often be able to migrate your data for you:
+Real product work needed more than a flat task loop. This continuation adds configurable project profiles, richer planning types, scoped roadmaps, consistent terminal rendering, batch lifecycle commands, ordering and rename workflows, completion policies, worktree-aware storage, structured automation interfaces, and dedicated browser and terminal applications.
 
-```
-The Beans data format has changed. Please migrate this project's beans to the new format.
-```
+The goal is not to turn beans into a hosted project-management platform. Beans remains a small, inspectable data and workflow layer that composes with Git, shells, editors, coding agents, and optional user interfaces.
 
-## Features
+[Read the fork lineage](wiki/fork-lineage.md) · [Review compatibility and upgrading](wiki/compatibility-and-upgrading.md)
 
-- **Track tasks, bugs, features**, and more right alongside your code.
-- **Plain old Markdown files** stored in a `.beans` directory in your project. Easy to version control, readable and editable by humans and machines alike!
-- Use the `beans` CLI to create, list, view, update, and archive beans; but more importantly, **let your coding agent do it for you**!
-- **Supercharge your robot friend** with full context about your project and its open tasks. A built-in **GraphQL query engine** allows your agent to get exactly the information it needs, keeping token use to a minimum.
-- **Project memory**: Completed beans are archived and serve as project memory that your coding agent can query for context about past work.
-- A beautiful **built-in** TUI for browsing and managing your beans from the terminal.
-- Generates a **Markdown roadmap document** for your project from your data.
+## Feature overview
+
+### Markdown-native issue tracking
+
+- Store each bean as a Markdown file with structured YAML front matter.
+- Review task changes with the same Git tools used for code.
+- Keep active work and archived project memory readable without a service or proprietary export.
+- Configure types, statuses, priorities, display rules, and lifecycle policies per repository.
+
+### Planning that fits the project
+
+- Select a bundled `classic`, `todo`, `simple`, or `complex` profile at initialization.
+- Model milestones or releases, thematic work, executable stories and tasks, bugs, and roadmap-excluded buckets.
+- Connect work through parent, child, blocking, and blocked-by relationships.
+- Order siblings explicitly without rewriting the complete store.
+
+### Human-readable terminal views
+
+- Render `list`, `milestones`, and `roadmap` as trees or tables with a consistent visual language.
+- Switch roadmap output between terminal presentation and portable Markdown.
+- Scope roadmaps and progress reports to the part of the hierarchy that matters now.
+- Preserve machine-readable JSON modes for scripts and agents.
+
+| Hierarchical list | Bean detail |
+| --- | --- |
+| ![beans list tree view](wiki/assets/list.webp) | ![beans show detail view](wiki/assets/show.webp) |
+
+### Agent-native workflows
+
+- Run `beans prime` to give a coding agent the current project's types, statuses, relationships, policies, and command contract.
+- Use `beans list --ready` or `beans next` to select actionable work rather than merely open work.
+- Query only the required fields through GraphQL and consume stable JSON output where supported.
+- Validate configuration, links, front matter, and policies with `beans check` before automation proceeds.
+
+### Complete work lifecycle
+
+- Create and inspect work with `create`, `list`, `show`, and `next`.
+- Move work through `start`, `complete`, `scrap`, and `archive`.
+- Organize work with `update`, `tag`, `order`, and cascading `rename` modes.
+- Report plans and outcomes with `roadmap`, `milestones`, `progress`, and `graph`.
+
+[Explore every capability](wiki/feature-overview.md) · [Open the full command index](wiki/commands/index.md)
+
+## Choose a project profile
+
+Profiles are expanded into the repository's `.beans.yml` when `beans init --profile` runs. Later releases do not silently replace that explicit project configuration.
+
+### `classic`
+
+- **Existing beans migration:** retain the original `milestone → epic → feature → task/bug` hierarchy when adopting the fork.
+- **Milestone-driven software delivery:** organize checkpoints into thematic epics, user-facing features, and executable work.
+
+### `todo`
+
+- **Markdown todo list:** track a flat set of tasks without planning containers or hierarchy overhead.
+- **AI agent backlog:** give a coding agent a small, unambiguous queue grouped through tags.
+
+### `simple`
+
+- **Small project roadmap:** plan milestones while keeping possible future work in roadmap-excluded buckets.
+- **Feature and bug tracking:** separate thematic epics and user-facing features from executable tasks and defects.
+
+### `complex`
+
+- **Release planning for product teams:** group everything that ships together under an explicit release.
+- **Customer-value prioritization:** distinguish new features, visible improvements, internal chores, demonstrable stories, bugs, and tasks.
+
+[Compare exact profile hierarchies and use cases](wiki/project-profiles.md)
 
 ## Installation
 
-We'll need to do three things:
+The fork does not currently publish downloadable GitHub Release artifacts. Build the verified checkout with the repository's `mise` pipeline, which installs the frontend assets required by Go's embedded web UI and stamps all three binaries with version metadata.
 
-1. Install the `beans` CLI tool.
-2. Configure your project to use it.
-3. Configure your coding agent to interact with it.
+````sh
+git clone https://github.com/xRiErOS/beans.git
+cd beans
 
-Either download Beans from the [Releases section](https://github.com/hmans/beans/releases), or install it via Homebrew:
+mise install
+mise run setup
+mise run build
 
-```bash
-brew install hmans/beans/beans
-```
+install -d "$HOME/.local/bin"
+install -m 755 beans beans-serve beans-tui "$HOME/.local/bin/"
+export PATH="$HOME/.local/bin:$PATH"
 
-Alternatively, install directly via Go:
+beans version
+````
 
-```bash
-go install github.com/hmans/beans@latest
-```
+The repository currently keeps the historical `github.com/hmans/beans` Go module path. Consequently, `go install github.com/xRiErOS/beans/cmd/beans@latest` is not a valid fork installation command.
 
-## Configure Your Project
+[Installation details and prerequisites](wiki/installation.md)
 
-Inside the root directory of your project, run:
+## Quick start
 
-```bash
-beans init
-```
+Initialize a disposable project with the smallest profile and create the first ready task:
 
-This will create a `.beans/` directory and a `.beans.yml` configuration file at the project root. All of it is meant to be tracked in your version control system.
+````sh
+mkdir beans-demo
+cd beans-demo
 
-From this point onward, you can interact with your Beans through the `beans` CLI. To get a list of available commands:
+beans init --profile todo
+beans create "Ship the first documented change" --type task --priority high --status todo
+beans list --ready
+beans next
+````
 
-```bash
-beans help
-```
+Beans creates `.beans.yml` plus a `.beans/` directory. Commit both with the repository so task history and code history travel together.
 
-But more importantly, you'll want to get your coding agent set up to use it. Let's dive in!
+For a hierarchical roadmap, initialize `simple` or `complex`, create top-level planning containers, and connect executable work with `--parent`.
 
-## Agent Configuration
+[Follow the complete hierarchy-to-roadmap tutorial](wiki/quick-start.md)
 
-The most basic way to teach your agent about Beans is to simply add the following instruction to your `AGENTS.md`, `CLAUDE.md`, or equivalent file:
+## Use beans with coding agents
 
-```
-**IMPORTANT**: before you do anything else, run the `beans prime` command and heed its output.
-```
+The smallest portable integration is a repository instruction that makes the installed binary describe itself and the current project:
 
-Some agents provide mechanisms to automate this step:
+````markdown
+Before managing project work, run `beans prime` and follow its project-specific instructions.
+````
 
-### Claude Code
+`beans prime` is preferable to a copied command manual because its output reflects the repository's configured types, statuses, priorities, relationships, and completion policies. Agents can then use natural-language requests while operating through exact CLI or GraphQL contracts.
 
-An official Beans plugin for Claude is in the works, but for the time being, please manually add the following hooks to your project's `.claude/settings.json` file:
+Examples of useful requests:
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      { "hooks": [{ "type": "command", "command": "beans prime" }] }
-    ],
-    "PreCompact": [
-      { "hooks": [{ "type": "command", "command": "beans prime" }] }
-    ]
-  }
-}
-```
+````text
+Inspect the ready beans and recommend the highest-value next action.
 
-### OpenCode
+Create a bug for the failure you found, relate it to the affected feature, and mark it blocked by the root-cause task.
 
-Beans integrates with OpenCode via a plugin that injects task context into your sessions. To set it up, **copy the plugin** from [`.opencode/plugin/beans-prime.ts`](.opencode/plugin/beans-prime.ts) to your project's `.opencode/plugin/` directory (or `~/.opencode/plugin/` for global availability across all projects).
+Summarize progress for the current release and identify incomplete descendants.
+````
 
-## Usage Hints
+[Configure Claude Code, OpenCode, and generic agents](wiki/agent-integration.md) · [Read the data model](wiki/data-model.md)
 
-As a human, you can get an overview of the CLI's functionalities by running:
+## Browser workspace with `beans-serve`
 
-```bash
-beans help
-```
+`beans-serve` runs the optional planning workspace and GraphQL service over the same `.beans/` store used by the CLI. The browser offers backlog, board, and workspace views without introducing a second database.
 
-You might specifically be interested in the interactive TUI:
+````sh
+beans-serve --beans-path .beans
+````
 
-```bash
-beans tui
-```
+![beans-serve board view](wiki/assets/serve-board.webp)
 
-### Example Workflows
+Network binding, CORS, routes, and authentication posture matter before exposing the service beyond a local machine.
 
-**But the real power of Beans** comes from letting your coding agent manage your tasks for you.
+[Configure the Web UI and API](wiki/web-ui-and-api.md)
 
-Assuming you have integrated Beans into your coding agent correctly, it will already know how to create and manage beans for you. You can use the usual assortment of natural language inquiries. If you've just
-added Beans to an existing project, you could try asking your agent to identify potential tasks and create beans for them:
+## Terminal interfaces
 
-```
-Are there any tasks we should be tracking for this project? If so, please create beans for them.
-```
+The fork still builds the original hmans terminal UI as the separate `beans-tui` compatibility binary. Active UI development does not continue inside that original TUI path.
 
-If you already have some beans available, you can ask your agent to recommend what to work on next:
+The actively developed companion is [`xRiErOS/beans-tui`](https://github.com/xRiErOS/beans-tui), launched as `bt`: a separate keyboard-first, mouse-friendly Product Owner cockpit built on beans as its data layer. It adds a multi-repository lobby, tree and detail navigation, backlog workflows, search, filters, and full mutation support while beans remains the source of truth.
 
-```
-What should we work on next?
-```
+[Understand the two TUI paths](wiki/tui-companion.md) · [Review all separate binaries](wiki/commands/separate-binaries.md)
 
-You can also specifically ask it to start working on a particular bean:
+## Full feature reference
 
-```
-It's time to tackle myproj-123.
-```
+The reference is grouped by user intent instead of reproducing one long `beans --help` block:
 
-Consider that your agent will be just as capable to deal with beans as it is with code, so how about using it to quickly restructure your tasks?
+- [Project setup](wiki/commands/project-setup.md): `init`, `path`, `prime`, `version`, `help`, `completion`.
+- [Inspection and search](wiki/commands/inspection-and-search.md): `list`, `show`, `next`.
+- [Lifecycle](wiki/commands/lifecycle.md): `create`, `start`, `complete`, `scrap`, `archive`, `delete`.
+- [Organization and relationships](wiki/commands/organization-and-relations.md): `update`, `tag`, `order`, `rename`.
+- [Planning and reporting](wiki/commands/planning-and-reporting.md): `roadmap`, `milestones`, `progress`, `graph`.
+- [Querying and automation](wiki/commands/querying-and-automation.md): `graphql`, JSON output, and structured errors.
+- [Validation and maintenance](wiki/commands/validation-and-maintenance.md): `check`, integrity rules, and policies.
+- [Separate applications](wiki/commands/separate-binaries.md): `beans-serve` and `beans-tui`.
 
-```
-Please inspect this project's beans and reorganize them into epics. Also please create 2-3 milestones to group these epics in a meaningful way.
-```
+The installed binary remains authoritative for version-specific options:
 
-You can also add Beans-specific instructions to your `AGENTS.md`, `CLAUDE.md` or equivalent file, for example:
+````sh
+beans --help
+beans <command> --help
+beans prime
+````
 
-```
-When making a commit, include the relevant bean IDs in the commit message
-```
+## Documentation
 
-## Contributing
+- [Documentation index](wiki/index.md) — route to every guide and reference page.
+- [Configuration reference](wiki/configuration.md) — stores, anchors, profiles, custom types, display, and policies.
+- [Data model and file format](wiki/data-model.md) — front matter, bodies, IDs, relationships, order, and archive.
+- [Compatibility and upgrading](wiki/compatibility-and-upgrading.md) — assess changes and migrate deliberately.
+- [Troubleshooting](wiki/troubleshooting.md) — diagnose store discovery, ready work, policies, configuration, and server startup.
 
-This project currently does not accept contributions -- it's just way too early for that!
-But if you do have suggestions or feedback, please feel free to open an issue.
+## Project status
+
+This is an actively maintained independent continuation of `hmans/beans`. Features and file-format contracts may still evolve; review the fork's commit history and compatibility guide before upgrading a shared store.
+
+Focused pull requests are welcome at [xRiErOS/beans](https://github.com/xRiErOS/beans). Include the observed behavior, expected behavior, beans version, and smallest reproducible store shape.
+
+## Acknowledgements
+
+Beans was created by [Hannes Müller](https://github.com/hmans) in [hmans/beans](https://github.com/hmans/beans). This fork is possible because that work was released under the Apache License 2.0.
 
 ## License
 
-This project is licensed under the Apache-2.0 License. See the [LICENSE](LICENSE) file for details.
-
-## Getting in Touch
-
-If you have any questions, suggestions, or just want to say hi, feel free to reach out to me [on Bluesky](https://bsky.app/profile/hmans.dev), or [open an issue](https://github.com/hmans/beans/issues) in this repository.
+Licensed under the [Apache License 2.0](LICENSE).
