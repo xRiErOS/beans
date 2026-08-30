@@ -441,10 +441,17 @@ func TestResolveBeansPathConfigFileOutranksEnv(t *testing.T) {
 // "follows the longest name" computation in feedTypeTables (longest+1),
 // which internal/ui's own setter/getter test cannot reach: internal/ui must
 // not import pkg/config, so the config-derived fixture has to live here.
-// "extraordinarily-long-type-name" is 31 characters, one longer than any
+// "extraordinarily-long-type-name" is 30 characters, one longer than any
 // DefaultTypes entry, so it must drive the merged type list's longest name.
 func TestFeedTypeTablesSetsFullWidthFromLongestTypeName(t *testing.T) {
-	t.Cleanup(func() { ui.SetTypeColumnWidths(3, 10) })
+	t.Cleanup(func() {
+		ui.SetTypeColumnWidths(3, 10)
+		// feedTypeTables also mutates internal/ui's process-wide type-shorts
+		// table (ui.SetTypeShorts in root.go); SetTypeShorts(nil) resets it
+		// to the built-in baseline, the same restore the styles_test.go
+		// tests in internal/ui use for the same table.
+		ui.SetTypeShorts(nil)
+	})
 
 	const longName = "extraordinarily-long-type-name"
 	c := &config.Config{Types: []config.TypeOverride{{Name: longName}}}
