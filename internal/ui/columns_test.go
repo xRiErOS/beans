@@ -720,3 +720,14 @@ func TestLegendUsesTheCellsColours(t *testing.T) {
 		t.Errorf("legend renders the task type in ResolveColor(\"\")'s colour instead of unstyled:\n%q", joined)
 	}
 }
+
+// TestWrapLegendLineEmitsNothingForNoEntries guards the unconditional
+// trailing flush this replaces: with an empty entry list the loop never
+// runs, so entriesOnLine stays 0 and the old code still flushed once,
+// emitting a line carrying only the axis label and no entries (beans-rxyz).
+func TestWrapLegendLineEmitsNothingForNoEntries(t *testing.T) {
+	lines := wrapLegendLine("priority", nil, nil, 80)
+	if len(lines) != 0 {
+		t.Errorf("wrapLegendLine(nil, nil) = %#v, want no lines", lines)
+	}
+}

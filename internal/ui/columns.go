@@ -543,6 +543,8 @@ func wrapLegendLine(label string, plain, styled []string, width int) []string {
 		linePlainWidth += entryWidth
 		entriesOnLine++
 	}
-	flush()
+	if entriesOnLine > 0 {
+		flush()
+	}
 	return lines
 }
