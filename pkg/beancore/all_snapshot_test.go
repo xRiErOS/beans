@@ -89,10 +89,7 @@ func BenchmarkCoreAll(b *testing.B) {
 func TestAllReturnsIndependentCopies(t *testing.T) {
 	core := benchCore(t, 3)
 
-	stored, err := core.Get("beans-b0000")
-	if err != nil {
-		t.Fatalf("core.Get() error = %v", err)
-	}
+	stored := liveBean(t, core, "beans-b0000")
 
 	var snapshot *bean.Bean
 	for _, b := range core.All() {
@@ -140,10 +137,7 @@ func TestAllReturnsIndependentCopies(t *testing.T) {
 func TestSearchReturnsIndependentCopies(t *testing.T) {
 	core := benchCore(t, 3)
 
-	stored, err := core.Get("beans-b0000")
-	if err != nil {
-		t.Fatalf("core.Get() error = %v", err)
-	}
+	stored := liveBean(t, core, "beans-b0000")
 
 	results, err := core.Search("bean")
 	if err != nil {
