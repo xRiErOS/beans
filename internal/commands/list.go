@@ -33,6 +33,7 @@ var (
 	listHasBlocking bool
 	listNoBlocking  bool
 	listIsBlocked   bool
+	listUnblocked   bool
 	listReady       bool
 	listQuiet       bool
 	listSort        string
@@ -104,9 +105,24 @@ Search Syntax (--search/-S):
 		if listReady && listIsBlocked {
 			return fmt.Errorf("--ready and --is-blocked are mutually exclusive")
 		}
+		// --unblocked is the exact inverse of --is-blocked, so the two
+		// can never be satisfied together.
+		if listUnblocked && listIsBlocked {
+			return fmt.Errorf("--unblocked and --is-blocked are mutually exclusive")
+		}
 
 		if listIsBlocked {
 			filter.IsBlocked = &listIsBlocked
+		}
+
+		// --unblocked keeps only beans with no unresolved blocker, direct or
+		// inherited from an ancestor. Unlike --ready it says nothing about
+		// status, so drafts and in-progress beans survive it. It is applied
+		// after --is-blocked, which the check above has already ruled out,
+		// and before --ready, which asks for the same value.
+		if listUnblocked {
+			unblocked := false
+			filter.IsBlocked = &unblocked
 		}
 
 		// --ready: beans available to start (not blocked, excludes in-progress/completed/scrapped/draft,
@@ -416,6 +432,7 @@ func RegisterListCmd(root *cobra.Command) {
 	listCmd.Flags().BoolVar(&listHasBlocking, "has-blocking", false, "Filter beans that are blocking others")
 	listCmd.Flags().BoolVar(&listNoBlocking, "no-blocking", false, "Filter beans that aren't blocking others")
 	listCmd.Flags().BoolVar(&listIsBlocked, "is-blocked", false, "Filter beans that are blocked by others")
+	listCmd.Flags().BoolVar(&listUnblocked, "unblocked", false, "Filter beans with no unresolved blocker")
 	listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft)")
 	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
 	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent) (default: status, priority, type, title)")
