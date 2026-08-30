@@ -147,8 +147,8 @@ Search Syntax (--search/-S):
 			return nil
 		}
 
-		// Default: tree view
-		// We need all beans to find ancestors for context
+		// Both forms need every bean: the tree form to resolve ancestors for
+		// context, the table form to compute implicit statuses.
 		allBeans, err := resolver.Beans(context.Background(), nil)
 		if err != nil {
 			return fmt.Errorf("querying all beans for tree: %w", err)
