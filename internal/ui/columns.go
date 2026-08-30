@@ -32,7 +32,7 @@ type Row struct {
 	AncestorsLast []bool
 	IsLast        bool
 	// Section, when set, prints as a heading above this row — the roadmap's
-	// "No Milestone" bucket is the only current use.
+	// "Unscheduled" bucket is the only current use.
 	Section  string
 	Progress *Progress
 }

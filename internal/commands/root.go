@@ -64,6 +64,8 @@ a full view of your project.`,
 			// renders, so this is the single place that applies it.
 			ui.SetTheme(cfg.GetTheme())
 
+			feedTypeTables(cfg)
+
 			root, err := resolveBeansPath(beansPath, cfg)
 			if err != nil {
 				return err
@@ -82,6 +84,25 @@ a full view of your project.`,
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "", "Path to config file (default: searches upward for .beans.yml)")
 
 	return rootCmd
+}
+
+// feedTypeTables fills internal/ui's process-wide type-short and
+// type-column-width tables from the merged type list. internal/ui must not
+// import pkg/config, so this is the one place - analogous to a SetTheme
+// call - where the config-derived values cross into it.
+func feedTypeTables(c *config.Config) {
+	shorts := make(map[string]string)
+	longest := 0
+	for _, t := range c.TypeList() {
+		shorts[t.Name] = c.ShortOf(t.Name)
+		if len(t.Name) > longest {
+			longest = len(t.Name)
+		}
+	}
+	ui.SetTypeShorts(shorts)
+	// One trailing space keeps the column from touching the next one, which is
+	// what the old literal 10 did for "milestone" at nine characters.
+	ui.SetTypeColumnWidths(3, longest+1)
 }
 
 // resolveBeansPath determines the beans data directory path.

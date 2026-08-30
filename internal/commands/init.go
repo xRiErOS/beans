@@ -1,9 +1,11 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/hmans/beans/internal/gitutil"
@@ -13,6 +15,7 @@ import (
 )
 
 var initJSON bool
+var initProfile string
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -22,6 +25,30 @@ var initCmd = &cobra.Command{
 		var projectDir string
 		var beansDir string
 		var dirName string
+
+		if beansPath != "" && initProfile != "" {
+			msg := "--profile writes a .beans.yml, which --beans-path skips; use one or the other"
+			if initJSON {
+				return output.Error(output.ErrValidation, msg)
+			}
+			return errors.New(msg)
+		}
+
+		// Resolve the profile before any side effect (beancore.Init creates
+		// .beans/ and its .gitignore): a typo must not leave a half-initialised
+		// project behind.
+		var profileTypes []config.TypeOverride
+		if initProfile != "" {
+			types, ok := config.ProfileTypes(initProfile)
+			if !ok {
+				msg := fmt.Sprintf("unknown profile %q (must be %s)", initProfile, strings.Join(config.ProfileNames(), ", "))
+				if initJSON {
+					return output.Error(output.ErrValidation, msg)
+				}
+				return errors.New(msg)
+			}
+			profileTypes = types
+		}
 
 		if beansPath != "" {
 			// Use explicit path for beans directory
@@ -62,6 +89,15 @@ var initCmd = &cobra.Command{
 			// Config is saved at project root (not inside .beans/)
 			defaultCfg := config.DefaultWithPrefix(dirName + "-")
 			defaultCfg.Project.Name = dirName
+			if initProfile != "" {
+				defaultCfg.Types = profileTypes
+				// A profile gives a project exactly its own types: switch off
+				// the merge onto the built-in defaults, not just override them.
+				defaultCfg.TypesExclusive = true
+				// The default type must exist in the chosen profile: todo has no
+				// milestone, complex has no plain feature leaf.
+				defaultCfg.Beans.DefaultType = "task"
+			}
 			defaultCfg.SetConfigDir(projectDir)
 
 			// Auto-detect the remote's default branch if we're in a git repo
@@ -87,5 +123,7 @@ var initCmd = &cobra.Command{
 
 func RegisterInitCmd(root *cobra.Command) {
 	initCmd.Flags().BoolVar(&initJSON, "json", false, "Output as JSON")
+	initCmd.Flags().StringVar(&initProfile, "profile", "",
+		fmt.Sprintf("Type profile to write out (%s)", strings.Join(config.ProfileNames(), ", ")))
 	root.AddCommand(initCmd)
 }

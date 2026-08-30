@@ -83,7 +83,9 @@ Use `beans <command> --help` for full options. Use `--json` for machine-readable
 
 ## Relationships
 
-- **Parent**: Hierarchy (milestone → epic → feature → task/bug). Set with `--parent <id>`.
+- **Parent**: A bean may hang under any bean of a higher rank. Ranks may be skipped, and two beans of the same rank are never parent and child. The ranks in this project:
+{{range .TypeRanks}}  - {{.}}
+{{end}}  Set a parent with `--parent <id>`.
 - **Blocking**: Use `--blocking <id>` when THIS bean blocks another (the other bean can't proceed until this is done).
 - **Blocked-by**: Use `--blocked-by <id>` when THIS bean is blocked by another (this bean can't proceed until the other is done). **Prefer this when creating dependent work.**
 - **Implicit blocking**: A bean is also considered blocked if any of its ancestors (via parent chain) are blocked. Commands like `list --ready` and `next` respect this automatically.
@@ -176,7 +178,7 @@ beans list --json --where release=0-5-0
 
 - A key that names a known field (e.g. `--set status=done`) is rejected -- use the native flag (`--status`) instead.
 - Extra keys appear in `list`/`show --json` under an `extra` object, and are queryable over GraphQL.
-- This is metadata, not a new hierarchy level: use it for cross-cutting groupings (like a release) that don't map onto the milestone → epic → task parent chain.
+- This is metadata, not a new hierarchy level: use it for cross-cutting groupings (like a release) that don't map onto the parent chain.
 
 {{if .RequiredFields}}
 ## Required Fields on Status Transitions

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/config"
 )
 
 func TestFindIncomingLinks(t *testing.T) {
@@ -851,5 +852,64 @@ func TestIsResolvedStatus(t *testing.T) {
 				t.Errorf("isResolvedStatus(%q) = %v, want %v", tt.status, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestValidParentTypesReproducesTheBuiltInTable(t *testing.T) {
+	cfg := &config.Config{}
+	cases := map[string][]string{
+		"milestone": nil,
+		"epic":      {"milestone"},
+		"feature":   {"milestone", "epic"},
+		"task":      {"milestone", "epic", "feature"},
+		"bug":       {"milestone", "epic", "feature"},
+	}
+	for child, want := range cases {
+		got := ValidParentTypes(cfg, child)
+		if len(got) != len(want) {
+			t.Fatalf("ValidParentTypes(%q) = %v, want %v", child, got, want)
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Errorf("ValidParentTypes(%q)[%d] = %q, want %q", child, i, got[i], want[i])
+			}
+		}
+	}
+}
+
+func TestUnknownTypeBehavesLikeALeaf(t *testing.T) {
+	cfg := &config.Config{}
+	got := ValidParentTypes(cfg, "chore")
+	want := []string{"milestone", "epic", "feature"}
+	if len(got) != len(want) {
+		t.Fatalf("ValidParentTypes(\"chore\") = %v, want %v", got, want)
+	}
+}
+
+func TestSameRankIsNotAParentRelation(t *testing.T) {
+	cfg := &config.Config{}
+	if IsValidParentRank(cfg, "feature", "feature") {
+		t.Error("feature under feature must stay rejected")
+	}
+	if IsValidParentRank(cfg, "epic", "epic") {
+		t.Error("epic under epic must stay rejected")
+	}
+}
+
+func TestRankJumpStaysAllowed(t *testing.T) {
+	cfg := &config.Config{}
+	if !IsValidParentRank(cfg, "task", "milestone") {
+		t.Error("task directly under a milestone must stay allowed")
+	}
+}
+
+func TestConfiguredSiblingRankForbidsNesting(t *testing.T) {
+	rank := 2
+	cfg := &config.Config{Types: []config.TypeOverride{{Name: "feature", Rank: &rank}}}
+	if IsValidParentRank(cfg, "feature", "epic") {
+		t.Error("with feature on epic's rank, nesting must be rejected")
+	}
+	if !IsValidParentRank(cfg, "feature", "milestone") {
+		t.Error("feature under milestone must stay allowed")
 	}
 }

@@ -150,7 +150,7 @@ func TestRoadmapCmdRejectsNonContainerRootType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a task-typed root")
 	}
-	if !strings.Contains(err.Error(), "milestone, epic, or feature") {
+	if !strings.Contains(err.Error(), "milestone, epic, feature") {
 		t.Errorf("expected error to name the allowed types, got %q", err.Error())
 	}
 }
@@ -315,17 +315,17 @@ func TestRoadmapCmdMilestoneGroupingSurvivesTableFlattening(t *testing.T) {
 	data := roadmapGroupingFixture()
 
 	got := roadmapOutput(data, true, roadmapFormatTTY, 90, true, "", false, ui.FormTable, config.Default())
-	for _, want := range []string{"beans-m1", "beans-m2", "beans-o1", "No Milestone"} {
+	for _, want := range []string{"beans-m1", "beans-m2", "beans-o1", "Unscheduled"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected table output to contain %q, got %q", want, got)
 		}
 	}
 	// The unscheduled bucket's heading must come after both milestones --
-	// otherwise "No Milestone" is floating free of the group it labels.
+	// otherwise "Unscheduled" is floating free of the group it labels.
 	m2Idx := strings.Index(got, "beans-m2")
-	headingIdx := strings.Index(got, "No Milestone")
+	headingIdx := strings.Index(got, "Unscheduled")
 	if m2Idx < 0 || headingIdx < 0 || headingIdx < m2Idx {
-		t.Errorf("expected \"No Milestone\" heading after both milestone rows, got %q", got)
+		t.Errorf("expected \"Unscheduled\" heading after both milestone rows, got %q", got)
 	}
 }
 

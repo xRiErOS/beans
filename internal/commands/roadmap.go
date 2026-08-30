@@ -62,7 +62,10 @@ type unscheduledGroup struct {
 	Other    []*bean.Bean   `json:"other,omitempty"`
 }
 
-// milestoneGroup represents a milestone and its contents.
+// milestoneGroup represents a rank-1 container and its contents. The JSON
+// keys are slot names, not type names: a configured rank-2 type appears
+// under "epics" and a rank-3 type under "features", whatever they are
+// called.
 type milestoneGroup struct {
 	Milestone *bean.Bean     `json:"milestone"`
 	Epics     []epicGroup    `json:"epics,omitempty"`
@@ -70,15 +73,19 @@ type milestoneGroup struct {
 	Other     []*bean.Bean   `json:"other,omitempty"`
 }
 
-// epicGroup represents an epic and its child items.
+// epicGroup represents a rank-2 container and its child items. The "epic"
+// JSON key is a slot name, not a type name: it holds whatever type is
+// configured at rank 2.
 type epicGroup struct {
 	Epic     *bean.Bean     `json:"epic"`
 	Items    []*bean.Bean   `json:"items,omitempty"`
 	Features []featureGroup `json:"features,omitempty"`
 }
 
-// featureGroup represents a feature and the leaf items found anywhere
-// beneath it (leafs below nested features are flattened into this list).
+// featureGroup represents a rank-3 container and the leaf items found
+// anywhere beneath it (leafs below nested rank-3 containers are flattened
+// into this list). The "feature" JSON key is a slot name, not a type name:
+// it holds whatever type is configured at rank 3.
 type featureGroup struct {
 	Feature *bean.Bean   `json:"feature"`
 	Items   []*bean.Bean `json:"items,omitempty"`
@@ -228,9 +235,11 @@ func roadmapOutput(data *roadmapData, isTTY bool, format roadmapFormatOverride, 
 // IsLast is irrelevant to what gets drawn (Connector/Stem never consult
 // AncestorsLast[0]) and is set to true throughout rather than tracked.
 //
-// Only the unscheduled bucket gets a Section heading ("No Milestone"): each
-// milestone is itself a Bean row (type "milestone"), which is heading enough
-// on its own, matching the one documented use of Row.Section (ui/columns.go).
+// Only the unscheduled bucket gets a Section heading ("Unscheduled"): each
+// rank-1 container is itself a Bean row, which is heading enough on its own,
+// matching the one documented use of Row.Section (ui/columns.go). The wording
+// is "Unscheduled" rather than "No Milestone" because a project's rank-1 type
+// need not be called "milestone", and a profile may define none at all.
 func roadmapRows(data *roadmapData) []ui.Row {
 	var items []ui.FlatItem
 
@@ -256,7 +265,7 @@ func roadmapRows(data *roadmapData) []ui.Row {
 
 	rows := ui.RowsFromFlatItems(items)
 	if unscheduledAt >= 0 && unscheduledAt < len(rows) {
-		rows[unscheduledAt].Section = "No Milestone"
+		rows[unscheduledAt].Section = "Unscheduled"
 	}
 	return rows
 }
@@ -364,11 +373,15 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	}
 
 	children := childrenIndex(allBeans)
+	hidden := hiddenSubtrees(allBeans, children)
 
 	// Find milestones, applying status filters
 	var milestones []*bean.Bean
 	for _, b := range allBeans {
-		if b.Type != "milestone" {
+		if !isRank(b, 1) {
+			continue
+		}
+		if hidden[b.ID] {
 			continue
 		}
 		// Apply status filters to milestones
@@ -387,7 +400,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Build milestone groups
 	var milestoneGroups []milestoneGroup
 	for _, m := range milestones {
-		group := buildMilestoneGroup(m, children, includeDone)
+		group := buildMilestoneGroup(m, children, includeDone, hidden)
 		// Only include milestones that have visible content
 		if len(group.Epics) > 0 || len(group.Features) > 0 || len(group.Other) > 0 {
 			milestoneGroups = append(milestoneGroups, group)
@@ -402,7 +415,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		for _, child := range children[m.ID] {
 			underMilestone[child.ID] = true
 			// Also mark children of epics under this milestone
-			if child.Type == "epic" {
+			if isRank(child, 2) {
 				for _, epicChild := range children[child.ID] {
 					underMilestone[epicChild.ID] = true
 				}
@@ -413,13 +426,16 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Find unscheduled epics (epics not under a milestone)
 	var unscheduledEpics []epicGroup
 	for _, b := range allBeans {
-		if b.Type != "epic" {
+		if !isRank(b, 2) {
+			continue
+		}
+		if hidden[b.ID] {
 			continue
 		}
 		if underMilestone[b.ID] {
 			continue
 		}
-		eg := buildEpicGroup(b, children, includeDone)
+		eg := buildEpicGroup(b, children, includeDone, hidden)
 		if len(eg.Items) > 0 || len(eg.Features) > 0 {
 			unscheduledEpics = append(unscheduledEpics, eg)
 		}
@@ -432,7 +448,10 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// milestone or epic (orphan features, e.g. created without --parent).
 	var unscheduledFeatures []featureGroup
 	for _, b := range allBeans {
-		if b.Type != "feature" {
+		if !isRank(b, 3) {
+			continue
+		}
+		if hidden[b.ID] {
 			continue
 		}
 		if underMilestone[b.ID] {
@@ -445,11 +464,11 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		// ValidateParent via the CLI, but beans are hand-editable markdown --
 		// this guard keeps hand-edited data from double-rendering.)
 		if b.Parent != "" {
-			if parent, ok := byID[b.Parent]; ok && (parent.Type == "epic" || parent.Type == "feature") {
+			if parent, ok := byID[b.Parent]; ok && (isRank(parent, 2) || isRank(parent, 3)) {
 				continue
 			}
 		}
-		fg := buildFeatureGroup(b, children, includeDone)
+		fg := buildFeatureGroup(b, children, includeDone, hidden)
 		if len(fg.Items) > 0 {
 			unscheduledFeatures = append(unscheduledFeatures, fg)
 		}
@@ -459,27 +478,33 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Find orphan items (not milestone, not epic, no parent or parent is not milestone/epic)
 	var orphanItems []*bean.Bean
 	for _, b := range allBeans {
-		// Skip milestones and epics -- always containers, never flat leaves.
-		if b.Type == "milestone" {
+		// A hidden container's whole subtree stays out of the roadmap --
+		// including here, where its orphaned children would otherwise
+		// resurface as unscheduled items.
+		if hidden[b.ID] {
 			continue
 		}
-		if b.Type == "epic" {
+		// Skip milestones and epics -- always containers, never flat leaves.
+		if isRank(b, 1) {
+			continue
+		}
+		if isRank(b, 2) {
 			// Epics with >=1 leaf descendant or feature are rendered via the
 			// unscheduledEpics loop above as an epicGroup; skip them
 			// here to avoid double-rendering. Childless epics (beans-36fa)
 			// are not containers -- fall through and treat them as a flat
 			// leaf like any other orphan item below.
-			if eg, _ := classifyEpicChild(b, children, includeDone); eg != nil {
+			if eg, _ := classifyEpicChild(b, children, includeDone, hidden); eg != nil {
 				continue
 			}
 		}
-		if b.Type == "feature" {
+		if isRank(b, 3) {
 			// Features with >=1 leaf descendant are rendered via the
 			// unscheduledFeatures loop above as a featureGroup; skip them
 			// here to avoid double-rendering. Childless features (D01,
 			// beans-n8zw) are not containers -- fall through and treat
 			// them as a flat leaf like any other orphan item below.
-			if fg, _ := classifyFeatureChild(b, children, includeDone); fg != nil {
+			if fg, _ := classifyFeatureChild(b, children, includeDone, hidden); fg != nil {
 				continue
 			}
 		}
@@ -517,6 +542,18 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	}
 }
 
+// isRank reports whether a bean sits on the given hierarchy rank.
+func isRank(b *bean.Bean, rank int) bool {
+	return cfg.RankOf(b.Type) == rank
+}
+
+// isContainerRank reports whether a bean sits on one of the three container
+// ranks. Leaves (rank 4) are rendered inside a container, never as one.
+func isContainerRank(b *bean.Bean) bool {
+	r := cfg.RankOf(b.Type)
+	return r >= 1 && r <= 3
+}
+
 // childrenIndex maps each bean ID to the beans that have it as a parent.
 func childrenIndex(allBeans []*bean.Bean) map[string][]*bean.Bean {
 	children := make(map[string][]*bean.Bean)
@@ -528,57 +565,135 @@ func childrenIndex(allBeans []*bean.Bean) map[string][]*bean.Bean {
 	return children
 }
 
+// markSubtree records id and every descendant of it in seen.
+func markSubtree(id string, children map[string][]*bean.Bean, seen map[string]bool) {
+	if seen[id] {
+		return
+	}
+	seen[id] = true
+	for _, child := range children[id] {
+		markSubtree(child.ID, children, seen)
+	}
+}
+
+// hiddenSubtrees returns the set of bean IDs that must vanish from an
+// aggregate view (D15): every container-ranked bean whose type opted out
+// via cfg.IsRoadmapType, plus everything beneath it, at any depth --
+// markSubtree walks every descendant regardless of its own type, so a
+// visible-typed epic under a hidden milestone is hidden too.
+func hiddenSubtrees(allBeans []*bean.Bean, children map[string][]*bean.Bean) map[string]bool {
+	hidden := make(map[string]bool)
+	for _, b := range allBeans {
+		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
+			markSubtree(b.ID, children, hidden)
+		}
+	}
+	return hidden
+}
+
+// hiddenSubtreesWithinScope is hiddenSubtrees restricted to a scoped-by-ID
+// root: only a hidden container that is a strict descendant of root can
+// seed hiding. This is deliberately narrower than "every bean except root":
+// an ancestor of root -- however deeply hidden -- is never a strict
+// descendant of root, so it can never seed hiding here, even though it
+// would have seeded it (and marked root's whole subtree) in an
+// allBeans-wide scan. root itself is also never a seed, even if its own
+// type opted out -- naming a container by ID is a direct lookup, not the
+// aggregate view the visibility flag governs, and the bypass is for
+// exactly that named node. A hidden container nested anywhere beneath root
+// still seeds normally and takes its own subtree down with it, exactly as
+// in the unscoped roadmap.
+func hiddenSubtreesWithinScope(allBeans []*bean.Bean, children map[string][]*bean.Bean, rootID string) map[string]bool {
+	descendants := make(map[string]bool)
+	markSubtree(rootID, children, descendants)
+
+	hidden := make(map[string]bool)
+	for _, b := range allBeans {
+		if b.ID == rootID || !descendants[b.ID] {
+			continue
+		}
+		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
+			markSubtree(b.ID, children, hidden)
+		}
+	}
+	return hidden
+}
+
 // buildScopedRoadmap builds a roadmapData scoped to a single milestone,
 // epic, or feature root. Callers must have already validated root's type
 // via validateRoadmapRootType; any other type panics, since that would be a
 // caller bug, not user input.
+//
+// The roadmap-visibility flag (cfg.IsRoadmapType, D15) governs the aggregate
+// views -- the unscoped roadmap and beans milestones -- but a direct-by-ID
+// lookup of a container the user named here bypasses hiding for the named
+// root only: hiddenSubtreesWithinScope seeds hiding only from root's strict
+// descendants, so no ancestor of root (hidden or not) can mark anything
+// inside the scope, while a hidden container nested anywhere beneath root
+// still seeds normally and is suppressed exactly as in the unscoped
+// roadmap.
 func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData {
-	switch root.Type {
-	case "milestone":
-		data := buildRoadmap(allBeans, includeDone, nil, nil)
-		for _, mg := range data.Milestones {
-			if mg.Milestone.ID == root.ID {
-				return &roadmapData{Milestones: []milestoneGroup{mg}}
-			}
-		}
-		// buildRoadmap drops milestones with zero visible children -- the
-		// root was still found and matched by type/ID, so render it as an
-		// empty container rather than silently returning nothing.
-		return &roadmapData{Milestones: []milestoneGroup{{Milestone: root}}}
-	case "epic":
-		eg := buildEpicGroup(root, childrenIndex(allBeans), includeDone)
+	children := childrenIndex(allBeans)
+	hidden := hiddenSubtreesWithinScope(allBeans, children, root.ID)
+	switch cfg.RankOf(root.Type) {
+	case 1:
+		group := buildMilestoneGroup(root, children, includeDone, hidden)
+		return &roadmapData{Milestones: []milestoneGroup{group}}
+	case 2:
+		eg := buildEpicGroup(root, children, includeDone, hidden)
 		return &roadmapData{Root: &rootGroup{Epic: &eg}}
-	case "feature":
-		fg := buildFeatureGroup(root, childrenIndex(allBeans), includeDone)
+	case 3:
+		fg := buildFeatureGroup(root, children, includeDone, hidden)
 		return &roadmapData{Root: &rootGroup{Feature: &fg}}
 	default:
+		// validateRoadmapRootType is checked by every caller before this
+		// runs, so reaching a non-container rank here would be a caller
+		// bug, not user input.
 		panic("buildScopedRoadmap: unsupported root type " + root.Type)
 	}
 }
 
-// validateRoadmapRootType returns an error if b is not a valid roadmap scope
-// root (milestone, epic, or feature).
+// validateRoadmapRootType returns an error if b does not sit on one of the
+// three container ranks (rank 1 through 3).
 func validateRoadmapRootType(b *bean.Bean) error {
-	switch b.Type {
-	case "milestone", "epic", "feature":
+	if isContainerRank(b) {
 		return nil
-	default:
-		return fmt.Errorf("roadmap root must be a milestone, epic, or feature, got %s (%s)", b.Type, b.ID)
 	}
+	var containers []string
+	for rank := 1; rank <= 3; rank++ {
+		containers = append(containers, cfg.TypesAtRank(rank)...)
+	}
+	if len(containers) == 0 {
+		return fmt.Errorf("this project defines no container types (ranks 1-3), so %s (%s) cannot be a roadmap root",
+			b.Type, b.ID)
+	}
+	return fmt.Errorf("roadmap root must be one of %s, got %s (%s)",
+		strings.Join(containers, ", "), b.Type, b.ID)
 }
 
-// buildMilestoneGroup builds a milestone group with its epics and other items.
-func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, includeDone bool) milestoneGroup {
+// buildMilestoneGroup builds a milestone group with its epics and other
+// items. hidden marks every bean whose whole subtree opted out of the
+// aggregate views (D15): such a child is dropped outright, not folded into
+// Other -- hiding removes, it does not reclassify. Pass nil to render
+// unfiltered (buildScopedRoadmap's direct-by-ID lookup bypasses hiding).
+func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) milestoneGroup {
 	group := milestoneGroup{Milestone: m}
 
-	// Get direct children of this milestone
-	directChildren := children[m.ID]
+	// Get direct children of this milestone, dropping any whose subtree is
+	// hidden before they can be classified as an epic or folded into Other.
+	var directChildren []*bean.Bean
+	for _, child := range children[m.ID] {
+		if hidden[child.ID] {
+			continue
+		}
+		directChildren = append(directChildren, child)
+	}
 
 	// Separate epics from other items
 	var epics []*bean.Bean
 	var rest []*bean.Bean
 	for _, child := range directChildren {
-		if child.Type == "epic" {
+		if isRank(child, 2) {
 			epics = append(epics, child)
 		} else {
 			rest = append(rest, child)
@@ -587,7 +702,7 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 
 	// Build epic groups
 	for _, epic := range epics {
-		eg := buildEpicGroup(epic, children, includeDone)
+		eg := buildEpicGroup(epic, children, includeDone, hidden)
 		if len(eg.Items) > 0 || len(eg.Features) > 0 {
 			group.Epics = append(group.Epics, eg)
 		}
@@ -598,7 +713,7 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 	other, featureChildren := splitByContainerType(rest)
 
 	for _, feature := range featureChildren {
-		fg, leaf := classifyFeatureChild(feature, children, includeDone)
+		fg, leaf := classifyFeatureChild(feature, children, includeDone, hidden)
 		if fg != nil {
 			group.Features = append(group.Features, *fg)
 		}
@@ -629,13 +744,23 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 }
 
 // buildEpicGroup builds an epic group: its direct leaf children plus a
-// recursively-resolved featureGroup for each direct feature child.
-func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) epicGroup {
-	leafs, featureChildren := splitByContainerType(children[epic.ID])
+// recursively-resolved featureGroup for each direct feature child. hidden is
+// as in buildMilestoneGroup: a hidden child's whole subtree is dropped, not
+// folded into Items. Pass nil to render unfiltered (buildScopedRoadmap's
+// direct-by-ID lookup bypasses hiding).
+func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) epicGroup {
+	var visibleChildren []*bean.Bean
+	for _, child := range children[epic.ID] {
+		if hidden[child.ID] {
+			continue
+		}
+		visibleChildren = append(visibleChildren, child)
+	}
+	leafs, featureChildren := splitByContainerType(visibleChildren)
 
 	eg := epicGroup{Epic: epic}
 	for _, feature := range featureChildren {
-		fg, leaf := classifyFeatureChild(feature, children, includeDone)
+		fg, leaf := classifyFeatureChild(feature, children, includeDone, hidden)
 		if fg != nil {
 			eg.Features = append(eg.Features, *fg)
 		}
@@ -662,8 +787,8 @@ func buildEpicGroup(epic *bean.Bean, children map[string][]*bean.Bean, includeDo
 // as leaf so the caller can fold it into its own flat-leaf list -- and go
 // through the exact same archive-status filtering every other leaf in that
 // list goes through, instead of being silently dropped.
-func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) (fg *featureGroup, leaf *bean.Bean) {
-	built := buildFeatureGroup(feature, children, includeDone)
+func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) (fg *featureGroup, leaf *bean.Bean) {
+	built := buildFeatureGroup(feature, children, includeDone, hidden)
 	if len(built.Items) > 0 {
 		return &built, nil
 	}
@@ -678,8 +803,8 @@ func classifyFeatureChild(feature *bean.Bean, children map[string][]*bean.Bean, 
 // its own flat-leaf list -- and go through the exact same archive-status
 // filtering every other leaf in that list goes through, instead of being
 // silently dropped.
-func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool) (eg *epicGroup, leaf *bean.Bean) {
-	built := buildEpicGroup(epic, children, includeDone)
+func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) (eg *epicGroup, leaf *bean.Bean) {
+	built := buildEpicGroup(epic, children, includeDone, hidden)
 	if len(built.Items) > 0 || len(built.Features) > 0 {
 		return &built, nil
 	}
@@ -687,9 +812,12 @@ func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includ
 }
 
 // buildFeatureGroup builds a feature group: all leaf descendants found
-// anywhere beneath the feature, flattened and sorted.
-func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) featureGroup {
-	items := collectLeafDescendants(feature.ID, children, includeDone)
+// anywhere beneath the feature, flattened and sorted. hidden is as in
+// buildMilestoneGroup: a hidden descendant, and everything beneath it, is
+// dropped rather than flattened into Items. Pass nil to render unfiltered
+// (buildScopedRoadmap's direct-by-ID lookup bypasses hiding).
+func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) featureGroup {
+	items := collectLeafDescendants(feature.ID, children, includeDone, hidden)
 	bean.SortRoadmapLeaves(items, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 	return featureGroup{Feature: feature, Items: items}
 }
@@ -716,7 +844,7 @@ func filterChildren(children []*bean.Bean, includeDone bool) []*bean.Bean {
 // (anything that isn't a feature) and feature-typed children.
 func splitByContainerType(beans []*bean.Bean) (leafs []*bean.Bean, features []*bean.Bean) {
 	for _, b := range beans {
-		if b.Type == "feature" {
+		if isRank(b, 3) {
 			features = append(features, b)
 		} else {
 			leafs = append(leafs, b)
@@ -728,16 +856,19 @@ func splitByContainerType(beans []*bean.Bean) (leafs []*bean.Bean, features []*b
 // collectLeafDescendants recursively walks everything below parentID and
 // returns the leaf beans found at any depth, flattened. Feature-typed
 // descendants are transparent containers: their own children are walked
-// too, but the feature bean itself is never included in the result.
+// too, but the feature bean itself is never included in the result. hidden
+// is as in buildMilestoneGroup: a hidden descendant, and everything beneath
+// it, is dropped rather than flattened in. Pass nil to render unfiltered
+// (buildScopedRoadmap's direct-by-ID lookup bypasses hiding).
 // beans.yml's ValidateParent forbids feature-under-feature via the CLI, so
 // this only recurses more than one level on hand-edited data -- the
 // visited guard exists purely so a hand-authored parent cycle can't crash
 // roadmap with a stack overflow (the old, non-recursive code was immune).
-func collectLeafDescendants(parentID string, children map[string][]*bean.Bean, includeDone bool) []*bean.Bean {
-	return collectLeafDescendantsVisited(parentID, children, includeDone, map[string]bool{})
+func collectLeafDescendants(parentID string, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool) []*bean.Bean {
+	return collectLeafDescendantsVisited(parentID, children, includeDone, hidden, map[string]bool{})
 }
 
-func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.Bean, includeDone bool, visited map[string]bool) []*bean.Bean {
+func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.Bean, includeDone bool, hidden map[string]bool, visited map[string]bool) []*bean.Bean {
 	if visited[parentID] {
 		return nil
 	}
@@ -745,8 +876,11 @@ func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.
 
 	var leafs []*bean.Bean
 	for _, child := range children[parentID] {
-		if child.Type == "feature" {
-			leafs = append(leafs, collectLeafDescendantsVisited(child.ID, children, includeDone, visited)...)
+		if hidden[child.ID] {
+			continue
+		}
+		if isRank(child, 3) {
+			leafs = append(leafs, collectLeafDescendantsVisited(child.ID, children, includeDone, hidden, visited)...)
 			continue
 		}
 		if !includeDone && cfg.IsArchiveStatus(child.Status) {
@@ -801,6 +935,7 @@ func renderRoadmapMarkdown(data *roadmapData, links bool, linkPrefix string, sho
 		template.New("roadmap").Funcs(template.FuncMap{
 			"firstParagraph": firstParagraph,
 			"typeBadge":      typeBadge,
+			"typeLabel":      typeHeadingLabel,
 			"beanRef": func(b *bean.Bean) string {
 				return renderBeanRef(b, links, linkPrefix)
 			},
@@ -832,22 +967,36 @@ func renderBeanRef(b *bean.Bean, asLink bool, linkPrefix string) string {
 	return fmt.Sprintf("([%s](%s%s))", b.ID, linkPrefix, b.Path)
 }
 
+// typeHeadingLabel renders a bean's own type name for a roadmap heading: the
+// name (identity, D03/D05) with its first letter upper-cased, purely a
+// display transform on the string itself -- not a config lookup, so it
+// renders the same whether or not cfg still knows the type (beans check's
+// unknownTypeBeans). This mirrors the same first-letter-uppercase idiom
+// Config.ShortOf already uses for the one-character type code, rather than
+// progressStatusLabel's per-word title-casing, which exists to turn a
+// hyphenated status like "in-progress" into "In Progress" and does not fit a
+// single-word type name. An empty type -- RankOf("") resolves to LeafRank,
+// so buildRoadmap itself never hands an empty-typed bean to a heading, but a
+// hand-built roadmapData could -- falls back to "Untyped" rather than
+// rendering an empty label.
+func typeHeadingLabel(typeName string) string {
+	if typeName == "" {
+		return "Untyped"
+	}
+	return strings.ToUpper(typeName[:1]) + typeName[1:]
+}
+
 // typeBadge returns a shields.io badge markdown for the bean type.
 func typeBadge(b *bean.Bean) string {
 	if b.Type == "" {
 		return ""
 	}
-	// Map types to colors
-	colors := map[string]string{
-		"bug":       "d73a4a",
-		"feature":   "0e8a16",
-		"task":      "1d76db",
-		"epic":      "5319e7",
-		"milestone": "fbca04",
-	}
-	color := colors[b.Type]
-	if color == "" {
-		color = "gray"
+	// One colour source: the badge shows the same tone the terminal renders,
+	// resolved through the active theme. shields.io wants the hex without the
+	// leading hash.
+	color := "gray"
+	if t := cfg.GetType(b.Type); t != nil && t.Color != "" {
+		color = strings.TrimPrefix(string(ui.ResolveColor(t.Color)), "#")
 	}
 	return fmt.Sprintf("![%s](https://img.shields.io/badge/%s-%s?style=flat-square)", b.Type, b.Type, color)
 }

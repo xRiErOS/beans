@@ -28,6 +28,10 @@ const (
 	// DefaultCommitField is the front matter key used to record a commit SHA
 	// when beans.commit_field is not configured.
 	DefaultCommitField = "commit"
+	// LeafRank is the rank of a type that carries no children. A type without
+	// an explicit rank lands here, which keeps the old behaviour where an
+	// unknown type was treated like "task".
+	LeafRank = 4
 )
 
 // DefaultStatuses defines the built-in status table. Config.Statuses can
@@ -44,11 +48,11 @@ var DefaultStatuses = []StatusConfig{
 // DefaultTypes defines the built-in type table. Config.Types can override
 // individual entries; see (*Config).TypeList.
 var DefaultTypes = []TypeConfig{
-	{Name: "milestone", Color: "mauve", Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
-	{Name: "epic", Color: "blue", Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
-	{Name: "feature", Color: "sapphire", Description: "A user-facing capability or enhancement"},
-	{Name: "bug", Color: "maroon", Description: "Something that is broken and needs fixing"},
-	{Name: "task", Color: "", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
+	{Name: "milestone", Color: "mauve", Rank: 1, Short: "M", Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
+	{Name: "epic", Color: "blue", Rank: 2, Short: "E", Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
+	{Name: "feature", Color: "sapphire", Rank: 3, Short: "F", Description: "A user-facing capability or enhancement"},
+	{Name: "bug", Color: "maroon", Rank: LeafRank, Short: "B", Description: "Something that is broken and needs fixing"},
+	{Name: "task", Color: "", Rank: LeafRank, Short: "T", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
 }
 
 // DefaultPriorities defines the built-in priority table. Config.Priorities
@@ -74,10 +78,23 @@ type StatusConfig struct {
 type TypeConfig struct {
 	Name  string `yaml:"name"`
 	Color string `yaml:"color"`
+	// Rank carries the hierarchy: a parent is valid when the child's rank is
+	// strictly greater. Ranks 1 to 3 are container ranks, 4 is the leaf rank.
+	// Ranks may be left unoccupied; the rule tolerates the gap.
+	Rank int `yaml:"rank,omitempty"`
 	// Emphasis renders this type bold across type word, id and title. It is
 	// what carries the hierarchy where hue alone cannot: Catppuccin tones are
 	// uniformly pastel, so a container would otherwise lose against a leaf.
-	Emphasis    bool   `yaml:"emphasis,omitempty"`
+	Emphasis bool `yaml:"emphasis,omitempty"`
+	// Roadmap decides whether this type gets its own section in `beans roadmap`
+	// and an entry in `beans milestones`. Nil means visible; only an explicit
+	// roadmap: false hides the type. On a container rank (1-3) this also
+	// hides its whole subtree; on the leaf rank it is inert, since a leaf is
+	// never itself a container to hide beneath.
+	Roadmap *bool `yaml:"roadmap,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means the first letter of the name, upper-cased.
+	Short       string `yaml:"short,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -106,10 +123,23 @@ type StatusOverride struct {
 // distinct from an explicit "emphasis: false", or a colour-only recolour of
 // e.g. "milestone" would silently clear its emphasis.
 type TypeOverride struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color,omitempty"`
+	Name  string `yaml:"name"`
+	Color string `yaml:"color,omitempty"`
+	// Rank is a pointer for the same reason Emphasis is: an omitted key must
+	// stay distinct from an explicit rank, or a colour-only override would
+	// pull its type down to rank 0 and outrank every container.
+	Rank        *int   `yaml:"rank,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Emphasis    *bool  `yaml:"emphasis,omitempty"`
+	// Roadmap decides whether this type gets its own section in `beans roadmap`
+	// and an entry in `beans milestones`. Nil means visible; only an explicit
+	// roadmap: false hides the type. On a container rank (1-3) this also
+	// hides its whole subtree; on the leaf rank it is inert, since a leaf is
+	// never itself a container to hide beneath.
+	Roadmap *bool `yaml:"roadmap,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means the first letter of the name, upper-cased.
+	Short string `yaml:"short,omitempty"`
 }
 
 // PriorityOverride is one entry of Config.Priorities: a priority the config
@@ -228,6 +258,13 @@ type Config struct {
 	Statuses   []StatusOverride   `yaml:"statuses,omitempty"`
 	Types      []TypeOverride     `yaml:"types,omitempty"`
 	Priorities []PriorityOverride `yaml:"priorities,omitempty"`
+
+	// TypesExclusive switches the merge in TypeList() off: when true, Types is
+	// the complete type table on its own, not an override list layered onto
+	// DefaultTypes. beans init --profile sets this so a profile gives a
+	// project exactly its own types; a hand-written config that never sets it
+	// keeps the existing entry-by-entry override behaviour unchanged.
+	TypesExclusive bool `yaml:"types_exclusive,omitempty"`
 
 	// configDir is the directory containing the config file (not serialized)
 	// Used to resolve relative paths
@@ -372,7 +409,14 @@ func Load(configPath string) (*Config, error) {
 		// override never changes an entry's Name, only its Color and
 		// Description), kept this way only because a future merge that did
 		// allow renaming should not have to remember this call site too.
-		cfg.Beans.DefaultType = cfg.TypeList()[0].Name
+		//
+		// TypesExclusive can make TypeList() legitimately empty (an exclusive
+		// config with no types of its own); there is nothing to derive a
+		// default from in that case, so DefaultType is left as it is rather
+		// than indexing into an empty slice.
+		if types := cfg.TypeList(); len(types) > 0 {
+			cfg.Beans.DefaultType = types[0].Name
+		}
 	}
 
 	// A misspelt anchor must not degrade into the default: that would silently
@@ -712,8 +756,17 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(t.Color))
 		}
+		if t.Rank != nil {
+			m.Content = append(m.Content, strNode("rank"), scalar(fmt.Sprintf("%d", *t.Rank), "!!int"))
+		}
 		if t.Emphasis != nil {
 			m.Content = append(m.Content, strNode("emphasis"), scalar(fmt.Sprintf("%t", *t.Emphasis), "!!bool"))
+		}
+		if t.Roadmap != nil {
+			m.Content = append(m.Content, strNode("roadmap"), scalar(fmt.Sprintf("%t", *t.Roadmap), "!!bool"))
+		}
+		if t.Short != "" {
+			m.Content = append(m.Content, strNode("short"), strNode(t.Short))
 		}
 		if t.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
@@ -768,9 +821,19 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		topMapping.Content = append(topMapping.Content, key, statusesSeq)
 	}
 
+	if c.TypesExclusive {
+		key := strNode("types_exclusive")
+		key.HeadComment = "true: types below is the complete type table, not overrides merged onto the built-in defaults"
+		topMapping.Content = append(topMapping.Content, key, scalar("true", "!!bool"))
+	}
+
 	if len(typesSeq.Content) > 0 {
 		key := strNode("types")
-		key.HeadComment = "Type overrides, merged entry by entry with the built-in defaults"
+		if c.TypesExclusive {
+			key.HeadComment = "The complete type table (types_exclusive: true)"
+		} else {
+			key.HeadComment = "Type overrides, merged entry by entry with the built-in defaults"
+		}
 		topMapping.Content = append(topMapping.Content, key, typesSeq)
 	}
 
@@ -930,6 +993,56 @@ func (c *Config) GetType(name string) *TypeConfig {
 	return nil
 }
 
+// RankOf returns the hierarchy rank of a type name. An unknown type and a
+// type without an explicit rank both sit at LeafRank.
+func (c *Config) RankOf(typeName string) int {
+	if t := c.GetType(typeName); t != nil && t.Rank != 0 {
+		return t.Rank
+	}
+	return LeafRank
+}
+
+// ShortOf returns the single-character code for a type: the configured one,
+// otherwise the upper-cased first letter, and "?" for an unknown type.
+func (c *Config) ShortOf(typeName string) string {
+	t := c.GetType(typeName)
+	if t == nil {
+		return "?"
+	}
+	if t.Short != "" {
+		return t.Short
+	}
+	if t.Name == "" {
+		return "?"
+	}
+	return strings.ToUpper(t.Name[:1])
+}
+
+// IsRoadmapType reports whether a type appears as its own container in the
+// aggregate views. Anything not explicitly switched off is visible.
+func (c *Config) IsRoadmapType(typeName string) bool {
+	if t := c.GetType(typeName); t != nil && t.Roadmap != nil {
+		return *t.Roadmap
+	}
+	return true
+}
+
+// TypesAtRank returns the names of every type on the given rank, in the order
+// the merged list carries them.
+func (c *Config) TypesAtRank(rank int) []string {
+	var names []string
+	for _, t := range c.TypeList() {
+		r := t.Rank
+		if r == 0 {
+			r = LeafRank
+		}
+		if r == rank {
+			names = append(names, t.Name)
+		}
+	}
+	return names
+}
+
 // TypeNames returns the names of the merged type list (see TypeList).
 func (c *Config) TypeNames() []string {
 	list := c.TypeList()
@@ -960,7 +1073,13 @@ func (c *Config) TypeList() []TypeConfig {
 		copy(out, DefaultTypes)
 		return out
 	}
-	return mergeDefaults(DefaultTypes, c.Types,
+	defaults := DefaultTypes
+	if c.TypesExclusive {
+		// An exclusive config is its own complete type table: nothing from
+		// DefaultTypes should be merged in underneath it.
+		defaults = nil
+	}
+	return mergeDefaults(defaults, c.Types,
 		func(t TypeConfig) string { return t.Name },
 		func(o TypeOverride) string { return o.Name },
 		func(t *TypeConfig, o TypeOverride) {
@@ -971,11 +1090,30 @@ func (c *Config) TypeList() []TypeConfig {
 			if o.Description != "" {
 				t.Description = o.Description
 			}
+			if o.Rank != nil {
+				t.Rank = *o.Rank
+			}
 			// Emphasis is a pointer: only an explicit emphasis: key (true or
 			// false) touches it, so a colour-only override cannot flip a
 			// type like "milestone" back to non-emphasised by accident.
 			if o.Emphasis != nil {
 				t.Emphasis = *o.Emphasis
+			}
+			// Roadmap is a pointer for the same reason: an omitted key must
+			// stay distinct from an explicit "roadmap: false", or a
+			// colour-only override would silently hide the type.
+			if o.Roadmap != nil {
+				t.Roadmap = o.Roadmap
+			}
+			if o.Short != "" {
+				t.Short = o.Short
+			}
+			// An appended type starts from a zero TypeConfig, so an entry
+			// without rank: would sit at rank 0 and outrank every container.
+			// Leaf rank is the safe default and matches the old behaviour for
+			// unknown types.
+			if t.Rank == 0 {
+				t.Rank = LeafRank
 			}
 		},
 	)

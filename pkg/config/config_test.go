@@ -1778,8 +1778,8 @@ func TestSavePreservesFileMode(t *testing.T) {
 
 	cfg := &Config{
 		Beans: BeansConfig{
-			Path:        ".beans",
-			Prefix:      "test-",
+			Path:   ".beans",
+			Prefix: "test-",
 		},
 	}
 	cfg.SetConfigDir(tmpDir)
@@ -2241,5 +2241,361 @@ func TestSaveRoundTripsTypeEmphasisOverride(t *testing.T) {
 
 	if got := reloaded.GetType("feature"); got == nil || !got.Emphasis {
 		t.Errorf("reloaded GetType(\"feature\").Emphasis = %v, want the saved override", got)
+	}
+}
+
+// Plan task 1 of docs/topics/beans-type-profiles: the hierarchy moves off the
+// type names and onto a numeric rank per type.
+
+func TestRankOfReturnsTheBuiltInRanks(t *testing.T) {
+	c := &Config{}
+	for name, want := range map[string]int{
+		"milestone": 1,
+		"epic":      2,
+		"feature":   3,
+		"task":      4,
+		"bug":       4,
+	} {
+		if got := c.RankOf(name); got != want {
+			t.Errorf("RankOf(%q) = %d, want %d", name, got, want)
+		}
+	}
+}
+
+func TestRankOfFallsBackToLeafRankForUnknownTypes(t *testing.T) {
+	c := &Config{}
+	if got := c.RankOf("chore"); got != LeafRank {
+		t.Errorf("RankOf(\"chore\") = %d, want %d (LeafRank)", got, LeafRank)
+	}
+}
+
+func TestRankOfHonoursAConfiguredRank(t *testing.T) {
+	rank := 2
+	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}
+	if got := c.RankOf("package"); got != 2 {
+		t.Errorf("RankOf(\"package\") = %d, want 2", got)
+	}
+}
+
+func TestAppendedTypeWithoutRankLandsOnTheLeafRank(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore", Color: "peach"}}}
+	if got := c.RankOf("chore"); got != LeafRank {
+		t.Errorf("RankOf(\"chore\") = %d, want %d (LeafRank)", got, LeafRank)
+	}
+}
+
+// AC-4 is about the merged list itself, not just about what RankOf reports:
+// both getters normalise a zero rank to LeafRank on their own, so a test that
+// only asks RankOf stays green even when the merge leaves the entry at 0. A
+// rank-0 entry in TypeList outranks every container for every later reader.
+func TestAppendedTypeCarriesTheLeafRankInTheMergedList(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore", Color: "peach"}}}
+
+	for _, ty := range c.TypeList() {
+		if ty.Name != "chore" {
+			continue
+		}
+		if ty.Rank != LeafRank {
+			t.Errorf("TypeList() entry \"chore\".Rank = %d, want %d (LeafRank)", ty.Rank, LeafRank)
+		}
+		return
+	}
+	t.Fatal("TypeList() carries no \"chore\" entry, want the appended type")
+}
+
+func TestColourOnlyOverrideKeepsTheBuiltInRank(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "epic", Color: "red"}}}
+	if got := c.RankOf("epic"); got != 2 {
+		t.Errorf("RankOf(\"epic\") = %d, want 2 - a colour override must not reset the rank", got)
+	}
+}
+
+func TestTypesAtRankReturnsListOrder(t *testing.T) {
+	rank := 2
+	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}
+	got := c.TypesAtRank(2)
+	want := []string{"epic", "package"}
+	if len(got) != len(want) {
+		t.Fatalf("TypesAtRank(2) = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("TypesAtRank(2)[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// Save() builds the types: sequence node by node rather than by marshalling
+// the struct, so a yaml tag alone does not carry Rank through a write-and-read
+// cycle. Without this test the omission is invisible: the existing round-trip
+// test sets no rank.
+func TestSaveRoundTripsATypeRankOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	rank := 2
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "package", Rank: &rank}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.RankOf("package"); got != 2 {
+		t.Errorf("reloaded RankOf(\"package\") = %d, want 2 - the saved rank must survive", got)
+	}
+}
+
+// Plan task 3 of docs/topics/beans-type-profiles: a type can opt out of the
+// aggregate views (roadmap, milestones) without losing its rank or colour.
+
+func TestEveryBuiltInTypeIsVisibleByDefault(t *testing.T) {
+	c := &Config{}
+	for _, name := range c.TypeNames() {
+		if !c.IsRoadmapType(name) {
+			t.Errorf("IsRoadmapType(%q) = false, want true — built-in types stay visible", name)
+		}
+	}
+}
+
+func TestRoadmapFalseHidesAType(t *testing.T) {
+	visible := false
+	rank := 1
+	c := &Config{Types: []TypeOverride{{Name: "bucket", Rank: &rank, Roadmap: &visible}}}
+	if c.IsRoadmapType("bucket") {
+		t.Error("a type with roadmap: false must not count as a roadmap type")
+	}
+}
+
+func TestAppendedTypeIsVisibleWithoutTheKey(t *testing.T) {
+	rank := 1
+	c := &Config{Types: []TypeOverride{{Name: "release", Rank: &rank}}}
+	if !c.IsRoadmapType("release") {
+		t.Error("an appended type without roadmap: must default to visible")
+	}
+}
+
+func TestColourOnlyOverrideKeepsVisibility(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "milestone", Color: "red"}}}
+	if !c.IsRoadmapType("milestone") {
+		t.Error("a colour override must not hide a type")
+	}
+}
+
+// Save() builds the types: sequence node by node rather than by marshalling
+// the struct, so a yaml tag alone does not carry Roadmap through a
+// write-and-read cycle. Without this test the omission is invisible.
+func TestSaveRoundTripsATypeRoadmapOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	visible := false
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "bug", Roadmap: &visible}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if reloaded.IsRoadmapType("bug") {
+		t.Error("reloaded IsRoadmapType(\"bug\") = true, want false - the saved roadmap flag must survive")
+	}
+}
+
+// Task 7 of docs/topics/beans-type-profiles: the type column's single-letter
+// code moves from a hardcoded internal/ui switch onto per-type config.
+
+func TestShortOfPrefersTheConfiguredValue(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore", Short: "C"}}}
+	if got := c.ShortOf("chore"); got != "C" {
+		t.Errorf("ShortOf(\"chore\") = %q, want \"C\"", got)
+	}
+}
+
+// Renamed from TestShortOfFallsBackToTheFirstLetter: DefaultTypes now carries
+// an explicit Short: "M" for "milestone", so this pins the configured branch,
+// not the first-letter fallback (see
+// TestShortOfFallsBackForATypeWithNoConfiguredShort below for that one).
+func TestShortOfReturnsTheConfiguredShortForABuiltInType(t *testing.T) {
+	c := &Config{}
+	if got := c.ShortOf("milestone"); got != "M" {
+		t.Errorf("ShortOf(\"milestone\") = %q, want \"M\"", got)
+	}
+}
+
+// A type with no configured short anywhere is what actually exercises the
+// first-letter fallback (see the comment on
+// TestShortOfReturnsTheConfiguredShortForABuiltInType above).
+func TestShortOfFallsBackForATypeWithNoConfiguredShort(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore"}}}
+	if got := c.ShortOf("chore"); got != "C" {
+		t.Errorf("ShortOf(\"chore\") = %q, want \"C\"", got)
+	}
+}
+
+func TestShortOfReturnsAQuestionMarkForAnUnknownType(t *testing.T) {
+	c := &Config{}
+	if got := c.ShortOf("unheard-of"); got != "?" {
+		t.Errorf("ShortOf(\"unheard-of\") = %q, want \"?\"", got)
+	}
+}
+
+// Save() builds the types: sequence node by node rather than by marshalling
+// the struct, so a yaml tag alone does not carry Short through a
+// write-and-read cycle. Without this test the omission is invisible.
+func TestSaveRoundTripsATypeShortOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	// "X" deliberately does not match "package"'s own first letter, so a
+	// Save() that silently drops Short would still pass by falling back to
+	// the first-letter default ("P") instead of failing loudly.
+	cfg.Types = []TypeOverride{{Name: "package", Short: "X"}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.ShortOf("package"); got != "X" {
+		t.Errorf("reloaded ShortOf(\"package\") = %q, want \"X\" - the saved short must survive", got)
+	}
+}
+
+// Task 9 fix round 2: TypesExclusive is a new top-level key, not one of the
+// TypeOverride fields, so it needs its own node in toYAMLNode()'s hand-built
+// mapping next to "types" - the same trap that TestSaveRoundTripsATypeShortOverride
+// and its siblings pin for the per-entry override fields.
+func TestSaveRoundTripsTypesExclusive(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.TypesExclusive = true
+	cfg.Types = []TypeOverride{{Name: "task", Rank: intPtr(LeafRank)}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !reloaded.TypesExclusive {
+		t.Error("reloaded TypesExclusive = false, want true - the saved flag must survive a write-and-read cycle")
+	}
+}
+
+// A plain Save() (no TypesExclusive set) must not introduce the new key at
+// all: every config written before this change, and every beans init without
+// --profile, has TypesExclusive false and must round-trip to the same false.
+func TestSaveOmitsTypesExclusiveWhenFalse(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(raw), "types_exclusive") {
+		t.Errorf("Save() wrote a types_exclusive key for a config that never set it:\n%s", raw)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if reloaded.TypesExclusive {
+		t.Error("reloaded TypesExclusive = true, want false")
+	}
+}
+
+// With TypesExclusive, TypeList() must be exactly the config's own Types -
+// nothing merged in from DefaultTypes. A profile like "todo" carries only
+// "task", so every other built-in name must fall back to the leaf rank as an
+// unknown name would, and no type occupies rank 1.
+func TestTypesExclusiveDropsTheBuiltInDefaults(t *testing.T) {
+	types, ok := ProfileTypes("todo")
+	if !ok {
+		t.Fatal("todo profile missing")
+	}
+	cfg := &Config{TypesExclusive: true, Types: types}
+
+	if got := cfg.RankOf("milestone"); got != LeafRank {
+		t.Errorf("RankOf(\"milestone\") = %d, want %d (unknown name falls back to the leaf rank)", got, LeafRank)
+	}
+	if got := cfg.TypesAtRank(1); len(got) != 0 {
+		t.Errorf("TypesAtRank(1) = %v, want empty - an exclusive todo config carries no rank-1 type", got)
+	}
+	if got := cfg.TypeList(); len(got) != 1 || got[0].Name != "task" {
+		t.Errorf("TypeList() = %+v, want exactly one type named \"task\"", got)
+	}
+}
+
+// The "complex" side of the same behaviour: an exclusive config with eight
+// types must not carry the two rank-1/rank-2 names ("milestone", "epic")
+// that DefaultTypes contributes under merge semantics.
+func TestTypesExclusiveOmitsDefaultsNotNamedByTheProfile(t *testing.T) {
+	types, ok := ProfileTypes("complex")
+	if !ok {
+		t.Fatal("complex profile missing")
+	}
+	cfg := &Config{TypesExclusive: true, Types: types}
+
+	list := cfg.TypeList()
+	if len(list) != 8 {
+		t.Fatalf("TypeList() has %d types, want 8", len(list))
+	}
+	for _, name := range []string{"milestone", "epic"} {
+		for _, ty := range list {
+			if ty.Name == name {
+				t.Errorf("TypeList() carries %q, which the complex profile does not name", name)
+			}
+		}
+	}
+}
+
+// Task 9 fix round 3: TypeList() can now legitimately return an empty slice
+// (types_exclusive: true with no types), which used to make Load's
+// default_type fallback panic on an out-of-range index into that slice. This
+// loads exactly that config and requires Load to return normally, leaving
+// DefaultType empty rather than deriving one from nothing.
+func TestLoadDoesNotPanicOnAnEmptyExclusiveTypeList(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, ConfigFileName)
+	content := "beans:\n  prefix: x-\ntypes_exclusive: true\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Beans.DefaultType != "" {
+		t.Errorf("Beans.DefaultType = %q, want empty - nothing to derive one from", cfg.Beans.DefaultType)
 	}
 }

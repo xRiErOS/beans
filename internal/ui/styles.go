@@ -12,6 +12,55 @@ import (
 // set once at startup from the config (see SetTheme).
 var activeTheme = DefaultTheme()
 
+// typeShorts is the process-wide single-character table, set once at startup
+// from the config (see SetTypeShorts). Same reasoning as activeTheme:
+// rendering has no other channel to carry it, and internal/ui must not
+// depend on pkg/config.
+//
+// It starts out holding the codes the old hardcoded switch carried, so a
+// command that renders before startup wiring runs (or a test that never
+// calls SetTypeShorts) still gets "M"/"E"/"F"/"B"/"T" instead of "?".
+var typeShorts = defaultTypeShorts()
+
+// defaultTypeShorts returns a fresh copy of the built-in type table.
+// SetTypeShorts(nil) resets to this, which is also what lets a test restore
+// the table instead of leaking an empty one into every test that runs after.
+func defaultTypeShorts() map[string]string {
+	return map[string]string{
+		"milestone": "M",
+		"epic":      "E",
+		"feature":   "F",
+		"bug":       "B",
+		"task":      "T",
+	}
+}
+
+// SetTypeShorts replaces the single-character table. Passing nil resets it
+// to the built-in defaults.
+func SetTypeShorts(shorts map[string]string) {
+	if shorts == nil {
+		typeShorts = defaultTypeShorts()
+		return
+	}
+	typeShorts = make(map[string]string, len(shorts))
+	for name, short := range shorts {
+		typeShorts[name] = short
+	}
+}
+
+// fullTypeColumnWidth is the width the long-form type column claims. It
+// follows the longest configured type name instead of a literal.
+var fullTypeColumnWidth = 10
+
+// SetTypeColumnWidths sets the short-form and long-form type column widths.
+func SetTypeColumnWidths(short, full int) {
+	ColWidthType = short
+	fullTypeColumnWidth = full
+}
+
+// FullTypeColumnWidth returns the long-form type column width.
+func FullTypeColumnWidth() int { return fullTypeColumnWidth }
+
 // legacyColorAliases maps colour names that were valid .beans.yml values
 // before the Catppuccin switch to the tone that now carries their intent.
 // green/yellow/red/blue kept working by coincidence - they already are
@@ -337,22 +386,14 @@ func RenderPriorityText(priority, color string) string {
 	return style.Render(priority)
 }
 
-// ShortType returns a single-character code for the bean type.
+// ShortType returns the single-character code for a bean type, from the
+// process-wide table (see SetTypeShorts). Falls back to "?" for a type the
+// table doesn't carry.
 func ShortType(t string) string {
-	switch t {
-	case "milestone":
-		return "M"
-	case "epic":
-		return "E"
-	case "bug":
-		return "B"
-	case "feature":
-		return "F"
-	case "task":
-		return "T"
-	default:
-		return "?"
+	if s, ok := typeShorts[t]; ok {
+		return s
 	}
+	return "?"
 }
 
 // ShortStatus returns a single-character code for the bean status.
@@ -432,9 +473,13 @@ type BeanRowConfig struct {
 const (
 	ColWidthID     = 12
 	ColWidthStatus = 3
-	ColWidthType   = 3
 	ColWidthTags   = 24
 )
+
+// ColWidthType is the short-form type column width. It is a var, not a
+// const, because SetTypeColumnWidths sets it at startup from the merged
+// type list (see SetTypeColumnWidths).
+var ColWidthType = 3
 
 // ResponsiveColumns holds calculated column widths based on available space
 type ResponsiveColumns struct {
@@ -464,7 +509,7 @@ func CalculateResponsiveColumns(totalWidth int, hasTags bool) ResponsiveColumns 
 	if totalWidth >= minWidthForFullNames {
 		cols.UseFullTypeStatus = true
 		cols.Status = 12 // "in-progress" needs 11 chars
-		cols.Type = 10   // "milestone" needs 9 chars
+		cols.Type = FullTypeColumnWidth()
 	}
 
 	// Don't show tags in narrow viewports - prioritize title space
@@ -560,7 +605,7 @@ func RenderBeanRow(id, status, typeName, title string, cfg BeanRowConfig) string
 	var typeStr string
 	if cfg.UseFullNames {
 		typeStr = typeName
-		typeStyle = typeStyle.Width(12) // wider for full names
+		typeStyle = typeStyle.Width(FullTypeColumnWidth()) // wider for full names
 	} else {
 		typeStr = ShortType(typeName)
 	}

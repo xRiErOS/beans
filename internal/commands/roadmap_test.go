@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -367,7 +368,7 @@ func TestCollectLeafDescendants(t *testing.T) {
 	}
 
 	t.Run("flattens through nested features, excludes done by default", func(t *testing.T) {
-		got := collectLeafDescendants("feat1", children, false)
+		got := collectLeafDescendants("feat1", children, false, nil)
 		if len(got) != 2 {
 			t.Fatalf("got %d leafs, want 2 (t1, t2)", len(got))
 		}
@@ -378,14 +379,14 @@ func TestCollectLeafDescendants(t *testing.T) {
 	})
 
 	t.Run("includes done when requested", func(t *testing.T) {
-		got := collectLeafDescendants("feat1", children, true)
+		got := collectLeafDescendants("feat1", children, true, nil)
 		if len(got) != 3 {
 			t.Fatalf("got %d leafs, want 3 (t1, t2, t3)", len(got))
 		}
 	})
 
 	t.Run("no children returns empty, not nil panic", func(t *testing.T) {
-		got := collectLeafDescendants("nonexistent", children, false)
+		got := collectLeafDescendants("nonexistent", children, false, nil)
 		if len(got) != 0 {
 			t.Errorf("got %d leafs, want 0", len(got))
 		}
@@ -405,7 +406,7 @@ func TestCollectLeafDescendants(t *testing.T) {
 				{ID: "t1", Type: "task", Title: "Reachable leaf", Status: "todo", Parent: "featB"},
 			},
 		}
-		got := collectLeafDescendants("featA", cyclic, false)
+		got := collectLeafDescendants("featA", cyclic, false, nil)
 		if len(got) != 1 || got[0].ID != "t1" {
 			t.Errorf("got %v, want exactly [t1]", got)
 		}
@@ -1088,6 +1089,32 @@ func TestValidateRoadmapRootType(t *testing.T) {
 	}
 }
 
+// TestValidateRoadmapRootTypeWithNoContainerTypes covers a profile like
+// "todo" that defines no container types at all: the old message rendered
+// as "roadmap root must be one of , got task (x-1)" -- an empty list before
+// "got" instead of a sensible explanation. The error must instead say the
+// project has no container types, without touching the normal-case message
+// TestRoadmapCmdRejectsNonContainerRootType depends on.
+func TestValidateRoadmapRootTypeWithNoContainerTypes(t *testing.T) {
+	leafRank := config.LeafRank
+	prev := cfg
+	cfg = &config.Config{TypesExclusive: true, Types: []config.TypeOverride{
+		{Name: "task", Rank: &leafRank},
+	}}
+	defer func() { cfg = prev }()
+
+	err := validateRoadmapRootType(&bean.Bean{ID: "x-1", Type: "task"})
+	if err == nil {
+		t.Fatal("expected an error when the project defines no container types")
+	}
+	if !strings.Contains(err.Error(), "no container types") {
+		t.Errorf("expected error to say the project defines no container types, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "must be one of ,") {
+		t.Errorf("error still renders the degenerate empty list, got %q", err.Error())
+	}
+}
+
 func TestRenderRoadmapMarkdownRootEpic(t *testing.T) {
 	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "Auth", Status: "todo", Path: "e1--auth.md"}
 	item1 := &bean.Bean{ID: "beans-t1", Type: "task", Title: "Login", Status: "todo", Path: "t1--login.md"}
@@ -1111,7 +1138,7 @@ func TestRenderRoadmapMarkdownRootEpic(t *testing.T) {
 	if strings.Contains(got, "## Milestone") {
 		t.Errorf("root-scoped output must not contain a Milestone heading, got %q", got)
 	}
-	if strings.Contains(got, "No Milestone") {
+	if strings.Contains(got, "Unscheduled") {
 		t.Errorf("root-scoped output must not contain the Unscheduled heading, got %q", got)
 	}
 }
@@ -1132,5 +1159,616 @@ func TestRenderRoadmapMarkdownRootFeature(t *testing.T) {
 	}
 	if !strings.Contains(got, "OIDC") {
 		t.Errorf("expected item OIDC to be rendered, got %q", got)
+	}
+}
+
+func TestRoadmapPlacesAConfiguredRank2TypeInTheEpicSlot(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{{Name: "package", Rank: &rank}}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "p1", Type: "package", Status: "todo", Title: "A package", Parent: "m1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "A task", Parent: "p1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if len(data.Milestones) != 1 {
+		t.Fatalf("got %d milestone groups, want 1", len(data.Milestones))
+	}
+	group := data.Milestones[0]
+	if len(group.Epics) != 1 {
+		t.Fatalf("got %d rank-2 groups, want 1 — a configured rank-2 type belongs in the epic slot", len(group.Epics))
+	}
+	if group.Epics[0].Epic.ID != "p1" {
+		t.Errorf("rank-2 slot holds %q, want \"p1\"", group.Epics[0].Epic.ID)
+	}
+	if len(group.Epics[0].Items) != 1 {
+		t.Errorf("got %d leaves under the package, want 1", len(group.Epics[0].Items))
+	}
+}
+
+func TestRoadmapAcceptsAConfiguredRank1TypeAsScopeRoot(t *testing.T) {
+	rank := 1
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{{Name: "release", Rank: &rank}}}
+	defer func() { cfg = prev }()
+
+	root := &bean.Bean{ID: "r1", Type: "release", Status: "todo", Title: "v1"}
+	if err := validateRoadmapRootType(root); err != nil {
+		t.Errorf("validateRoadmapRootType(release) = %v, want nil", err)
+	}
+}
+
+func TestRoadmapRejectsALeafAsScopeRoot(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{}
+	defer func() { cfg = prev }()
+
+	if err := validateRoadmapRootType(&bean.Bean{ID: "t1", Type: "task"}); err == nil {
+		t.Error("a leaf type must not be accepted as a roadmap root")
+	}
+}
+
+func TestHiddenContainerAndItsSubtreeStayOutOfTheRoadmap(t *testing.T) {
+	rank := 1
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Planned", Parent: "m1"},
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"},
+		{ID: "t2", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	for _, g := range data.Milestones {
+		if g.Milestone.ID == "b1" {
+			t.Fatal("a hidden container must not render as its own section")
+		}
+	}
+	if data.Unscheduled != nil {
+		for _, b := range data.Unscheduled.Other {
+			if b.ID == "t2" {
+				t.Fatal("a leaf under a hidden container must not resurface as unscheduled")
+			}
+		}
+	}
+	if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
+		t.Errorf("the visible milestone must still render")
+	}
+}
+
+// TestHiddenContainerHidesEveryRankBeneathIt covers the full container depth
+// the rank scheme allows: a hidden rank-1 bucket with a rank-2 child that
+// itself has a rank-3 child with a leaf, plus a rank-3 child parented
+// directly under the hidden rank-1 (skipping rank 2). A visible-typed
+// container nested under a hidden one must vanish too -- markSubtree walks
+// every descendant regardless of its own type -- and none of it may resurface
+// in any of the unscheduled buckets.
+func TestHiddenContainerHidesEveryRankBeneathIt(t *testing.T) {
+	rank := 1
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"},
+		{ID: "e1", Type: "epic", Status: "todo", Title: "Nested epic", Parent: "b1"},
+		{ID: "f1", Type: "feature", Status: "todo", Title: "Nested feature", Parent: "e1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Deep leaf", Parent: "f1"},
+		{ID: "f2", Type: "feature", Status: "todo", Title: "Direct feature", Parent: "b1"},
+		{ID: "t2", Type: "task", Status: "todo", Title: "Leaf under direct feature", Parent: "f2"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if data.Unscheduled != nil {
+		for _, eg := range data.Unscheduled.Epics {
+			if eg.Epic.ID == "e1" {
+				t.Fatal("a rank-2 container nested under a hidden rank-1 container must not resurface as unscheduled")
+			}
+		}
+		for _, fg := range data.Unscheduled.Features {
+			if fg.Feature.ID == "f1" || fg.Feature.ID == "f2" {
+				t.Fatalf("a rank-3 container under a hidden rank-1 container must not resurface as unscheduled, got %q", fg.Feature.ID)
+			}
+		}
+		for _, b := range data.Unscheduled.Other {
+			if b.ID == "t1" || b.ID == "t2" {
+				t.Fatalf("a leaf at any depth under a hidden rank-1 container must not resurface as unscheduled, got %q", b.ID)
+			}
+		}
+	}
+	if len(data.Milestones) != 0 {
+		t.Errorf("got %d milestone groups, want 0 — the hidden bucket is the only rank-1 bean", len(data.Milestones))
+	}
+}
+
+// TestHiddenContainerNestedUnderVisibleParentVanishesEntirely covers Ruling 1
+// of the fix round (D15): hiding removes, it does not reclassify. A
+// hidden-type rank-2 container underneath a *visible* rank-1 milestone must
+// vanish together with its whole subtree -- it must not render as one of the
+// milestone's Epics, and its leaf must not fold up into the milestone's flat
+// "Other" list either (that fold-up is exactly the "unassigned items"
+// failure mode D15 names).
+func TestHiddenContainerNestedUnderVisibleParentVanishesEntirely(t *testing.T) {
+	rank := 2
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "t0", Type: "task", Status: "todo", Title: "Planned", Parent: "m1"},
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot", Parent: "m1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
+		t.Fatalf("the visible milestone must still render, got %+v", data.Milestones)
+	}
+	group := data.Milestones[0]
+	for _, eg := range group.Epics {
+		if eg.Epic.ID == "b1" {
+			t.Fatal("a hidden rank-2 container under a visible milestone must not render as one of its Epics")
+		}
+	}
+	for _, o := range group.Other {
+		if o.ID == "t1" || o.ID == "b1" {
+			t.Fatalf("a hidden container's leaf must not fold up into the parent's flat Other list, got %q", o.ID)
+		}
+	}
+	if data.Unscheduled != nil {
+		for _, o := range data.Unscheduled.Other {
+			if o.ID == "t1" || o.ID == "b1" {
+				t.Fatalf("a hidden container's leaf must not resurface as unscheduled either, got %q", o.ID)
+			}
+		}
+	}
+}
+
+// TestScopedRoadmapHidingRespectsScopeBoundary pins Ruling 2 (fix round 2)
+// plus its round-3 correction: the scoped-by-ID bypass exempts exactly the
+// named root, nothing more and nothing less.
+//
+//   - Naming a hidden container directly renders its full subtree (the
+//     bypass): true for a rank-1 root (restores the coverage
+//     TestScopedRoadmapBypassesHidingForTheNamedRoot carried before it was
+//     narrowed to rank 2 only) and for a rank-2 root.
+//   - Naming a visible container that sits BELOW a hidden ancestor also
+//     renders its full subtree: a direct-by-ID lookup is not the aggregate
+//     view the visibility flag governs, and an ancestor's opt-out must not
+//     reach down past the scoped root. This is the fix-round-4 bug: seeding
+//     hidden from a bean whose ID merely differs from root reaches ancestors
+//     of root too, and marks everything root and its descendants ancestrally
+//     shared.
+//   - Naming a visible container that CONTAINS a hidden container still
+//     suppresses that inner hidden container and its subtree -- the bypass
+//     is not total, D15 still applies to anything nested inside the scope.
+//
+// One fixture carries all four cases: v1 (hidden rank-1 vault) -> e2
+// (visible epic) -> t2 (leaf), and m1 (visible milestone) -> b1 (hidden
+// rank-2 bucket) -> t1 (leaf).
+func TestScopedRoadmapHidingRespectsScopeBoundary(t *testing.T) {
+	rank1, rank2 := 1, 2
+	hidden := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank2, Roadmap: &hidden},
+		{Name: "vault", Rank: &rank1, Roadmap: &hidden},
+	}}
+	defer func() { cfg = prev }()
+
+	m1 := &bean.Bean{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"}
+	b1 := &bean.Bean{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot", Parent: "m1"}
+	t1 := &bean.Bean{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"}
+	v1 := &bean.Bean{ID: "v1", Type: "vault", Status: "todo", Title: "Attic"}
+	e2 := &bean.Bean{ID: "e2", Type: "epic", Status: "todo", Title: "Someday feature", Parent: "v1"}
+	t2 := &bean.Bean{ID: "t2", Type: "task", Status: "todo", Title: "Someday task", Parent: "e2"}
+	beans := []*bean.Bean{m1, b1, t1, v1, e2, t2}
+
+	t.Run("scoped to a visible container that contains a hidden one, the hidden subtree is suppressed", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, m1)
+		if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
+			t.Fatalf("expected the named root m1 to render, got %+v", data.Milestones)
+		}
+		group := data.Milestones[0]
+		for _, eg := range group.Epics {
+			if eg.Epic.ID == "b1" {
+				t.Fatal("a hidden rank-2 container below the scoped root must not render as one of its Epics")
+			}
+		}
+		for _, o := range group.Other {
+			if o.ID == "b1" || o.ID == "t1" {
+				t.Fatalf("a hidden container's subtree below the scoped root must not fold into Other, got %q", o.ID)
+			}
+		}
+	})
+
+	t.Run("scoped directly to a hidden rank-2 container, it renders in full", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, b1)
+		if data.Root == nil || data.Root.Epic == nil || data.Root.Epic.Epic.ID != "b1" {
+			t.Fatalf("a scoped hidden root must still render as its own container, got %+v", data.Root)
+		}
+		found := false
+		for _, o := range data.Root.Epic.Items {
+			if o.ID == "t1" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a scoped hidden root must render its own full content -- the bypass covers the named root")
+		}
+	})
+
+	t.Run("scoped directly to a hidden rank-1 container, it renders in full", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, v1)
+		if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "v1" {
+			t.Fatalf("a scoped hidden rank-1 root must still render as its own container, got %+v", data.Milestones)
+		}
+		group := data.Milestones[0]
+		if len(group.Epics) != 1 || group.Epics[0].Epic.ID != "e2" {
+			t.Fatalf("a scoped hidden rank-1 root must render its own visible child, got %+v", group.Epics)
+		}
+		found := false
+		for _, item := range group.Epics[0].Items {
+			if item.ID == "t2" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a scoped hidden rank-1 root must render its whole subtree -- the bypass covers the named root")
+		}
+	})
+
+	t.Run("scoped to a visible container below a hidden ancestor, it renders in full", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, e2)
+		if data.Root == nil || data.Root.Epic == nil || data.Root.Epic.Epic.ID != "e2" {
+			t.Fatalf("expected the named root e2 to render, got %+v", data.Root)
+		}
+		found := false
+		for _, item := range data.Root.Epic.Items {
+			if item.ID == "t2" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a visible root below a hidden ancestor must render its full subtree -- the ancestor's opt-out must not reach past the scoped root")
+		}
+	})
+}
+
+// TestHiddenRank3ContainerVanishesWithItsLeaf closes a coverage gap the
+// reviewer flagged: rank 3, directly opting out (not via an ancestor), had
+// no test of its own alongside the existing rank-1/rank-2 cases.
+func TestHiddenRank3ContainerVanishesWithItsLeaf(t *testing.T) {
+	rank := 3
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "drawer", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "e1", Type: "epic", Status: "todo", Title: "Auth", Parent: "m1"},
+		{ID: "t2", Type: "task", Status: "todo", Title: "Planned", Parent: "e1"},
+		{ID: "d1", Type: "drawer", Status: "todo", Title: "Hidden drawer", Parent: "e1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "d1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if len(data.Milestones) != 1 {
+		t.Fatalf("got %d milestone groups, want 1", len(data.Milestones))
+	}
+	group := data.Milestones[0]
+	if len(group.Epics) != 1 || group.Epics[0].Epic.ID != "e1" {
+		t.Fatalf("expected epic e1 to still render (it has a visible sibling task), got %+v", group.Epics)
+	}
+	eg := group.Epics[0]
+	for _, fg := range eg.Features {
+		if fg.Feature.ID == "d1" {
+			t.Fatal("a hidden rank-3 container must not render as one of its epic's Features")
+		}
+	}
+	foundT1, foundT2 := false, false
+	for _, item := range eg.Items {
+		if item.ID == "t1" {
+			foundT1 = true
+		}
+		if item.ID == "t2" {
+			foundT2 = true
+		}
+	}
+	if foundT1 {
+		t.Error("a leaf under a hidden rank-3 container must not fold into the epic's Items")
+	}
+	if !foundT2 {
+		t.Error("the epic's own visible leaf must still render")
+	}
+}
+
+// TestScopedRoadmapRank3RootBypassesItsOwnHiddenType mirrors the rank-1/
+// rank-2 scoped-bypass coverage for rank 3, per the reviewer's note.
+func TestScopedRoadmapRank3RootBypassesItsOwnHiddenType(t *testing.T) {
+	rank := 3
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "drawer", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	root := &bean.Bean{ID: "d1", Type: "drawer", Status: "todo", Title: "Hidden drawer"}
+	beans := []*bean.Bean{
+		root,
+		{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "d1"},
+	}
+
+	data := buildScopedRoadmap(beans, false, root)
+
+	if data.Root == nil || data.Root.Feature == nil || data.Root.Feature.Feature.ID != "d1" {
+		t.Fatalf("a scoped hidden rank-3 root must still render as its own container, got %+v", data.Root)
+	}
+	found := false
+	for _, item := range data.Root.Feature.Items {
+		if item.ID == "t1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("a scoped hidden rank-3 root must render its own full content")
+	}
+}
+
+func TestTypeBadgeUsesTheConfiguredColour(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "chore", Rank: &rank, Color: "peach"},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "c1", Type: "chore"})
+
+	if strings.Contains(got, "gray") {
+		t.Errorf("badge fell back to gray: %s", got)
+	}
+	if !strings.Contains(got, "chore-") {
+		t.Errorf("badge does not name the type: %s", got)
+	}
+}
+
+func TestTypeBadgeStaysEmptyForATypelessBean(t *testing.T) {
+	if got := typeBadge(&bean.Bean{ID: "x1"}); got != "" {
+		t.Errorf("typeBadge() = %q, want empty", got)
+	}
+}
+
+// badgeURLPattern pins the exact shape shields.io needs: a bare 6-digit hex
+// (no leading '#') or the literal fallback "gray" after the type-dash. A
+// stray '#' would make the URL fail to match and thus fail the test, where
+// the badge itself would just silently not render.
+var badgeURLPattern = regexp.MustCompile(`^!\[([a-z]+)\]\(https://img\.shields\.io/badge/([a-z]+)-([0-9a-f]{6}|gray)\?style=flat-square\)$`)
+
+func TestTypeBadgeURLOmitsTheLeadingHash(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "chore", Rank: &rank, Color: "peach"},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "c1", Type: "chore"})
+
+	m := badgeURLPattern.FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("typeBadge() = %q, does not match expected badge URL shape %s", got, badgeURLPattern)
+	}
+	if m[3] == "gray" {
+		t.Errorf("typeBadge() = %q, resolved colour fell back to gray", got)
+	}
+	if strings.Contains(got, "#") {
+		t.Errorf("typeBadge() = %q, badge URL carries a stray '#'", got)
+	}
+}
+
+func TestTypeBadgeFallsBackToGrayForATypeWithNoColour(t *testing.T) {
+	rank := 4
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "task", Rank: &rank},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "t1", Type: "task"})
+
+	want := "![task](https://img.shields.io/badge/task-gray?style=flat-square)"
+	if got != want {
+		t.Errorf("typeBadge() = %q, want %q", got, want)
+	}
+}
+
+func TestTypeBadgeFallsBackToGrayForAnUnknownType(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "u1", Type: "mystery"})
+
+	want := "![mystery](https://img.shields.io/badge/mystery-gray?style=flat-square)"
+	if got != want {
+		t.Errorf("typeBadge() = %q, want %q", got, want)
+	}
+}
+
+func TestTypeBadgeAcceptsARawHexColour(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "chore", Rank: &rank, Color: "#123abc"},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "c1", Type: "chore"})
+
+	want := "![chore](https://img.shields.io/badge/chore-123abc?style=flat-square)"
+	if got != want {
+		t.Errorf("typeBadge() = %q, want %q", got, want)
+	}
+}
+
+// --- Heading labels follow the bean's own type (beans-0mvv fix wave 2) -----
+//
+// Task 4 moved the roadmap's container *selection* to rank but left the
+// *labels* hardcoded to "Milestone"/"Epic"/"Feature" in both renderers. On a
+// non-classic profile every rank-1 container rendered as "Milestone" and
+// every rank-2 container as "Epic", regardless of its configured type name.
+
+// TestTypeHeadingLabel pins typeHeadingLabel in isolation: first-letter
+// upper-case as a pure display transform (D05 keeps the stored/configured
+// name lowercase), plus the empty-type fallback. A mutation that returns the
+// name unchanged fails the "chore"/"a" cases; a mutation that drops the
+// empty-string fallback fails the "" case.
+func TestTypeHeadingLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"milestone", "Milestone"},
+		{"chore", "Chore"},
+		{"a", "A"},
+		{"", "Untyped"},
+	}
+	for _, tt := range tests {
+		t.Run("\""+tt.name+"\"", func(t *testing.T) {
+			if got := typeHeadingLabel(tt.name); got != tt.want {
+				t.Errorf("typeHeadingLabel(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRoadmapMarkdownHeadingsUseTheBeansOwnType is the direct regression
+// test for the defect: on a project whose rank-1 type is "release" and
+// whose rank-2 type is "chore" (the "complex" profile shape), the roadmap
+// heading must say "Release"/"Chore", not the classic-profile words. A
+// reversion to the hardcoded "## Milestone:"/"### Epic:" text keeps the
+// bean data and structure identical but changes only the literal template
+// text, so it would leave every other test in this file green while
+// failing the "contains Release/Chore" and "does not contain Milestone/
+// Epic" assertions below -- exactly the defect reported against a real
+// store ("Parking lot" rendering as "## Milestone: Parking lot").
+func TestRoadmapMarkdownHeadingsUseTheBeansOwnType(t *testing.T) {
+	rank1, rank2 := 1, 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "release", Rank: &rank1},
+		{Name: "chore", Rank: &rank2},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "r1", Type: "release", Status: "todo", Title: "v2.0"},
+		{ID: "c1", Type: "chore", Status: "todo", Title: "Tidy the store", Parent: "r1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Sweep", Parent: "c1"},
+	}
+	data := buildRoadmap(beans, false, nil, nil)
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "## Release: v2.0") {
+		t.Errorf("expected the rank-1 heading to name the bean's own type (Release), got %q", got)
+	}
+	if !strings.Contains(got, "### Chore: Tidy the store") {
+		t.Errorf("expected the rank-2 heading to name the bean's own type (Chore), got %q", got)
+	}
+	if strings.Contains(got, "Milestone") || strings.Contains(got, "Epic") {
+		t.Errorf("heading must not fall back to the classic-profile words when they are not configured, got %q", got)
+	}
+}
+
+// TestRoadmapMarkdownHeadingForUnknownType covers a bean whose type the
+// config no longer knows (surfaced by `beans check`'s unknownTypeBeans): the
+// heading must still show the bean's own type name, capitalised, rather than
+// an empty or nonsensical heading. This bypasses buildRoadmap (an
+// unknown-typed bean is never classified onto a container rank by RankOf)
+// and drives renderRoadmapMarkdown directly with a hand-built rootGroup, the
+// same way TestRenderRoadmapMarkdownRootEpic does, since the heading
+// renderer itself must tolerate whatever string reaches it.
+func TestRoadmapMarkdownHeadingForUnknownType(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{}}
+	defer func() { cfg = prev }()
+
+	e := &bean.Bean{ID: "beans-legacy1", Type: "legacy", Title: "Old container", Status: "todo"}
+	data := &roadmapData{Root: &rootGroup{Epic: &epicGroup{Epic: e}}}
+
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "### Legacy: Old container") {
+		t.Errorf("expected the heading to capitalise the bean's own unknown type, got %q", got)
+	}
+}
+
+// TestRoadmapMarkdownHeadingForEmptyType covers an empty type string
+// reaching the heading renderer directly (defensive: RankOf("") resolves to
+// LeafRank via cfg.GetType, so buildRoadmap itself never classifies an
+// empty-typed bean onto a container rank -- but a hand-built roadmapData, or
+// a future caller, could still hand the renderer one). "Untyped" must
+// appear rather than an empty "### : Title" heading.
+func TestRoadmapMarkdownHeadingForEmptyType(t *testing.T) {
+	f := &bean.Bean{ID: "beans-notype1", Type: "", Title: "Mystery container", Status: "todo"}
+	data := &roadmapData{Root: &rootGroup{Feature: &featureGroup{Feature: f}}}
+
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "#### Untyped: Mystery container") {
+		t.Errorf("expected the empty-type fallback heading, got %q", got)
+	}
+	if strings.Contains(got, "#### : ") {
+		t.Errorf("must not render an empty type label, got %q", got)
+	}
+}
+
+// TestRoadmapMarkdownUnscheduledHeadingSaysUnscheduled pins the wording
+// chosen for the orphan section (formerly the classic-profile-specific
+// "No Milestone"): "Unscheduled" says something true whether the project's
+// rank-1 type is named "milestone", is one of several rank-1 types, or does
+// not exist at all (the "todo" profile). A reversion to the literal
+// "No Milestone" string would fail this on any of those projects.
+func TestRoadmapMarkdownUnscheduledHeadingSaysUnscheduled(t *testing.T) {
+	m := &bean.Bean{ID: "m1", Type: "milestone", Status: "todo", Title: "v1"}
+	orphanTask := &bean.Bean{ID: "t1", Type: "task", Status: "todo", Title: "Loose end"}
+	data := &roadmapData{
+		Milestones:  []milestoneGroup{{Milestone: m, Other: []*bean.Bean{}}},
+		Unscheduled: &unscheduledGroup{Other: []*bean.Bean{orphanTask}},
+	}
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "## Unscheduled") {
+		t.Errorf("expected the orphan section heading to say Unscheduled, got %q", got)
+	}
+	if strings.Contains(got, "No Milestone") {
+		t.Errorf("orphan section heading must not hardcode the classic-profile word, got %q", got)
 	}
 }

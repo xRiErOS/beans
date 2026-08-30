@@ -112,6 +112,49 @@ func TestShortType(t *testing.T) {
 	}
 }
 
+// Task 7 of docs/topics/beans-type-profiles: the type table moves off a
+// hardcoded switch onto a process-wide table fed from config at startup,
+// the same pattern SetTheme/activeTheme already use.
+
+func TestShortTypeReadsTheConfiguredTable(t *testing.T) {
+	SetTypeShorts(map[string]string{"milestone": "M", "chore": "C"})
+	defer SetTypeShorts(nil)
+
+	if got := ShortType("chore"); got != "C" {
+		t.Errorf("ShortType(\"chore\") = %q, want \"C\"", got)
+	}
+	if got := ShortType("milestone"); got != "M" {
+		t.Errorf("ShortType(\"milestone\") = %q, want \"M\"", got)
+	}
+}
+
+func TestShortTypeFallsBackToAQuestionMark(t *testing.T) {
+	SetTypeShorts(map[string]string{"task": "T"})
+	defer SetTypeShorts(nil)
+
+	if got := ShortType("unheard-of"); got != "?" {
+		t.Errorf("ShortType(\"unheard-of\") = %q, want \"?\"", got)
+	}
+}
+
+// TestSetTypeColumnWidthsStoresBothValues exercises the setter/getter pair
+// on their own -- it does not, and cannot, prove that any caller derives 12
+// from a longest type name of 11 characters. That derivation lives in
+// internal/commands.feedTypeTables (longest+1) and is covered separately by
+// that package's tests, since internal/ui must not import pkg/config to
+// build the config-derived fixture itself.
+func TestSetTypeColumnWidthsStoresBothValues(t *testing.T) {
+	SetTypeColumnWidths(3, 12)
+	defer SetTypeColumnWidths(3, 10)
+
+	if ColWidthType != 3 {
+		t.Errorf("ColWidthType = %d, want 3", ColWidthType)
+	}
+	if FullTypeColumnWidth() != 12 {
+		t.Errorf("FullTypeColumnWidth() = %d, want 12", FullTypeColumnWidth())
+	}
+}
+
 // Task 3: colour names now resolve against the active Catppuccin theme
 // instead of a hand-rolled hex palette.
 
