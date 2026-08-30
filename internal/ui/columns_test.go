@@ -698,4 +698,17 @@ func TestLegendUsesTheCellsColours(t *testing.T) {
 	if !strings.Contains(joined, wantCritical) {
 		t.Errorf("legend does not render the critical priority in its cell colour (bold red):\n%q", joined)
 	}
+
+	// task: no configured colour, so styleFor renders it with the terminal's
+	// own text colour and no bold — not some colour ResolveColor("") happens
+	// to resolve to. A legend entry styled any other way would name "task"
+	// with a swatch the actual cell never shows (beans-5451).
+	wantTask := lipgloss.NewStyle().Render("T")
+	if !strings.Contains(joined, wantTask) {
+		t.Errorf("legend does not render the task type unstyled, matching the cell (beans-5451):\n%q", joined)
+	}
+	wrongTask := lipgloss.NewStyle().Foreground(ResolveColor("")).Render("T")
+	if wrongTask != wantTask && strings.Contains(joined, wrongTask) {
+		t.Errorf("legend renders the task type in ResolveColor(\"\")'s colour instead of unstyled:\n%q", joined)
+	}
 }

@@ -427,10 +427,11 @@ func (c Columns) Legend(cfg *config.Config) []string {
 	if !c.LongType {
 		var plain, styled []string
 		for _, tc := range cfg.TypeList() {
-			style := lipgloss.NewStyle().Foreground(ResolveColor(tc.Color)).Bold(tc.Emphasis)
+			tc := tc
+			style := typeStyle(&tc)
 			code := ShortType(tc.Name)
 			plain = append(plain, code+" "+tc.Name)
-			styled = append(styled, style.Render(code)+Muted.Render(" "+tc.Name))
+			styled = append(styled, style.render(code)+Muted.Render(" "+tc.Name))
 		}
 		lines = append(lines, wrapLegendLine("type", plain, styled, c.Width)...)
 	}
