@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/config"
 )
@@ -721,6 +721,56 @@ func roadmapOutputFixture() *roadmapData {
 	}
 }
 
+// TestRoadmapRowsNestItemsUnderTheirEpic asserts roadmapRows' Depth mapping
+// directly, on a four-level fixture (milestone -> epic -> feature -> task).
+// TestRoadmapCmdTreeViewRendersConnectors only checks that a "└─" connector
+// appears somewhere in rendered output, which stays green even if nesting
+// past the first level collapses -- e.g. the mutation
+// `childDepth := depth + 1` -> `childDepth := depth` in
+// appendRoadmapEpicGroup/appendRoadmapFeatureGroup flattens feature and task
+// onto depth 1/2 instead of 2/3, and a connector is still drawn. Asserting
+// Depth on roadmapRows' own output is the only thing that catches that.
+func TestRoadmapRowsNestItemsUnderTheirEpic(t *testing.T) {
+	now := time.Now()
+	m := &bean.Bean{ID: "beans-m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now, Path: "m1--v10.md"}
+	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "Auth", Status: "todo", Path: "e1--auth.md"}
+	f := &bean.Bean{ID: "beans-f1", Type: "feature", Title: "Login flow", Status: "todo", Path: "f1--login-flow.md"}
+	task := &bean.Bean{ID: "beans-t1", Type: "task", Title: "Login", Status: "todo", Priority: "high", Path: "t1--login.md"}
+	data := &roadmapData{
+		Milestones: []milestoneGroup{
+			{
+				Milestone: m,
+				Epics: []epicGroup{
+					{Epic: e, Features: []featureGroup{{Feature: f, Items: []*bean.Bean{task}}}},
+				},
+			},
+		},
+	}
+
+	rows := roadmapRows(data)
+
+	want := []struct {
+		id    string
+		depth int
+	}{
+		{"beans-m1", 0},
+		{"beans-e1", 1},
+		{"beans-f1", 2},
+		{"beans-t1", 3},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].Bean == nil || rows[i].Bean.ID != w.id {
+			t.Errorf("row %d: bean = %v, want id %s", i, rows[i].Bean, w.id)
+		}
+		if rows[i].Depth != w.depth {
+			t.Errorf("row %d (%s): Depth = %d, want %d", i, w.id, rows[i].Depth, w.depth)
+		}
+	}
+}
+
 // SC-501: the TTY flag alone must decide which renderer roadmapOutput picks
 // -- pipe gets the markdown artifact (badges + links), TTY gets the plain
 // table (no badges, no markdown link syntax, glyph tree).
@@ -728,7 +778,7 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	data := roadmapOutputFixture()
 
 	t.Run("pipe (non-tty) renders markdown", func(t *testing.T) {
-		got := roadmapOutput(data, false, 0, true, "", false)
+		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "# Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
 		}
@@ -738,7 +788,7 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	})
 
 	t.Run("tty renders plain-text table", func(t *testing.T) {
-		got := roadmapOutput(data, true, 80, true, "", false)
+		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
 		}
@@ -748,8 +798,11 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 		if strings.Contains(got, "](") {
 			t.Error("TTY output must not contain markdown link syntax (EARS-4)")
 		}
-		if !strings.Contains(got, "■ Milestone") {
-			t.Error("expected TTY output to contain the milestone glyph line")
+		// Since beans-dbph Step B the milestone bean itself is the heading
+		// (a Row of type "milestone"), not a custom "■ Milestone" prefix --
+		// its ID showing up proves the milestone row rendered.
+		if !strings.Contains(got, "beans-m1") {
+			t.Error("expected TTY output to contain the milestone row (beans-m1)")
 		}
 	})
 }
@@ -770,7 +823,7 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 	}
 
 	t.Run("pipe (non-tty) renders markdown with Root", func(t *testing.T) {
-		got := roadmapOutput(data, false, 0, true, "", false)
+		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "# Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
 		}
@@ -789,12 +842,15 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 	})
 
 	t.Run("tty renders plain-text table with Root", func(t *testing.T) {
-		got := roadmapOutput(data, true, 80, true, "", false)
+		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
 		}
-		if !strings.Contains(got, "▸ Epic") {
-			t.Errorf("expected epic glyph line (▸ Epic), got %q", got)
+		// Since beans-dbph Step B the epic bean itself is the heading (a Row
+		// of type "epic"), not a custom "▸ Epic" prefix -- its ID showing up
+		// proves the epic row rendered.
+		if !strings.Contains(got, "beans-epic1") {
+			t.Errorf("expected epic row (beans-epic1), got %q", got)
 		}
 		if strings.Contains(got, "img.shields.io") {
 			t.Error("TTY output must not contain shields.io badges")
@@ -802,8 +858,8 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 		if strings.Contains(got, "](") {
 			t.Error("TTY output must not contain markdown link syntax")
 		}
-		if strings.Contains(got, "■ Milestone") {
-			t.Error("root-scoped output must not contain milestone framing")
+		if strings.Contains(got, "No Milestone") {
+			t.Error("root-scoped output must not contain the unscheduled-bucket heading")
 		}
 		if !strings.Contains(got, "Auth") {
 			t.Errorf("expected epic title Auth in output, got %q", got)
@@ -838,7 +894,7 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := roadmapOutput(data, false, 0, tt.links, "some/prefix", false)
+			got := roadmapOutput(data, false, roadmapFormatAuto, 0, tt.links, "some/prefix", false, ui.FormTree, config.Default())
 			want := renderRoadmapMarkdown(data, tt.links, "some/prefix", false)
 			if got != want {
 				t.Errorf("roadmapOutput(non-tty, links=%v, false) diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", tt.links, got, want)
@@ -856,23 +912,6 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 	}
 }
 
-// Mutation guard for the "fallback bei unbestimmbarer Breite" line (D08):
-// roadmapOutput must run cols through roadmapClampWidth, not use it raw. A
-// cols=0 caller (no terminal detected) must land on the 80-column floor, not
-// a 0-width render.
-func TestRoadmapOutputZeroColsFallsBackTo80(t *testing.T) {
-	data := roadmapOutputFixture()
-	got := roadmapOutput(data, true, 0, true, "", false)
-
-	lines := strings.SplitN(got, "\n", 3)
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 lines, got %d: %q", len(lines), got)
-	}
-	sepWidth := utf8.RuneCountInString(lines[1])
-	if sepWidth != 80 {
-		t.Errorf("separator width = %d, want 80 (roadmapClampWidth(0) floor, D08)", sepWidth)
-	}
-}
 
 func TestBuildScopedRoadmapMilestoneRoot(t *testing.T) {
 	oldCfg := cfg

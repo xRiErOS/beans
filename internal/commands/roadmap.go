@@ -12,8 +12,10 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
+	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -30,6 +32,9 @@ var (
 	roadmapLinkPrefix  string
 	roadmapDepth       int
 	roadmapTags        bool
+	roadmapView        string
+	roadmapFormat      string
+	roadmapWidthFlag   int
 )
 
 // roadmapData holds the structured roadmap for JSON output.
@@ -108,6 +113,23 @@ argument the root is that item, so --depth 1 lists its direct children.
 			return err
 		}
 
+		form, ok := ui.ParseForm(roadmapView)
+		if !ok {
+			return fmt.Errorf("invalid --view %q: must be one of \"tree\", \"table\"", roadmapView)
+		}
+
+		var formatOverride roadmapFormatOverride
+		switch roadmapFormat {
+		case "":
+			formatOverride = roadmapFormatAuto
+		case "tty":
+			formatOverride = roadmapFormatTTY
+		case "markdown":
+			formatOverride = roadmapFormatMarkdown
+		default:
+			return fmt.Errorf("invalid --format %q: must be one of \"tty\", \"markdown\"", roadmapFormat)
+		}
+
 		// Build the roadmap
 		var data *roadmapData
 		scoped := len(args) == 1
@@ -147,30 +169,190 @@ argument the root is that item, so --depth 1 lists its direct children.
 		}
 
 		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-		cols := 0
-		if isTTY {
-			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-				cols = w
-			}
-		}
+		cols := resolveWidth(roadmapWidthFlag, cmd.Flags().Changed("max-width"), cfg)
 
-		fmt.Print(roadmapOutput(data, isTTY, cols, links, linkPrefix, roadmapTags))
+		fmt.Print(roadmapOutput(data, isTTY, formatOverride, cols, links, linkPrefix, roadmapTags, form, cfg))
 		return nil
 	},
 }
 
+// roadmapFormatOverride lets --format force which branch roadmapOutput takes,
+// independent of isTTY detection. roadmapFormatAuto preserves today's
+// detection-only behaviour exactly -- this step does not change what either
+// branch renders, only how the branch is chosen.
+type roadmapFormatOverride int
+
+const (
+	roadmapFormatAuto roadmapFormatOverride = iota
+	roadmapFormatTTY
+	roadmapFormatMarkdown
+)
+
 // roadmapOutput is the testable TTY switch (EARS-1/EARS-2/EARS-5): TTY gets
-// the plain-text tree via renderRoadmapPretty, everything else (pipe,
-// redirect, non-terminal) gets renderRoadmapMarkdown unchanged -- byte-
-// identical to calling renderRoadmapMarkdown directly (Q07/D02). cols is
-// clamped via roadmapClampWidth regardless of what the caller passed in; a
-// caller that could not determine a terminal width passes 0, which lands on
-// the 80-column floor (D08).
-func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPrefix string, showTags bool) string {
-	if isTTY {
-		return renderRoadmapPretty(data, roadmapClampWidth(cols), showTags)
+// the shared layout engine (ui.Render) in the requested form, everything else
+// (pipe, redirect, non-terminal) gets renderRoadmapMarkdown unchanged --
+// byte-identical to calling renderRoadmapMarkdown directly (Q07/D02). cols is
+// passed through to ui.Render as-is -- resolveWidth (roadmap.go's RunE) is
+// the one place the width is decided (floor 80, cap from --max-width/config/
+// terminal, or uncapped for --max-width 0); a second clamp here would make
+// roadmap silently disagree with every other command about what --max-width
+// means (beans-dbph). format overrides the isTTY-derived choice when
+// it is not roadmapFormatAuto, so a caller can force either branch (e.g. for
+// tests, or a user explicitly asking for --format markdown/tty).
+func roadmapOutput(data *roadmapData, isTTY bool, format roadmapFormatOverride, cols int, links bool, linkPrefix string, showTags bool, form ui.Form, cfg *config.Config) string {
+	renderTTY := isTTY
+	switch format {
+	case roadmapFormatTTY:
+		renderTTY = true
+	case roadmapFormatMarkdown:
+		renderTTY = false
+	}
+	if renderTTY {
+		return ui.Render(roadmapRows(data), form, "Roadmap", cols, showTags, cfg)
 	}
 	return renderRoadmapMarkdown(data, links, linkPrefix, showTags)
+}
+
+// roadmapRows bridges the grouped roadmapData produced by buildRoadmap /
+// buildScopedRoadmap into the flat row list ui.Render expects. It mirrors the
+// walk renderRoadmapPretty performs (milestone -> epics -> features -> leafs,
+// then epic/feature/other for the unscheduled bucket), but builds
+// ui.FlatItems instead of writing text directly, and does no sorting of its
+// own -- order comes entirely from the builder's slices.
+//
+// Depth counts tree levels, not the old renderer's indent-in-spaces: each
+// milestone (or, for the unscheduled bucket, each of its top-level epics/
+// features/other) is its own depth-0 root. ui.RowsFromFlatItems resets its
+// ancestry stack whenever depth drops back to 0, so consecutive roots never
+// bleed tree lines into each other -- which is also why a milestone's own
+// IsLast is irrelevant to what gets drawn (Connector/Stem never consult
+// AncestorsLast[0]) and is set to true throughout rather than tracked.
+//
+// Only the unscheduled bucket gets a Section heading ("No Milestone"): each
+// milestone is itself a Bean row (type "milestone"), which is heading enough
+// on its own, matching the one documented use of Row.Section (ui/columns.go).
+func roadmapRows(data *roadmapData) []ui.Row {
+	var items []ui.FlatItem
+
+	if data.Root != nil {
+		if data.Root.Epic != nil {
+			appendRoadmapEpicGroup(&items, *data.Root.Epic, 0, true)
+		}
+		if data.Root.Feature != nil {
+			appendRoadmapFeatureGroup(&items, *data.Root.Feature, 0, true)
+		}
+		return ui.RowsFromFlatItems(items)
+	}
+
+	for _, mg := range data.Milestones {
+		appendRoadmapMilestoneGroup(&items, mg)
+	}
+
+	unscheduledAt := -1
+	if data.Unscheduled != nil {
+		unscheduledAt = len(items)
+		appendRoadmapUnscheduledGroup(&items, *data.Unscheduled)
+	}
+
+	rows := ui.RowsFromFlatItems(items)
+	if unscheduledAt >= 0 && unscheduledAt < len(rows) {
+		rows[unscheduledAt].Section = "No Milestone"
+	}
+	return rows
+}
+
+// appendRoadmapMilestoneGroup appends a milestone (depth 0) followed by its
+// epics, features, and other leaf items (depth 1), in that order -- matching
+// renderRoadmapPretty's mg.Epics / mg.Features / mg.Other walk.
+func appendRoadmapMilestoneGroup(items *[]ui.FlatItem, mg milestoneGroup) {
+	// Unreachable in production -- every construction site sets Milestone --
+	// but a hand-built roadmapData literal in a test would otherwise panic
+	// inside ui.Render instead of producing an empty render (beans-dbph
+	// review F5).
+	if mg.Milestone == nil {
+		return
+	}
+	*items = append(*items, ui.FlatItem{Bean: mg.Milestone, Depth: 0, IsLast: true})
+
+	total := len(mg.Epics) + len(mg.Features) + len(mg.Other)
+	i := 0
+	for _, eg := range mg.Epics {
+		i++
+		appendRoadmapEpicGroup(items, eg, 1, i == total)
+	}
+	for _, fg := range mg.Features {
+		i++
+		appendRoadmapFeatureGroup(items, fg, 1, i == total)
+	}
+	for _, leaf := range mg.Other {
+		i++
+		*items = append(*items, ui.FlatItem{Bean: leaf, Depth: 1, IsLast: i == total})
+	}
+}
+
+// appendRoadmapUnscheduledGroup appends the unscheduled bucket's epics,
+// features, and other leaf items at depth 0 -- each is its own root, exactly
+// like a milestone-less scoped root, since there is no milestone bean to
+// hang them under.
+func appendRoadmapUnscheduledGroup(items *[]ui.FlatItem, ug unscheduledGroup) {
+	total := len(ug.Epics) + len(ug.Features) + len(ug.Other)
+	i := 0
+	for _, eg := range ug.Epics {
+		i++
+		appendRoadmapEpicGroup(items, eg, 0, i == total)
+	}
+	for _, fg := range ug.Features {
+		i++
+		appendRoadmapFeatureGroup(items, fg, 0, i == total)
+	}
+	for _, leaf := range ug.Other {
+		i++
+		*items = append(*items, ui.FlatItem{Bean: leaf, Depth: 0, IsLast: i == total})
+	}
+}
+
+// appendRoadmapEpicGroup appends an epic at depth, followed by its direct
+// leaf items and nested feature groups at depth+1 -- items before features,
+// per renderRoadmapEpicGroup / roadmap.tmpl.
+func appendRoadmapEpicGroup(items *[]ui.FlatItem, eg epicGroup, depth int, isLast bool) {
+	// Unreachable in production -- every construction site sets Epic -- but
+	// a hand-built epicGroup literal in a test would otherwise panic inside
+	// ui.Render instead of producing an empty render (beans-dbph review F5).
+	if eg.Epic == nil {
+		return
+	}
+	*items = append(*items, ui.FlatItem{Bean: eg.Epic, Depth: depth, IsLast: isLast})
+
+	childDepth := depth + 1
+	total := len(eg.Items) + len(eg.Features)
+	i := 0
+	for _, leaf := range eg.Items {
+		i++
+		*items = append(*items, ui.FlatItem{Bean: leaf, Depth: childDepth, IsLast: i == total})
+	}
+	for _, fg := range eg.Features {
+		i++
+		appendRoadmapFeatureGroup(items, fg, childDepth, i == total)
+	}
+}
+
+// appendRoadmapFeatureGroup appends a feature at depth, followed by its
+// flattened leaf items at depth+1.
+func appendRoadmapFeatureGroup(items *[]ui.FlatItem, fg featureGroup, depth int, isLast bool) {
+	// Unreachable in production -- every construction site sets Feature --
+	// but a hand-built featureGroup literal in a test would otherwise panic
+	// inside ui.Render instead of producing an empty render (beans-dbph
+	// review F5).
+	if fg.Feature == nil {
+		return
+	}
+	*items = append(*items, ui.FlatItem{Bean: fg.Feature, Depth: depth, IsLast: isLast})
+
+	childDepth := depth + 1
+	n := len(fg.Items)
+	for i, leaf := range fg.Items {
+		*items = append(*items, ui.FlatItem{Bean: leaf, Depth: childDepth, IsLast: i == n-1})
+	}
 }
 
 // buildRoadmap constructs the roadmap data structure from beans.
@@ -504,7 +686,6 @@ func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includ
 	return nil, epic
 }
 
-
 // buildFeatureGroup builds a feature group: all leaf descendants found
 // anywhere beneath the feature, flattened and sorted.
 func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) featureGroup {
@@ -739,5 +920,8 @@ func RegisterRoadmapCmd(root *cobra.Command) {
 	roadmapCmd.Flags().StringVar(&roadmapLinkPrefix, "link-prefix", "", "URL prefix for links")
 	roadmapCmd.Flags().IntVar(&roadmapDepth, "depth", 0, "Limit output to n levels below the roadmap root (default: no limit)")
 	roadmapCmd.Flags().BoolVar(&roadmapTags, "tags", false, "Render each item's tags")
+	roadmapCmd.Flags().StringVar(&roadmapView, "view", "tree", `Layout: "tree" or "table"`)
+	roadmapCmd.Flags().StringVar(&roadmapFormat, "format", "", `Output format: "tty" or "markdown" (default: detect)`)
+	roadmapCmd.Flags().IntVar(&roadmapWidthFlag, "max-width", 0, "Cap rendering width in columns (0: no cap)")
 	root.AddCommand(roadmapCmd)
 }
