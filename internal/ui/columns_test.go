@@ -612,6 +612,68 @@ func TestLegendOmitsAxesThatAreAlreadyLong(t *testing.T) {
 	}
 }
 
+// TestLegendWrapsInsteadOfOverflowing guards the defect this task fixes:
+// Legend built each line as a label plus every entry joined by " · " with no
+// regard for c.Width at all, so on any terminal narrower than roughly 68
+// cells — the width the five default types need on one line — the legend ran
+// past the right edge. The sweep below starts at 80 (wide enough that no
+// wrapping should be needed) and goes well under 68, into the range where
+// the old code actually overflowed, down to 20.
+func TestLegendWrapsInsteadOfOverflowing(t *testing.T) {
+	widths := []int{80, 60, 50, 40, 30, 20}
+	for _, width := range widths {
+		c := NewColumns(testRows(strings.Repeat("x", 200)), width, true, config.Default())
+		lines := c.Legend(config.Default())
+		for _, line := range lines {
+			plain := stripANSI(line)
+			if plain == "" {
+				continue // the blank separator line Legend prepends
+			}
+			got := DisplayWidth(plain)
+			if got <= c.Width {
+				continue
+			}
+			if !strings.Contains(plain, "·") {
+				// A single entry is never split mid-word — the same
+				// exception WrapText documents for an unbreakable word. At
+				// pathologically narrow widths one entry alone (lead plus
+				// code plus name) can still exceed width; that is
+				// unavoidable without either truncating the mapping away
+				// or breaking a name mid-character, both worse than a
+				// slightly wide lone line.
+				continue
+			}
+			t.Errorf("width %d: legend line %d cells wide, want <= %d: %q",
+				width, got, c.Width, plain)
+		}
+	}
+}
+
+// TestLegendContinuationLineIndentsUnderTheEntries guards the specific shape
+// the wrap must take: a continuation line carries the same 9 cells of lead
+// the axis label occupies on the first line, so entries stay aligned under
+// entries rather than sliding left under the label.
+func TestLegendContinuationLineIndentsUnderTheEntries(t *testing.T) {
+	c := NewColumns(testRows(strings.Repeat("x", 200)), 30, true, config.Default())
+	lines := c.Legend(config.Default())
+
+	sawContinuation := false
+	for _, line := range lines {
+		plain := stripANSI(line)
+		if plain == "" || strings.HasPrefix(plain, "type") ||
+			strings.HasPrefix(plain, "status") || strings.HasPrefix(plain, "priority") {
+			continue
+		}
+		sawContinuation = true
+		if !strings.HasPrefix(plain, strings.Repeat(" ", 9)) {
+			t.Errorf("continuation line does not carry the 9-cell lead: %q", plain)
+		}
+	}
+	if !sawContinuation {
+		t.Fatal("width 30 with the full default type/status/priority lists produced no continuation line — adjust the fixture")
+	}
+}
+
 // TestLegendUsesTheCellsColours guards against a vacuous colour assertion:
 // under `go test` there is no tty, so lipgloss suppresses ANSI entirely and
 // a plain "contains this escape sequence" check would pass whether or not

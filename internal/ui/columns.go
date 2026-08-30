@@ -402,6 +402,17 @@ func headerLabel(long bool, wide, narrow string) string {
 	return narrow
 }
 
+// legendLead is the column an entry sits in: the axis label itself is padded
+// to this many cells (see PadRight calls below), so a continuation line
+// carries the same number of leading spaces to keep entries aligned under
+// entries rather than sliding left under the label.
+const legendLead = 9
+
+// legendSep joins entries on one legend line. It is a plain-text constant
+// because wrapLegendLine measures against it before any colour is applied —
+// see wrapLegendLine's own comment for why measuring must happen first.
+const legendSep = " · "
+
 // Legend names every abbreviation still on screen, in the same colours the
 // cells use. An axis written out in full explains itself and is left out —
 // no abbreviation, no legend entry for it.
@@ -409,25 +420,29 @@ func (c Columns) Legend(cfg *config.Config) []string {
 	var lines []string
 
 	if !c.LongType {
-		var parts []string
+		var plain, styled []string
 		for _, tc := range cfg.TypeList() {
 			style := lipgloss.NewStyle().Foreground(ResolveColor(tc.Color)).Bold(tc.Emphasis)
-			parts = append(parts, style.Render(ShortType(tc.Name))+Muted.Render(" "+tc.Name))
+			code := ShortType(tc.Name)
+			plain = append(plain, code+" "+tc.Name)
+			styled = append(styled, style.Render(code)+Muted.Render(" "+tc.Name))
 		}
-		lines = append(lines, Muted.Render(PadRight("type", 9))+strings.Join(parts, Muted.Render(" · ")))
+		lines = append(lines, wrapLegendLine("type", plain, styled, c.Width)...)
 	}
 
 	if !c.LongStatus {
-		var parts []string
+		var plain, styled []string
 		for _, sc := range cfg.StatusList() {
 			style := lipgloss.NewStyle().Foreground(ResolveColor(sc.Color)).Bold(!sc.Archive)
-			parts = append(parts, style.Render(ShortStatus(sc.Name))+Muted.Render(" "+sc.Name))
+			code := ShortStatus(sc.Name)
+			plain = append(plain, code+" "+sc.Name)
+			styled = append(styled, style.Render(code)+Muted.Render(" "+sc.Name))
 		}
-		lines = append(lines, Muted.Render(PadRight("status", 9))+strings.Join(parts, Muted.Render(" · ")))
+		lines = append(lines, wrapLegendLine("status", plain, styled, c.Width)...)
 	}
 
 	if !c.LongPrio {
-		var parts []string
+		var plain, styled []string
 		for _, pc := range cfg.PriorityList() {
 			sym := GetPrioritySymbol(pc.Name)
 			if sym == "" {
@@ -435,13 +450,79 @@ func (c Columns) Legend(cfg *config.Config) []string {
 			}
 			style := lipgloss.NewStyle().Foreground(ResolveColor(pc.Color)).
 				Bold(pc.Name == "critical" || pc.Name == "high")
-			parts = append(parts, style.Render(sym)+Muted.Render(" "+pc.Name))
+			plain = append(plain, sym+" "+pc.Name)
+			styled = append(styled, style.Render(sym)+Muted.Render(" "+pc.Name))
 		}
-		lines = append(lines, Muted.Render(PadRight("priority", 9))+strings.Join(parts, Muted.Render(" · ")))
+		lines = append(lines, wrapLegendLine("priority", plain, styled, c.Width)...)
 	}
 
 	if len(lines) == 0 {
 		return nil
 	}
 	return append([]string{""}, lines...) // blank line sets the legend off from the table
+}
+
+// wrapLegendLine reflows one axis's entries into lines that fit width cells,
+// instead of joining every entry onto a single line regardless of how wide
+// it grows — which is the defect this function replaces. Truncating with an
+// ellipsis was rejected: the legend's whole purpose is to name every
+// abbreviation on screen, and cutting the list short would silently drop
+// mappings for whichever entries did not fit.
+//
+// A continuation line carries legendLead worth of blank space instead of the
+// axis label, so entries keep lining up under entries. Measurement happens
+// on plain, an entry always joins the line it started even if that alone
+// already exceeds width — a single entry is never split, only the join
+// between entries wraps — so the loop always makes progress and a line is
+// never emitted empty. That mirrors the tradeoff WrapText documents for an
+// unbreakable word: at a pathologically narrow width, a lone entry can still
+// leave its line wider than requested, which is preferable to truncating the
+// mapping away or breaking a status/type name mid-character.
+//
+// plain and styled must be the same length and index-aligned: plain decides
+// where the line breaks fall, styled supplies what actually gets rendered at
+// those same positions. Deciding on plain and rendering from styled — rather
+// than measuring styled directly — is what keeps the wrap correct: an ANSI
+// colour escape counts as printable width to runewidth, so measuring a
+// styled string reports it wider than it renders and would wrap too early
+// (or, once no tty is attached and lipgloss emits no colour at all, hide the
+// question entirely).
+func wrapLegendLine(label string, plain, styled []string, width int) []string {
+	var lines []string
+	linePlainWidth := 0
+	lineStyled := ""
+	entriesOnLine := 0
+
+	flush := func() {
+		if len(lines) == 0 {
+			lines = append(lines, Muted.Render(PadRight(label, legendLead))+lineStyled)
+		} else {
+			lines = append(lines, strings.Repeat(" ", legendLead)+lineStyled)
+		}
+	}
+
+	for i, p := range plain {
+		entryWidth := DisplayWidth(p)
+		grown := legendLead + linePlainWidth
+		if entriesOnLine > 0 {
+			grown += DisplayWidth(legendSep) + entryWidth
+		} else {
+			grown += entryWidth
+		}
+		if entriesOnLine > 0 && grown > width {
+			flush()
+			linePlainWidth = 0
+			lineStyled = ""
+			entriesOnLine = 0
+		}
+		if entriesOnLine > 0 {
+			lineStyled += Muted.Render(legendSep)
+			linePlainWidth += DisplayWidth(legendSep)
+		}
+		lineStyled += styled[i]
+		linePlainWidth += entryWidth
+		entriesOnLine++
+	}
+	flush()
+	return lines
 }
