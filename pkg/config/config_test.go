@@ -2637,6 +2637,27 @@ func TestRoadmapFalseHidesAType(t *testing.T) {
 	}
 }
 
+// TypeList() merges each override into a fresh TypeConfig, but Roadmap used
+// to hand out o.Roadmap itself rather than a copy - every other pointer
+// field here (Rank, Emphasis) is deep-copied. Mutating a Roadmap value
+// through the merged list must not reach back into the config's own
+// TypeOverride.
+func TestRoadmapPointerIsDeepCopiedNotAliased(t *testing.T) {
+	visible := true
+	override := TypeOverride{Name: "bucket", Roadmap: &visible}
+	c := &Config{Types: []TypeOverride{override}}
+
+	merged := c.GetType("bucket")
+	if merged == nil || merged.Roadmap == nil {
+		t.Fatal("GetType(\"bucket\").Roadmap = nil, want a copy of the override's pointer")
+	}
+	*merged.Roadmap = false
+
+	if !*c.Types[0].Roadmap {
+		t.Error("mutating the merged TypeConfig's Roadmap flipped c.Types[0].Roadmap - it must be an independent copy")
+	}
+}
+
 func TestAppendedTypeIsVisibleWithoutTheKey(t *testing.T) {
 	rank := 1
 	c := &Config{Types: []TypeOverride{{Name: "release", Rank: &rank}}}

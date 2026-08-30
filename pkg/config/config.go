@@ -1242,9 +1242,12 @@ func (c *Config) TypeList() []TypeConfig {
 			}
 			// Roadmap is a pointer for the same reason: an omitted key must
 			// stay distinct from an explicit "roadmap: false", or a
-			// colour-only override would silently hide the type.
+			// colour-only override would silently hide the type. Deep-copy
+			// it, like every other pointer field here - handing out o.Roadmap
+			// itself would alias a caller's TypeOverride, letting a mutation
+			// through the merged TypeList() reach back into c.Types.
 			if o.Roadmap != nil {
-				t.Roadmap = o.Roadmap
+				t.Roadmap = boolPtr(*o.Roadmap)
 			}
 			if o.shortSet || o.Short != "" {
 				t.Short = o.Short
