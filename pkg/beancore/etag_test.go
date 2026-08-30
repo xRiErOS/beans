@@ -149,11 +149,18 @@ func TestETagIfMatchRejectsGenuineConcurrentModification(t *testing.T) {
 // status the field policy is measured from. Both read the same file, and they
 // have to keep agreeing after that read was consolidated.
 func TestUpdateWithIfMatchAndStatusPolicy(t *testing.T) {
-	core, _ := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
-	b := createTestBean(t, core, "test-etpol", "Gated bean", "todo")
-	etag := b.ETag()
+	// Each subtest gets its own core and bean: they all write to the same bean,
+	// so sharing one would make the outcome depend on which of them ran — and
+	// on which of them happened to fail before writing.
+	gated := func(t *testing.T) (*Core, *bean.Bean, string) {
+		t.Helper()
+		core, _ := setupTestCoreWithRequireFieldsOn(t, map[string][]string{"completed": {"commit"}})
+		b := createTestBean(t, core, "test-etpol", "Gated bean", "todo")
+		return core, b, b.ETag()
+	}
 
 	t.Run("policy blocks the transition even with a matching etag", func(t *testing.T) {
+		core, b, etag := gated(t)
 		b.Status = "completed"
 		err := core.Update(b, &etag)
 
@@ -164,6 +171,7 @@ func TestUpdateWithIfMatchAndStatusPolicy(t *testing.T) {
 	})
 
 	t.Run("a stale etag is rejected before the policy runs", func(t *testing.T) {
+		core, b, _ := gated(t)
 		stale := "0123456789abcdef"
 		b.Status = "completed"
 		err := core.Update(b, &stale)
@@ -175,6 +183,7 @@ func TestUpdateWithIfMatchAndStatusPolicy(t *testing.T) {
 	})
 
 	t.Run("the transition goes through once the field is there", func(t *testing.T) {
+		core, b, etag := gated(t)
 		b.Status = "completed"
 		b.Extra = map[string]any{"commit": "abc1234"}
 		if err := core.Update(b, &etag); err != nil {
@@ -187,6 +196,58 @@ func TestUpdateWithIfMatchAndStatusPolicy(t *testing.T) {
 		}
 		if got.Status != "completed" {
 			t.Errorf("Status = %q, want %q", got.Status, "completed")
+		}
+	})
+}
+
+// TestUpdateIfMatchUnderWorktreePath pins where the If-Match etag comes from
+// when the write is routed to a worktree: the main store, not the in-memory
+// bean. A worktree write does not make the main-store file irrelevant — it is
+// still the copy a later merge or a main-store writer works against, so a
+// change behind the watcher's back has to be caught here as it is on the
+// ordinary path.
+func TestUpdateIfMatchUnderWorktreePath(t *testing.T) {
+	core, beansDir := setupTestCore(t)
+	b := createTestBean(t, core, "test-wtetag", "Worktree gated", "todo")
+	staleETag := b.ETag()
+
+	// Someone replaced the main-store file behind the watcher's back.
+	mainFile := filepath.Join(beansDir, b.Path)
+	replaced := "---\nid: test-wtetag\ntitle: Worktree gated\nstatus: in-progress\ntype: task\n---\n\nchanged\n"
+	if err := os.WriteFile(mainFile, []byte(replaced), 0644); err != nil {
+		t.Fatalf("replacing the main-store file: %v", err)
+	}
+	onDisk, err := os.ReadFile(mainFile)
+	if err != nil {
+		t.Fatalf("reading back the main-store file: %v", err)
+	}
+	freshETag := bean.ETagOf(onDisk)
+	if freshETag == staleETag {
+		t.Fatal("the replacement did not change the file's etag — the test proves nothing")
+	}
+
+	wtDir := t.TempDir()
+
+	t.Run("a stale etag is rejected", func(t *testing.T) {
+		b.Priority = "low"
+		err := core.Update(b, &staleETag, WithWorktreePath(wtDir))
+
+		var mismatch *ETagMismatchError
+		if !errors.As(err, &mismatch) {
+			t.Fatalf("Update() error = %v, want *ETagMismatchError", err)
+		}
+		if mismatch.Current != freshETag {
+			t.Errorf("Current = %q, want the main-store file's etag %q", mismatch.Current, freshETag)
+		}
+	})
+
+	t.Run("the main-store etag is accepted", func(t *testing.T) {
+		b.Priority = "high"
+		if err := core.Update(b, &freshETag, WithWorktreePath(wtDir)); err != nil {
+			t.Fatalf("Update() error = %v, want nil", err)
+		}
+		if _, err := os.Stat(filepath.Join(wtDir, BeansDir, bean.BuildFilename(b.ID, b.Slug))); err != nil {
+			t.Fatalf("the bean was not written to the worktree: %v", err)
 		}
 	})
 }
