@@ -551,17 +551,40 @@ func seedListTree(t *testing.T) {
 	}
 }
 
-// resetListViewFlags restores listView/listMaxWidth to their zero state.
-// listCmd's flags are registered exactly once (idempotent Lookup guard in
-// RegisterListCmd, so tests can call it repeatedly into throwaway roots),
-// and pflag.FlagSet.Parse never resets a flag's Value or Changed bit for a
-// flag absent from the current argv — so without this reset, a --view or
-// --max-width value set by one test would silently leak into the next.
-func resetListViewFlags(t *testing.T) {
+// resetListViewFlags puts listView/listMaxWidth and their FlagSet bookkeeping
+// back to a known, fresh state before an Execute()-driven test. Two separate
+// cobra quirks make this necessary: listCmd's flags are registered exactly
+// once per test binary (idempotent Lookup guard in RegisterListCmd, so tests
+// can register into throwaway roots without panicking on a second flag
+// definition — other _test.go files in this package register listCmd via
+// RegisterCoreCommands before list_test.go's own tests ever run), and
+// pflag.FlagSet.Parse never resets a Value or the Changed bit for a flag
+// absent from the current argv. Without this, a --view/--max-width value —
+// or just its Changed bit — set by one test leaks into the next.
+//
+// listView's reset value is read back from the flag's own registered
+// DefValue rather than hardcoded to "table": an earlier, hardcoded version
+// of this helper masked a mutated default (RegisterListCmd's "table"
+// literal changed to "tree") because it forced listView back to "table"
+// regardless of what RegisterListCmd actually registered — the mutation
+// proof for TestListDefaultsToTheTableForm caught this. Deriving the reset
+// from DefValue means that test now actually exercises the registered
+// default instead of one this helper invented independently. Requires
+// RegisterListCmd(root) to have already run so Lookup succeeds.
+func resetListViewFlags(t *testing.T, root *cobra.Command) {
 	t.Helper()
 	oldView, oldWidth := listView, listMaxWidth
-	listView, listMaxWidth = "table", 0
 	t.Cleanup(func() { listView, listMaxWidth = oldView, oldWidth })
+
+	viewFlag := listCmd.Flags().Lookup("view")
+	widthFlag := listCmd.Flags().Lookup("max-width")
+	if viewFlag == nil || widthFlag == nil {
+		t.Fatalf("--view/--max-width not registered; call RegisterListCmd(root) first")
+	}
+	listView = viewFlag.DefValue
+	listMaxWidth = 0
+	viewFlag.Changed = false
+	widthFlag.Changed = false
 }
 
 // runListThroughRoot drives listCmd via a real cobra root.Execute() rather
@@ -571,12 +594,13 @@ func resetListViewFlags(t *testing.T) {
 func runListThroughRoot(t *testing.T, args []string) (stdout string, runErr error) {
 	t.Helper()
 	setupListTest(t)
-	resetListViewFlags(t)
 	seedListTree(t)
 
+	root := &cobra.Command{Use: "beans"}
+	RegisterListCmd(root)
+	resetListViewFlags(t, root)
+
 	out := captureListStdout(t, func() {
-		root := &cobra.Command{Use: "beans"}
-		RegisterListCmd(root)
 		root.SetArgs(append([]string{"list"}, args...))
 		root.SetOut(io.Discard)
 		root.SetErr(io.Discard)
