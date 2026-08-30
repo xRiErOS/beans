@@ -2422,17 +2422,20 @@ func TestShortOfPrefersTheConfiguredValue(t *testing.T) {
 	}
 }
 
-func TestShortOfFallsBackToTheFirstLetter(t *testing.T) {
+// Renamed from TestShortOfFallsBackToTheFirstLetter: DefaultTypes now carries
+// an explicit Short: "M" for "milestone", so this pins the configured branch,
+// not the first-letter fallback (see
+// TestShortOfFallsBackForATypeWithNoConfiguredShort below for that one).
+func TestShortOfReturnsTheConfiguredShortForABuiltInType(t *testing.T) {
 	c := &Config{}
 	if got := c.ShortOf("milestone"); got != "M" {
 		t.Errorf("ShortOf(\"milestone\") = %q, want \"M\"", got)
 	}
 }
 
-// "milestone" carries an explicit Short in DefaultTypes, so the test above
-// passes through the configured branch without ever exercising the
-// first-letter fallback. A type with no configured short anywhere closes
-// that gap.
+// A type with no configured short anywhere is what actually exercises the
+// first-letter fallback (see the comment on
+// TestShortOfReturnsTheConfiguredShortForABuiltInType above).
 func TestShortOfFallsBackForATypeWithNoConfiguredShort(t *testing.T) {
 	c := &Config{Types: []TypeOverride{{Name: "chore"}}}
 	if got := c.ShortOf("chore"); got != "C" {
