@@ -365,3 +365,110 @@ func TestParseForm(t *testing.T) {
 		t.Error(`ParseForm("grid") accepted an unknown form`)
 	}
 }
+
+// richRows is the golden-width fixture: a milestone with a progress bar, a
+// long-title epic with tags, a critical bug two levels deep, and a plain
+// short task — enough shape to exercise the tree stem, the tag column, the
+// progress counter and the type/status/priority long-vs-short axes at once.
+func richRows() []Row {
+	long := "Canary-Instanz sproutling-test — Staged-Rollout & Dogfood auf NAS"
+	return []Row{
+		{Bean: &bean.Bean{ID: "SPF-fexy", Title: "v0.5.0 — Kind-Administration", Type: "milestone",
+			Status: "draft", Priority: "normal", Tags: []string{"rel-0-5-0"}},
+			Depth: 0, IsLast: false, Progress: &Progress{Done: 131, Total: 139}},
+		{Bean: &bean.Bean{ID: "SPF-9m0d", Title: long, Type: "epic", Status: "in-progress",
+			Priority: "high", Tags: []string{"note-intern", "slug-tailwind-upgrade"}},
+			Depth: 1, AncestorsLast: []bool{false}, IsLast: false},
+		{Bean: &bean.Bean{ID: "SPF-wa9y", Title: "Status column drifts by one cell when tags are on",
+			Type: "bug", Status: "todo", Priority: "critical", Tags: []string{"regression"}},
+			Depth: 2, AncestorsLast: []bool{false, false}, IsLast: true},
+		{Bean: &bean.Bean{ID: "SPF-635g", Title: "short", Type: "task", Status: "completed",
+			Priority: "deferred"}, Depth: 1, AncestorsLast: []bool{false}, IsLast: true},
+	}
+}
+
+// TestNoLineEverExceedsItsTerminal guards the third prototype defect: a line
+// that ran past the terminal edge because a *minimum* width was used as an
+// actual width. The swept widths straddle both threshold constants that
+// widen columns (minWidthForFullNames=120, minWidthForTags=140 in
+// styles.go) — 110/130 sit just below each, 130/160 just above — so both the
+// squeezed and the roomy layouts get checked, not just the middle.
+func TestNoLineEverExceedsItsTerminal(t *testing.T) {
+	widths := []int{70, 80, 100, 110, 130, 160}
+	for _, form := range []Form{FormTable, FormTree} {
+		for _, w := range widths {
+			for _, tags := range []bool{false, true} {
+				out := Render(richRows(), form, "Golden", w, tags, config.Default())
+				for i, line := range strings.Split(out, "\n") {
+					if got := DisplayWidth(stripANSI(line)); got > w {
+						t.Errorf("form=%s width=%d tags=%v: line %d is %d cells\n%s",
+							form, w, tags, i, got, stripANSI(line))
+					}
+				}
+			}
+		}
+	}
+}
+
+// tableColumnsFor mirrors renderTable's own rows-to-flat step (Table drops
+// tree shape, not columns math) so the Columns computed here match exactly
+// what Render(..., FormTable, ...) computes internally — a tree-indented
+// Columns would consume extra title budget and disagree on which axes are
+// long. No column-width or legend decision is reimplemented; only the
+// tree-field drop that renderTable itself performs is repeated here so the
+// test can call the production Columns.Legend on the same input.
+func tableColumnsFor(rows []Row, width int, showTags bool, cfg *config.Config) Columns {
+	flat := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		flat = append(flat, Row{Bean: r.Bean, Depth: 0, IsLast: true, Section: r.Section, Progress: r.Progress})
+	}
+	return NewColumns(flat, width, showTags, cfg)
+}
+
+// TestLegendAppearsExactlyWhenSomethingIsShort checks the legend through the
+// production function that emits it, Columns.Legend, rather than by
+// grepping for a type/status name that also appears in the table itself
+// whenever that axis renders long-form — that string-sniffing approach
+// can never fail, since the name is present in the table's own cell.
+func TestLegendAppearsExactlyWhenSomethingIsShort(t *testing.T) {
+	for _, w := range []int{70, 80, 100, 110, 130, 160} {
+		c := tableColumnsFor(richRows(), w, true, config.Default())
+		out := stripANSI(Render(richRows(), FormTable, "Golden", w, true, config.Default()))
+		legend := strings.Join(c.Legend(config.Default()), "\n")
+		shortSomewhere := !c.LongType || !c.LongStatus || !c.LongPrio
+
+		if shortSomewhere {
+			if legend == "" {
+				t.Fatalf("width %d: an axis is short but Columns.Legend returned nothing", w)
+			}
+			if !strings.Contains(out, legend) {
+				t.Errorf("width %d: an axis is short but the render does not contain what Legend() produced", w)
+			}
+		} else {
+			if legend != "" {
+				t.Errorf("width %d: every axis is long but Columns.Legend still produced text: %q", w, legend)
+			}
+		}
+	}
+}
+
+func TestProgressCounterNeverWraps(t *testing.T) {
+	for _, w := range []int{80, 110, 160} {
+		out := stripANSI(Render(richRows(), FormTable, "Golden", w, false, config.Default()))
+		if !strings.Contains(out, "131/139") {
+			t.Errorf("width %d: the counter 131/139 did not survive on one line:\n%s", w, out)
+		}
+	}
+}
+
+// TestLongTagsNeverBreakMidWord from the brief is deliberately not shipped
+// here — see task-21-report.md. Given richRows() and widths {80,110,160},
+// tagCell (render.go) is structurally binary for any tag past the first:
+// it renders the tag in full or collapses it behind a "+N" marker, never a
+// partial/wrapped form, because its overflow check compares a fully-sized
+// candidate against a strictly smaller budget (width-reserve), so a
+// truncated candidate can never pass. The first tag, "#note-intern" at 12
+// cells, never gets truncated either: the observed non-zero Tags column
+// width never drops below 18 for this fixture. No single-line production
+// mutation was found that turns a check for a "rade"/"upgrade"
+// line-start fragment red without additionally rigging the fixture.
