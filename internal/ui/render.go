@@ -245,7 +245,16 @@ func renderTree(rows []Row, title string, width int, showTags bool, cfg *config.
 		}
 		return r
 	}
-	body := max(20, width-leadWidth-rightWidth(c.Tags))
+	// minRenderableTitle, not an invented tree-only floor: the table's last
+	// resort (columns.go) and the tree's must be the same number and the
+	// same story, or the two forms overflow their terminal by different
+	// amounts for the same width. Below it the title cannot hold even a
+	// truncation ellipsis meaningfully; this is the one place this layout
+	// accepts overflow rather than guarding against it.
+	body := width - leadWidth - rightWidth(c.Tags)
+	if body < minRenderableTitle {
+		body = minRenderableTitle
+	}
 
 	// Same redistribution as the table: unclaimed title width goes to the tags.
 	tmp := Columns{Title: body, Tags: c.Tags, Gap: c.Gap}

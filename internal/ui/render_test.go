@@ -183,11 +183,38 @@ func demoRows() []Row {
 }
 
 func TestNoLineExceedsTheWidthInEitherForm(t *testing.T) {
+	// The original sweep started at 70 and never reached the tree's title-body
+	// floor, which only misfires below width 47 (tags off) or 67 (tags on)
+	// for demoRows() — a Task-10-shaped gap: the right property, swept in a
+	// range the guarded code never runs in. 40 sits inside that window (and
+	// is the exact value traced by hand in review) without falling into the
+	// narrower width below 39 where even the fix legitimately still overflows
+	// — demoRows()'s longest id is 10 cells wide, and minRenderableTitle is
+	// the documented last resort for exactly that case (see columns.go): a
+	// terminal too narrow for id+status+priority to fit at all is not this
+	// bug, it is the accepted floor doing its job. 20 and 30 were tried first
+	// and both land in that legitimately-still-overflowing zone for *both*
+	// forms, which is why they are not in this list.
+	//
+	// Legend() (columns.go) is out of scope for this file and is not
+	// width-aware at all — its longest line ("status ...") is a fixed 68
+	// cells regardless of the width argument, so it overflows any width below
+	// that on its own, in both forms, independent of anything render.go
+	// decides. That is a real, separate violation of the same "no line
+	// exceeds width" property this test polices, but it belongs to
+	// columns.go, which this task does not touch — see the report. To keep
+	// this test targeted at what render.go itself is responsible for (the
+	// row/tree layout), the legend block — everything from the first blank
+	// line on, which is exactly where Columns.Legend's own output begins — is
+	// excluded from the narrow-width check below.
 	for _, form := range []Form{FormTable, FormTree} {
-		for _, w := range []int{70, 80, 100, 110, 130, 160} {
+		for _, w := range []int{40, 70, 80, 100, 110, 130, 160} {
 			for _, tags := range []bool{false, true} {
 				out := Render(demoRows(), form, "Demo", w, tags, config.Default())
 				for i, line := range strings.Split(out, "\n") {
+					if line == "" {
+						break // start of the legend block; not this file's responsibility
+					}
 					if got := DisplayWidth(stripANSI(line)); got > w {
 						t.Errorf("form=%s width=%d tags=%v line %d is %d cells:\n%s",
 							form, w, tags, i, got, stripANSI(line))
@@ -207,6 +234,30 @@ func TestTableFormHasAHeaderAndNoTreeCharacters(t *testing.T) {
 		if strings.Contains(out, glyph) {
 			t.Errorf("table form must be flat, found %q", glyph)
 		}
+	}
+}
+
+// TestTableFormFlattensBeforeMeasuringColumns guards render.go:185's flat
+// argument to NewColumns. demoRows() carries real depth (0, 1, 2, 2), and
+// the flat-vs-tree distinction has no tree glyphs to give it away in table
+// form (renderTable never calls Connector/Stem) — the only symptom of
+// passing rows instead of flat is that NewColumns' Indent (3*maxDepth) is
+// folded into the header's TYPE column but not into the row's own type
+// cell, so the header silently drifts out of alignment with its column.
+func TestTableFormFlattensBeforeMeasuringColumns(t *testing.T) {
+	out := stripANSI(Render(demoRows(), FormTable, "Demo", 110, false, config.Default()))
+	lines := strings.Split(out, "\n")
+	if len(lines) < 4 {
+		t.Fatalf("expected at least a title, rule, header and one row, got %d lines:\n%s", len(lines), out)
+	}
+	header, firstRow := lines[2], lines[3]
+	headerID := strings.Index(header, "ID")
+	rowID := strings.Index(firstRow, "beans-fexy")
+	if headerID < 0 || rowID < 0 {
+		t.Fatalf("could not locate ID column in header %q or row %q", header, firstRow)
+	}
+	if headerID != rowID {
+		t.Errorf("header's ID column starts at %d, first row's id at %d — the tree depth carried by demoRows() must be dropped before NewColumns measures, not just hidden by the absence of glyphs", headerID, rowID)
 	}
 }
 
@@ -248,6 +299,50 @@ func TestWrappedTitlesKeepTheVerticalLines(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("a wrapped row severed its branch:\n%s", out)
+	}
+}
+
+// TestColourSurvivesAWrappedTitleInBothForms guards the prototype regression
+// the user caught by eye: only the first line of a wrapped title took the
+// type's colour, continuation lines fell back to the terminal's default. All
+// other colour-bearing tests in this file strip ANSI first and would not
+// notice this; this one deliberately does not.
+func TestColourSurvivesAWrappedTitleInBothForms(t *testing.T) {
+	withTrueColor(t)
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "beans-x", Title: strings.Repeat("word ", 30), Type: "epic", Status: "todo"}, Depth: 0, IsLast: true},
+	}
+	colourBefore := func(t *testing.T, line, target string) string {
+		t.Helper()
+		idx := strings.Index(line, target)
+		if idx < 0 {
+			t.Fatalf("could not find %q in line %q", target, line)
+		}
+		matches := ansiEscape.FindAllString(line[:idx], -1)
+		if len(matches) == 0 {
+			t.Fatalf("line %q carries no ANSI colour before %q under a true-colour profile", line, target)
+		}
+		return matches[len(matches)-1]
+	}
+	for _, form := range []Form{FormTable, FormTree} {
+		out := Render(rows, form, "Demo", 40, false, config.Default())
+		lines := strings.Split(out, "\n")
+		firstIdx := -1
+		for i, l := range lines {
+			if strings.Contains(l, "beans-x") {
+				firstIdx = i
+				break
+			}
+		}
+		if firstIdx < 0 || firstIdx+1 >= len(lines) {
+			t.Fatalf("form=%s: expected a wrapped title with at least one continuation line:\n%s", form, out)
+		}
+		first, cont := lines[firstIdx], lines[firstIdx+1]
+		firstColour := colourBefore(t, first, "word")
+		contColour := colourBefore(t, cont, "word")
+		if firstColour != contColour {
+			t.Errorf("form=%s: title colour changed across the wrap: first line %q, continuation %q", form, firstColour, contColour)
+		}
 	}
 }
 
