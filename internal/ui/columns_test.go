@@ -502,6 +502,40 @@ func TestHeaderHasNoTrailingWhitespace(t *testing.T) {
 	}
 }
 
+// TestHeaderHasNoTrailingWhitespaceWithProgressNoTags covers the branch
+// TestHeaderHasNoTrailingWhitespace does not: every existing trailing-
+// whitespace test uses showTags=true, so TAGS is always the last cell and
+// the tag-absent paths — PRIORITY or PROGRESS as the last cell — are never
+// exercised. Header() applies TrimRight to the whole joined string
+// regardless of which cell ends it, so this is currently safe, but a future
+// change that moves the trim into the tag-cell branch specifically would
+// break exactly this case while every existing test stayed green.
+//
+// showTags=false alone is not enough to prove the point: PRIORITY's column
+// width is always exactly its own label's width (1 for "P", 8 for
+// "PRIORITY"), so it never carries trailing padding to begin with and a
+// missing trim would not show up there. A progress-carrying row is what
+// forces a genuinely padded last cell without tags: ProgressWidth
+// (progressBarWidth + gap + counter) is wider than "PROGRESS" itself, so
+// PROGRESS is padded, and it is the last cell when tags are off.
+func TestHeaderHasNoTrailingWhitespaceWithProgressNoTags(t *testing.T) {
+	rows := []Row{{
+		Bean:     &bean.Bean{ID: "beans-abcd", Title: "x", Type: "task", Status: "todo", Priority: "normal"},
+		Progress: &Progress{Done: 3, Total: 10},
+	}}
+	c := NewColumns(rows, 80, false, config.Default())
+	if c.ProgressWidth == 0 {
+		t.Fatal("fixture does not carry a progress column — adjust it")
+	}
+	if c.Tags != 0 {
+		t.Fatal("fixture unexpectedly has a tags column — PROGRESS would not be last")
+	}
+	plain := stripANSI(c.Header())
+	if plain != strings.TrimRight(plain, " ") {
+		t.Errorf("header has trailing whitespace with PROGRESS as the last cell: %q", plain)
+	}
+}
+
 // TestHeaderExactLayoutWithMultibyteID pins the header to an exact string
 // built entirely from literals, not from any field read back off c — a
 // mutation that reorders columns, drops the gap, or forgets the trailing
