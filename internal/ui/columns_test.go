@@ -309,3 +309,97 @@ func TestPrioTextHidesNormal(t *testing.T) {
 		t.Errorf("short critical = %q, want %q", got, "‼")
 	}
 }
+
+func rowsWithTags(title string, tags []string) []Row {
+	return []Row{{Bean: &bean.Bean{
+		ID: "beans-abcd", Title: title, Type: "task", Status: "todo",
+		Priority: "normal", Tags: tags,
+	}}}
+}
+
+func TestRebalanceMovesUnusedTitleWidthToTags(t *testing.T) {
+	rows := rowsWithTags("short", []string{"a-rather-long-tag-name", "second-tag"})
+	c := NewColumns(rows, 110, true, config.Default())
+	titleBefore, tagsBefore := c.Title, c.Tags
+
+	c.Rebalance(rows)
+
+	if c.Title >= titleBefore {
+		t.Errorf("title stayed at %d, want it to shrink from %d", c.Title, titleBefore)
+	}
+	if c.Tags <= tagsBefore {
+		t.Errorf("tags stayed at %d, want them to grow from %d", c.Tags, tagsBefore)
+	}
+	if c.Title+c.Tags != titleBefore+tagsBefore {
+		t.Errorf("rebalance changed the total: %d+%d vs %d+%d",
+			c.Title, c.Tags, titleBefore, tagsBefore)
+	}
+}
+
+func TestRebalanceDoesNothingWhenATitleClaimsTheWidth(t *testing.T) {
+	rows := rowsWithTags(strings.Repeat("x", 300), []string{"tag"})
+	c := NewColumns(rows, 110, true, config.Default())
+	before := c.Title
+	c.Rebalance(rows)
+	if c.Title != before {
+		t.Errorf("title moved from %d to %d though no width was spare", before, c.Title)
+	}
+}
+
+func TestRebalanceGivesNoMoreThanTheTagsNeed(t *testing.T) {
+	rows := rowsWithTags("x", []string{"ab"})
+	c := NewColumns(rows, 110, true, config.Default())
+	c.Rebalance(rows)
+	if c.Tags > 3 {
+		t.Errorf("tags grew to %d for a single #ab, want at most 3", c.Tags)
+	}
+}
+
+func TestRebalanceIsANoopWithoutTags(t *testing.T) {
+	rows := testRows("short")
+	c := NewColumns(rows, 110, false, config.Default())
+	before := c.Title
+	c.Rebalance(rows)
+	if c.Title != before || c.Tags != 0 {
+		t.Errorf("rebalance touched a tagless layout: title %d->%d, tags %d", before, c.Title, c.Tags)
+	}
+}
+
+// TestRebalanceMeasuresTagWidthInDisplayCells guards against a byte-count
+// regression: "beans-über" is 11 bytes but only 10 display cells (ü is a
+// single cell but two UTF-8 bytes). The single tag here needs exactly 11
+// cells ("#" plus the 10-cell tag) — a literal, not a value read back from
+// c. If Rebalance measured with len() instead of DisplayWidth, the tag
+// column would land on 12, one cell short of the real content because it
+// thinks the tag needs one more byte-cell than it does.
+func TestRebalanceMeasuresTagWidthInDisplayCells(t *testing.T) {
+	rows := rowsWithTags("x", []string{"beans-über"})
+	c := NewColumns(rows, 110, true, config.Default())
+	c.Rebalance(rows)
+	if c.Tags != 11 {
+		t.Errorf("tags = %d, want exactly 11 display cells for #beans-über", c.Tags)
+	}
+}
+
+// TestRebalanceNeverGrowsTheColumnTotal pins the conservation half of the
+// contract for the case Task 7's flagship test got backwards: Title and Tags
+// must never sum to more after Rebalance than before it, whether width moved
+// between them (case: tags need more) or was released (case: tags need
+// less). The expected bound is titleBefore+tagsBefore, captured before
+// Rebalance runs — not anything read back from c afterward — so a mutation
+// that grows one column without shrinking the other by the same amount
+// trips it.
+func TestRebalanceNeverGrowsTheColumnTotal(t *testing.T) {
+	rows := rowsWithTags("short", []string{
+		"a-rather-long-tag-name", "second-tag-that-is-long", "third-tag-also-long",
+	})
+	c := NewColumns(rows, 110, true, config.Default())
+	titleBefore, tagsBefore := c.Title, c.Tags
+	total := titleBefore + tagsBefore
+
+	c.Rebalance(rows)
+
+	if c.Title+c.Tags > total {
+		t.Errorf("title+tags grew from %d to %d", total, c.Title+c.Tags)
+	}
+}

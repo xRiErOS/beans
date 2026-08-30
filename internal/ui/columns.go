@@ -262,6 +262,81 @@ func NewColumns(rows []Row, width int, showTags bool, cfg *config.Config) Column
 	return c
 }
 
+// Rebalance hands width the titles do not need over to the tags.
+//
+// The title column otherwise swallows everything left over, even when no
+// title comes near filling it, while the tags beside it are elided. Width is
+// information; unclaimed width belongs to whoever still has something to say.
+//
+// Two moves happen, and only one of them can fire for a given row set:
+//
+//   - Tags want more than they have: title gives up its spare, capped by
+//     what tags actually need and by what title can give up without going
+//     below its own floor. This move only ever transfers width — the total
+//     held by the two columns together is unchanged.
+//   - Tags hold more than their content needs: that excess is released.
+//     It is not handed to the title — the title only ever gives, it never
+//     receives back — so this move can shrink the two columns' total, but
+//     never grow it and never grow the title.
+//
+// Either way, Rebalance never enlarges what NewColumns already decided; it
+// only redistributes or releases width within that budget.
+func (c *Columns) Rebalance(rows []Row) {
+	if c.Tags <= 0 || len(rows) == 0 {
+		return
+	}
+
+	neededTitle := 0
+	neededTags := 0
+	for _, r := range rows {
+		if w := DisplayWidth(r.Bean.Title); w > neededTitle {
+			neededTitle = w
+		}
+		if w := DisplayWidth(joinTags(r.Bean.Tags)); w > neededTags {
+			neededTags = w
+		}
+	}
+
+	// The title floor is minRenderableTitle, not neededTitle alone: Rebalance
+	// must not undo the readability guarantee NewColumns already enforces,
+	// even when the actual title content would ask for less than that.
+	titleFloor := neededTitle
+	if titleFloor < minRenderableTitle {
+		titleFloor = minRenderableTitle
+	}
+
+	switch {
+	case c.Tags < neededTags:
+		spare := c.Title - titleFloor
+		if spare <= 0 {
+			return
+		}
+		give := neededTags - c.Tags
+		if give > spare {
+			give = spare
+		}
+		c.Title -= give
+		c.Tags += give
+	case c.Tags > neededTags:
+		if neededTags < 0 {
+			neededTags = 0
+		}
+		c.Tags = neededTags
+	}
+}
+
+// joinTags renders a bean's tags the way they appear in the tag column.
+func joinTags(tags []string) string {
+	if len(tags) == 0 {
+		return ""
+	}
+	parts := make([]string, len(tags))
+	for i, t := range tags {
+		parts[i] = "#" + t
+	}
+	return strings.Join(parts, " ")
+}
+
 // TypeText renders the type in the form this layout decided on.
 func (c Columns) TypeText(b *bean.Bean) string {
 	if c.LongType {
