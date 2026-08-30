@@ -103,12 +103,16 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
-		// 3. Check all status colors are valid (hardcoded statuses). An
-		// empty Color is not an invalid one -- it means "no explicit
-		// colour, fall back to the muted default" (see ui.ResolveColor),
-		// the same meaning it carries in a StatusOverride. Only a non-empty
-		// value gets validated against the theme's tone names.
-		for _, s := range config.DefaultStatuses {
+		// 3. Check all status colours are valid. This must iterate the
+		// MERGED list, not config.DefaultStatuses: the defaults are
+		// compile-time constants this repository writes itself, so
+		// validating them can only ever report a defect we shipped, never
+		// one a user configured -- a guard that cannot fail. An empty Color
+		// is not an invalid one; it means "no explicit colour, fall back to
+		// the muted default" (see ui.ResolveColor), the same meaning it
+		// carries in a StatusOverride. Only a non-empty value is checked
+		// against the theme's tone names.
+		for _, s := range cfg.StatusList() {
 			if s.Color != "" && !ui.IsValidColor(s.Color) {
 				configErrors = append(configErrors, fmt.Sprintf("invalid color '%s' for status '%s'", s.Color, s.Name))
 			}
@@ -125,11 +129,11 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
-		// 4. Check all type colors are valid (hardcoded types). Same
-		// reasoning as the status loop above: "task" deliberately carries
-		// an empty Color in the ranked type scale (task 3), and an empty
+		// 4. Check all type colours are valid, again over the merged list.
+		// Same reasoning as the status loop above: "task" deliberately
+		// carries an empty Color in the ranked type scale, and an empty
 		// colour is "uncoloured", not "invalid".
-		for _, t := range config.DefaultTypes {
+		for _, t := range cfg.TypeList() {
 			if t.Color != "" && !ui.IsValidColor(t.Color) {
 				configErrors = append(configErrors, fmt.Sprintf("invalid color '%s' for type '%s'", t.Color, t.Name))
 			}

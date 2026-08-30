@@ -331,3 +331,27 @@ func TestCalculateResponsiveColumnsIgnoresTheme(t *testing.T) {
 		t.Errorf("CalculateResponsiveColumns followed the theme: mocha=%+v latte=%+v", mocha, latte)
 	}
 }
+
+// TestIsValidColorRejectsNonHexDigits pins a gap the final review's check
+// finding exposed: the hex branch only measured LENGTH, so "#zzz" and
+// "#gggggg" were accepted as valid colours. They reach lipgloss as a colour
+// it cannot parse, and `beans check` -- whose whole job is to catch a broken
+// .beans.yml before it confuses someone -- reported them as fine.
+//
+// Mutation: restore `return len(color) == 4 || len(color) == 7` and the
+// invalid cases below go green.
+func TestIsValidColorRejectsNonHexDigits(t *testing.T) {
+	valid := []string{"#abc", "#ABC", "#a1b2c3", "#FFFFFF", "#000"}
+	invalid := []string{"#zzz", "#gggggg", "#12g", "#", "#ab", "#abcd", "#12345", "#1234567"}
+
+	for _, c := range valid {
+		if !IsValidColor(c) {
+			t.Errorf("IsValidColor(%q) = false, want true", c)
+		}
+	}
+	for _, c := range invalid {
+		if IsValidColor(c) {
+			t.Errorf("IsValidColor(%q) = true, want false", c)
+		}
+	}
+}

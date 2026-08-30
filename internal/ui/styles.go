@@ -157,8 +157,18 @@ func ResolveColor(color string) lipgloss.Color {
 // theme, or a legacy colour name aliased to one (see legacyColorAliases).
 func IsValidColor(color string) bool {
 	if strings.HasPrefix(color, "#") {
-		// Valid hex: #RGB or #RRGGBB
-		return len(color) == 4 || len(color) == 7
+		// Valid hex: #RGB or #RRGGBB. The digits are checked, not just the
+		// length -- "#zzz" is the right length and no colour at all, and
+		// lipgloss renders it as nothing rather than rejecting it.
+		if len(color) != 4 && len(color) != 7 {
+			return false
+		}
+		for _, r := range color[1:] {
+			if !((r >= '0' && r <= '9') || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')) {
+				return false
+			}
+		}
+		return true
 	}
 	name := strings.ToLower(color)
 	if tone, ok := legacyColorAliases[name]; ok {

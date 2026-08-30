@@ -39,6 +39,15 @@ func TestCheckHelperProcess(t *testing.T) {
 
 	beansDir := os.Getenv("BEANS_CHECK_DIR")
 	testCfg := config.Default()
+	// Lets a test put a USER override into the subprocess's config, which is
+	// the only way to exercise the merged-list colour validation across the
+	// process boundary.
+	if c := os.Getenv("BEANS_CHECK_BAD_STATUS_COLOR"); c != "" {
+		testCfg.Statuses = []config.StatusOverride{{Name: "todo", Color: c}}
+	}
+	if c := os.Getenv("BEANS_CHECK_BAD_TYPE_COLOR"); c != "" {
+		testCfg.Types = []config.TypeOverride{{Name: "bug", Color: c}}
+	}
 	testCore := beancore.New(beansDir, testCfg)
 	if err := testCore.Load(); err != nil {
 		os.Stderr.WriteString("loading core: " + err.Error() + "\n")
@@ -67,6 +76,8 @@ func runCheckInTestStore(t *testing.T) string {
 		"BEANS_CHECK_HELPER=1",
 		"BEANS_CHECK_DIR="+beansDir,
 		"BEANS_CHECK_THEME="+ui.ActiveTheme().Name,
+		"BEANS_CHECK_BAD_STATUS_COLOR="+os.Getenv("BEANS_CHECK_BAD_STATUS_COLOR"),
+		"BEANS_CHECK_BAD_TYPE_COLOR="+os.Getenv("BEANS_CHECK_BAD_TYPE_COLOR"),
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -155,5 +166,29 @@ func TestUnknownTypeBeansAcceptsAConfiguredType(t *testing.T) {
 
 	if got := unknownTypeBeans([]*bean.Bean{{ID: "a2", Type: "chore"}}); len(got) != 0 {
 		t.Errorf("got %d beans, want 0 — chore is configured", len(got))
+	}
+}
+
+// TestCheckValidatesConfiguredColoursNotOnlyDefaults pins the fix for the
+// final review's config finding. The colour checks iterated
+// config.DefaultStatuses and config.DefaultTypes -- compile-time constants
+// this repository writes itself -- so they could only ever report a defect
+// we had shipped, never one a user configured. That made the entire
+// override surface introduced by this branch unvalidated, and made the
+// guard structurally incapable of failing.
+//
+// Mutation: point the loops back at config.DefaultStatuses/DefaultTypes and
+// this goes green again while the user's broken colour stays unreported.
+func TestCheckValidatesConfiguredColoursNotOnlyDefaults(t *testing.T) {
+	t.Setenv("BEANS_CHECK_BAD_STATUS_COLOR", "not-a-tone")
+	t.Setenv("BEANS_CHECK_BAD_TYPE_COLOR", "chartreuse")
+
+	out := stripANSITest(runCheckInTestStore(t))
+
+	if !strings.Contains(out, "invalid color 'not-a-tone' for status 'todo'") {
+		t.Errorf("check did not report the user's invalid status colour:\n%s", out)
+	}
+	if !strings.Contains(out, "invalid color 'chartreuse' for type 'bug'") {
+		t.Errorf("check did not report the user's invalid type colour:\n%s", out)
 	}
 }
