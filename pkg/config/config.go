@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/hmans/beans/pkg/bean"
 	"gopkg.in/yaml.v3"
@@ -1015,7 +1016,10 @@ func (c *Config) ShortOf(typeName string) string {
 	if t.Name == "" {
 		return "?"
 	}
-	return strings.ToUpper(t.Name[:1])
+	// First RUNE, not first byte: a type named "Änderung" would otherwise
+	// yield half a rune and render as U+FFFD.
+	r, _ := utf8.DecodeRuneInString(t.Name)
+	return strings.ToUpper(string(r))
 }
 
 // IsRoadmapType reports whether a type appears as its own container in the

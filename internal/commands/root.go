@@ -95,8 +95,10 @@ func feedTypeTables(c *config.Config) {
 	longest := 0
 	for _, t := range c.TypeList() {
 		shorts[t.Name] = c.ShortOf(t.Name)
-		if len(t.Name) > longest {
-			longest = len(t.Name)
+		// Cells, not bytes: this value becomes a column width, and a type
+		// named "Änderung" is 8 cells in 9 bytes.
+		if w := ui.DisplayWidth(t.Name); w > longest {
+			longest = w
 		}
 	}
 	ui.SetTypeShorts(shorts)

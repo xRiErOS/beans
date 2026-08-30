@@ -280,7 +280,12 @@ func renderTree(rows []Row, title string, width int, showTags bool, cfg *config.
 			strings.Repeat(" ", max(0, leadWidth-DisplayWidth(conn)-DisplayWidth(word)))
 
 		parts := WrapText(r.Bean.Title, body)
-		right := statusCell(r.Bean, c, cfg) + gap + prioCell(r.Bean, c, cfg) + gap + st.render(r.Bean.ID)
+		// The ID is padded to c.ID, the width rightWidth() already charges
+		// the title for. Rendering it unpadded spent the title's cells and
+		// left everything after a short ID ragged (renderTable pads it).
+		// The line is TrimRight'ed below, so a trailing pad costs nothing.
+		right := statusCell(r.Bean, c, cfg) + gap + prioCell(r.Bean, c, cfg) + gap +
+			st.render(PadRight(r.Bean.ID, c.ID))
 		if c.ProgressWidth > 0 {
 			right += gap + progressCell(r.Progress, c)
 		}

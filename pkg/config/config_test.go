@@ -2599,3 +2599,15 @@ func TestLoadDoesNotPanicOnAnEmptyExclusiveTypeList(t *testing.T) {
 		t.Errorf("Beans.DefaultType = %q, want empty - nothing to derive one from", cfg.Beans.DefaultType)
 	}
 }
+
+// TestShortOfSlicesByRuneNotByte pins the fallback short code against a
+// multi-byte first character. It used to be t.Name[:1] -- a byte slice --
+// so a type named "Änderung" produced half a rune and rendered as U+FFFD.
+func TestShortOfSlicesByRuneNotByte(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "Änderung"}, {Name: "课题"}}}
+	for name, want := range map[string]string{"Änderung": "Ä", "课题": "课"} {
+		if got := c.ShortOf(name); got != want {
+			t.Errorf("ShortOf(%q) = %q, want %q", name, got, want)
+		}
+	}
+}

@@ -513,3 +513,39 @@ func TestTagCellIsAlwaysASingleLine(t *testing.T) {
 // width never drops below 18 for this fixture. No single-line production
 // mutation was found that turns a check for a "rade"/"upgrade"
 // line-start fragment red without additionally rigging the fixture.
+
+// TestTreeIDColumnIsPaddedLikeTheTable pins a misalignment found in the
+// final review: renderTree charged the title budget c.ID -- the widest ID in
+// the set -- but rendered the cell as st.render(r.Bean.ID) with no PadRight,
+// while renderTable padded it correctly. With IDs of differing width in one
+// set (this workspace has SPF-, beans- and prefix-less legacy IDs at once)
+// everything to the right of a short ID shifted left, and the width was
+// still taken from the title rather than used by the ID.
+//
+// Mutation: drop the PadRight around r.Bean.ID in renderTree and this goes
+// red; the table stays green, which is the asymmetry that hid the defect.
+func TestTreeIDColumnIsPaddedLikeTheTable(t *testing.T) {
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "beans-wa9y", Title: "long identifier", Type: "epic",
+			Status: "todo", Tags: []string{"alpha"}}, Depth: 0, IsLast: false},
+		{Bean: &bean.Bean{ID: "old1", Title: "short identifier", Type: "task",
+			Status: "todo", Tags: []string{"beta"}}, Depth: 1, AncestorsLast: []bool{false}, IsLast: true},
+	}
+	out := stripANSI(Render(rows, FormTree, "T", 110, true, config.Default()))
+
+	// Measured in CELLS, not bytes: strings.Index returns a byte offset and
+	// the tree connector "└─ " is 7 bytes wide but 3 cells, which reads as a
+	// 4-cell misalignment that is not there.
+	var cols []int
+	for _, line := range strings.Split(out, "\n") {
+		if i := strings.Index(line, "#"); i >= 0 {
+			cols = append(cols, DisplayWidth(line[:i]))
+		}
+	}
+	if len(cols) != 2 {
+		t.Fatalf("expected two tag cells, found %d in:\n%s", len(cols), out)
+	}
+	if cols[0] != cols[1] {
+		t.Errorf("tag column starts at cell %d and %d: the ID cell is not padded\n%s", cols[0], cols[1], out)
+	}
+}

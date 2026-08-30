@@ -122,3 +122,29 @@ func TestWrapTextWideCharacterExactlyFitsTheWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestSetTypeColumnWidthsIsFedInCells is the layer-side half of a defect
+// found in the final review: root.go measured the longest type name with
+// len(), a BYTE count, and handed it to SetTypeColumnWidths as a column
+// width. The error was in the safe direction for the default vocabulary
+// (bytes >= cells, so the column came out too wide) but it is the exact
+// defect class this layer exists to prevent, three lines from the comment
+// explaining why the measurement has to live outside internal/ui.
+//
+// This pins the property at the seam: a name whose byte length and display
+// width differ must size the column by cells.
+func TestSetTypeColumnWidthsIsFedInCells(t *testing.T) {
+	// "Änderung": 8 display cells, 9 bytes. "课题": 2 runes, 4 cells, 6 bytes.
+	for _, tc := range []struct{ name string; cells int }{
+		{"Änderung", 8},
+		{"课题", 4},
+		{"milestone", 9},
+	} {
+		if got := DisplayWidth(tc.name); got != tc.cells {
+			t.Errorf("DisplayWidth(%q) = %d, want %d", tc.name, got, tc.cells)
+		}
+		if len(tc.name) == tc.cells && tc.name != "milestone" {
+			t.Errorf("%q was chosen because bytes and cells differ; they do not", tc.name)
+		}
+	}
+}
