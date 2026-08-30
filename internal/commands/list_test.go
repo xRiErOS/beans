@@ -710,9 +710,11 @@ func TestListMaxWidthCapsRenderedWidth(t *testing.T) {
 // old code built table rows from the same tree via
 // ui.RowsFromFlatItems(ui.FlattenTree(tree)) regardless of form. Verified
 // against a real store (SPF_sproutling, `list --status completed --view
-// table` vs `--json`): 513 table rows against 496 matched beans, an 18-row
-// leak of unmatched ancestors. list.go now builds table rows from
-// ui.FlatRows(beans) — the already-filtered slice — instead.
+// table` vs `--json`), extracting bean IDs from both outputs with the same
+// regex so the two counts are actually comparable: 496 filter-matched beans
+// against 514 unique IDs in the old table output, an 18-ID leak of unmatched
+// ancestors. list.go now builds table rows from ui.FlatRows(beans) — the
+// already-filtered slice — instead.
 func TestListTableOmitsUnmatchedAncestors(t *testing.T) {
 	setupListTest(t)
 
