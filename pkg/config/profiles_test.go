@@ -117,17 +117,15 @@ func TestUnknownProfileIsReported(t *testing.T) {
 	}
 }
 
+// Task 9 fix round 2: init --profile now sets TypesExclusive, so a profile's
+// types are the whole rendered table, not overrides layered onto
+// DefaultTypes. Every entry - including the five names DefaultTypes already
+// carries - must ship its own description; there is no defaults fallback
+// left to inherit one from.
 func TestEveryProfileTypeCarriesADescription(t *testing.T) {
-	builtIn := map[string]bool{}
-	for _, t2 := range DefaultTypes {
-		builtIn[t2.Name] = true
-	}
 	for _, profile := range ProfileNames() {
 		list, _ := ProfileTypes(profile)
 		for _, ty := range list {
-			if builtIn[ty.Name] {
-				continue // inherits its text from DefaultTypes
-			}
 			if ty.Description == "" {
 				t.Errorf("%s: type %q ships without a description", profile, ty.Name)
 			}

@@ -84,6 +84,38 @@ func TestInitCmdWithKnownProfileWritesTheExpandedTypesToDisk(t *testing.T) {
 	if loaded.Beans.DefaultType != "task" {
 		t.Errorf("Beans.DefaultType = %q, want \"task\"", loaded.Beans.DefaultType)
 	}
+	if !loaded.TypesExclusive {
+		t.Error("TypesExclusive = false, want true - a profile must give a project exactly its own types")
+	}
+}
+
+// The path every existing user hits: beans init with no --profile at all
+// must not be affected by any of this task's changes - no types: block, no
+// types_exclusive key, same file as before this task existed.
+func TestInitCmdWithoutProfileWritesNoTypesBlock(t *testing.T) {
+	dir, err := runInitCmd(t, "", false)
+	if err != nil {
+		t.Fatalf("initCmd.RunE: %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(dir, config.ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(raw), "types_exclusive") {
+		t.Errorf("plain init must not write types_exclusive:\n%s", raw)
+	}
+	if strings.Contains(string(raw), "types:") {
+		t.Errorf("plain init must not write a types: block:\n%s", raw)
+	}
+
+	loaded, err := config.Load(filepath.Join(dir, config.ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if loaded.TypesExclusive {
+		t.Error("plain init: TypesExclusive = true, want false")
+	}
 }
 
 func TestInitCmdWithUnknownProfileFailsBeforeAnySideEffect(t *testing.T) {

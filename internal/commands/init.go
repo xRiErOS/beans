@@ -91,6 +91,9 @@ var initCmd = &cobra.Command{
 			defaultCfg.Project.Name = dirName
 			if initProfile != "" {
 				defaultCfg.Types = profileTypes
+				// A profile gives a project exactly its own types: switch off
+				// the merge onto the built-in defaults, not just override them.
+				defaultCfg.TypesExclusive = true
 				// The default type must exist in the chosen profile: todo has no
 				// milestone, complex has no plain feature leaf.
 				defaultCfg.Beans.DefaultType = "task"
