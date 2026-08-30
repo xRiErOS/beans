@@ -389,10 +389,13 @@ func richRows() []Row {
 
 // TestNoLineEverExceedsItsTerminal guards the third prototype defect: a line
 // that ran past the terminal edge because a *minimum* width was used as an
-// actual width. The swept widths straddle both threshold constants that
-// widen columns (minWidthForFullNames=120, minWidthForTags=140 in
-// styles.go) — 110/130 sit just below each, 130/160 just above — so both the
-// squeezed and the roomy layouts get checked, not just the middle.
+// actual width. The swept widths straddle the thresholds NewColumns actually
+// consults: the inline `width >= 120` that buys the roomy layout (110 sits
+// just below, 130 just above), minTitleWidth=45 which gates every long-form
+// upgrade, and tagsCrushWidth=25 below which the tags column is dropped —
+// reached at 70 and 80 with tags on. The constants in styles.go's
+// CalculateResponsiveColumns are NOT in play here: that function serves the
+// TUI and neither NewColumns nor Render ever calls it.
 func TestNoLineEverExceedsItsTerminal(t *testing.T) {
 	widths := []int{70, 80, 100, 110, 130, 160}
 	for _, form := range []Form{FormTable, FormTree} {
@@ -434,7 +437,10 @@ func TestLegendAppearsExactlyWhenSomethingIsShort(t *testing.T) {
 	for _, w := range []int{70, 80, 100, 110, 130, 160} {
 		c := tableColumnsFor(richRows(), w, true, config.Default())
 		out := stripANSI(Render(richRows(), FormTable, "Golden", w, true, config.Default()))
-		legend := strings.Join(c.Legend(config.Default()), "\n")
+		// `out` is stripped, so the needle must be too -- otherwise the
+		// comparison is asymmetric and would start failing the moment a
+		// test forces a colour profile.
+		legend := stripANSI(strings.Join(c.Legend(config.Default()), "\n"))
 		shortSomewhere := !c.LongType || !c.LongStatus || !c.LongPrio
 
 		if shortSomewhere {
@@ -452,6 +458,14 @@ func TestLegendAppearsExactlyWhenSomethingIsShort(t *testing.T) {
 	}
 }
 
+// TestProgressCounterNeverWraps guards the counter against being cut, which
+// is a different failure from the line overflow TestNoLineEverExceedsItsTerminal
+// catches: too narrow a Counter makes the line too WIDE (PadRight never
+// truncates), so test 1 catches that on its own. What only this test catches
+// is the opposite repair -- someone forcing the column to fit by truncating
+// it. Mutation: in progressCell, replace PadRight(..., c.Counter) with
+// Truncate(..., c.Counter-1); "131/139" becomes "131/1…", this goes red and
+// test 1 stays green because the line got narrower, not wider.
 func TestProgressCounterNeverWraps(t *testing.T) {
 	for _, w := range []int{80, 110, 160} {
 		out := stripANSI(Render(richRows(), FormTable, "Golden", w, false, config.Default()))
