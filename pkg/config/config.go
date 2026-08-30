@@ -405,7 +405,14 @@ func Load(configPath string) (*Config, error) {
 		// override never changes an entry's Name, only its Color and
 		// Description), kept this way only because a future merge that did
 		// allow renaming should not have to remember this call site too.
-		cfg.Beans.DefaultType = cfg.TypeList()[0].Name
+		//
+		// TypesExclusive can make TypeList() legitimately empty (an exclusive
+		// config with no types of its own); there is nothing to derive a
+		// default from in that case, so DefaultType is left as it is rather
+		// than indexing into an empty slice.
+		if types := cfg.TypeList(); len(types) > 0 {
+			cfg.Beans.DefaultType = types[0].Name
+		}
 	}
 
 	// A misspelt anchor must not degrade into the default: that would silently

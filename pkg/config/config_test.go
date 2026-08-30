@@ -2577,3 +2577,25 @@ func TestTypesExclusiveOmitsDefaultsNotNamedByTheProfile(t *testing.T) {
 		}
 	}
 }
+
+// Task 9 fix round 3: TypeList() can now legitimately return an empty slice
+// (types_exclusive: true with no types), which used to make Load's
+// default_type fallback panic on an out-of-range index into that slice. This
+// loads exactly that config and requires Load to return normally, leaving
+// DefaultType empty rather than deriving one from nothing.
+func TestLoadDoesNotPanicOnAnEmptyExclusiveTypeList(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, ConfigFileName)
+	content := "beans:\n  prefix: x-\ntypes_exclusive: true\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.Beans.DefaultType != "" {
+		t.Errorf("Beans.DefaultType = %q, want empty - nothing to derive one from", cfg.Beans.DefaultType)
+	}
+}

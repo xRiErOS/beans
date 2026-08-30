@@ -66,6 +66,27 @@ func TestComplexProfileMatchesTheDesign(t *testing.T) {
 	}
 }
 
+// Task 9 fix round 3: DefaultTypes fills a field only where this profile
+// leaves it empty. The brief gives complex's "feature" its own Description
+// ("A new capability with customer benefit") because in complex, rank 2
+// carries the value-origin axis (feature / improvement / chore) that D13
+// depends on - the generic DefaultTypes text for "feature" does not say
+// that, and must not silently replace it.
+func TestComplexFeatureKeepsItsBespokeDescription(t *testing.T) {
+	list, _ := ProfileTypes("complex")
+	for _, ty := range list {
+		if ty.Name != "feature" {
+			continue
+		}
+		want := "A new capability with customer benefit"
+		if ty.Description != want {
+			t.Errorf("complex feature Description = %q, want %q", ty.Description, want)
+		}
+		return
+	}
+	t.Fatal("complex profile has no feature type")
+}
+
 func TestBucketOptsOutOfTheRoadmapInEveryProfile(t *testing.T) {
 	for _, profile := range []string{"simple", "complex"} {
 		list, _ := ProfileTypes(profile)

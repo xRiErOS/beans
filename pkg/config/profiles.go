@@ -12,15 +12,19 @@ func intPtr(i int) *int { return &i }
 // a later change to a profile definition must not silently move the types of
 // an existing project.
 //
-// Task 9 fix round 2: `beans init --profile` also sets Config.TypesExclusive,
-// which switches TypeList() off from merging onto DefaultTypes. With no
-// defaults underneath, every entry here has to be self-sufficient - it is
-// the whole rendered type, not an override layered onto a built-in. A name
+// Task 9 fix round 2/3: `beans init --profile` also sets
+// Config.TypesExclusive, which switches TypeList() off from merging onto
+// DefaultTypes. With no defaults underneath, every entry here has to be
+// self-sufficient - it is the whole rendered type, not an override layered
+// onto a built-in. The rule for filling in a field this table does not name
+// itself: DefaultTypes fills only what is left empty here. A name
 // DefaultTypes already carries (milestone, epic, feature, bug, task) takes
-// its Color, Emphasis and Description straight from DefaultTypes in this
-// file, unchanged, in every profile that uses it - one name, one meaning
-// (D16). The five genuinely new names (bucket, release, improvement, chore,
-// story) keep the bespoke descriptions this table always gave them and stay
+// its Color, Emphasis and Description from DefaultTypes wherever this table
+// leaves that field unset - one name, one meaning (D16) - but a field this
+// table does set of its own accord (complex's "feature" Description, which
+// carries the D13 value-origin wording) is never overwritten by that fill.
+// The five genuinely new names (bucket, release, improvement, chore, story)
+// keep the bespoke descriptions this table always gave them and stay
 // without a colour.
 var profiles = map[string][]TypeOverride{
 	// classic reproduces the built-in set. It is what an existing store runs
@@ -67,8 +71,13 @@ var profiles = map[string][]TypeOverride{
 			Description: "A version that ships; gets a release tag and groups everything that goes out together"},
 		{Name: "bucket", Rank: intPtr(1), Short: "K", Roadmap: boolPtr(false),
 			Description: "A parking lot for topics that might be picked up some day; carries work like a release but stays out of the roadmap and the milestone list"},
+		// feature keeps its own bespoke description here (not DefaultTypes'
+		// generic one): in complex, rank 2 carries the value-origin axis
+		// (feature / improvement / chore), and D13 needs this wording to
+		// say so. DefaultTypes fills only the fields the brief left empty -
+		// here that is Color, not Description.
 		{Name: "feature", Rank: intPtr(2), Short: "F", Color: "sapphire",
-			Description: "A user-facing capability or enhancement"},
+			Description: "A new capability with customer benefit"},
 		{Name: "improvement", Rank: intPtr(2), Short: "I",
 			Description: "Work that makes an existing capability better and the customer notices; a refactoring nobody sees is a chore instead"},
 		{Name: "chore", Rank: intPtr(2), Short: "C",
