@@ -196,25 +196,15 @@ func TestNoLineExceedsTheWidthInEitherForm(t *testing.T) {
 	// and both land in that legitimately-still-overflowing zone for *both*
 	// forms, which is why they are not in this list.
 	//
-	// Legend() (columns.go) is out of scope for this file and is not
-	// width-aware at all — its longest line ("status ...") is a fixed 68
-	// cells regardless of the width argument, so it overflows any width below
-	// that on its own, in both forms, independent of anything render.go
-	// decides. That is a real, separate violation of the same "no line
-	// exceeds width" property this test polices, but it belongs to
-	// columns.go, which this task does not touch — see the report. To keep
-	// this test targeted at what render.go itself is responsible for (the
-	// row/tree layout), the legend block — everything from the first blank
-	// line on, which is exactly where Columns.Legend's own output begins — is
-	// excluded from the narrow-width check below.
+	// Legend() (columns.go) used to be excluded here: its lines were a fixed
+	// width regardless of the width argument. wrapLegendLine (beans-whly)
+	// made it width-aware, so the legend block is now covered by the same
+	// sweep as the row/tree layout instead of being carved out (beans-b0bx).
 	for _, form := range []Form{FormTable, FormTree} {
 		for _, w := range []int{40, 70, 80, 100, 110, 130, 160} {
 			for _, tags := range []bool{false, true} {
 				out := Render(demoRows(), form, "Demo", w, tags, config.Default())
 				for i, line := range strings.Split(out, "\n") {
-					if line == "" {
-						break // start of the legend block; not this file's responsibility
-					}
 					if got := DisplayWidth(stripANSI(line)); got > w {
 						t.Errorf("form=%s width=%d tags=%v line %d is %d cells:\n%s",
 							form, w, tags, i, got, stripANSI(line))
