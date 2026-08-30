@@ -57,7 +57,10 @@ type unscheduledGroup struct {
 	Other    []*bean.Bean   `json:"other,omitempty"`
 }
 
-// milestoneGroup represents a milestone and its contents.
+// milestoneGroup represents a rank-1 container and its contents. The JSON
+// keys are slot names, not type names: a configured rank-2 type appears
+// under "epics" and a rank-3 type under "features", whatever they are
+// called.
 type milestoneGroup struct {
 	Milestone *bean.Bean     `json:"milestone"`
 	Epics     []epicGroup    `json:"epics,omitempty"`
@@ -65,15 +68,19 @@ type milestoneGroup struct {
 	Other     []*bean.Bean   `json:"other,omitempty"`
 }
 
-// epicGroup represents an epic and its child items.
+// epicGroup represents a rank-2 container and its child items. The "epic"
+// JSON key is a slot name, not a type name: it holds whatever type is
+// configured at rank 2.
 type epicGroup struct {
 	Epic     *bean.Bean     `json:"epic"`
 	Items    []*bean.Bean   `json:"items,omitempty"`
 	Features []featureGroup `json:"features,omitempty"`
 }
 
-// featureGroup represents a feature and the leaf items found anywhere
-// beneath it (leafs below nested features are flattened into this list).
+// featureGroup represents a rank-3 container and the leaf items found
+// anywhere beneath it (leafs below nested rank-3 containers are flattened
+// into this list). The "feature" JSON key is a slot name, not a type name:
+// it holds whatever type is configured at rank 3.
 type featureGroup struct {
 	Feature *bean.Bean   `json:"feature"`
 	Items   []*bean.Bean `json:"items,omitempty"`
@@ -186,7 +193,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Find milestones, applying status filters
 	var milestones []*bean.Bean
 	for _, b := range allBeans {
-		if b.Type != "milestone" {
+		if !isRank(b, 1) {
 			continue
 		}
 		// Apply status filters to milestones
@@ -220,7 +227,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		for _, child := range children[m.ID] {
 			underMilestone[child.ID] = true
 			// Also mark children of epics under this milestone
-			if child.Type == "epic" {
+			if isRank(child, 2) {
 				for _, epicChild := range children[child.ID] {
 					underMilestone[epicChild.ID] = true
 				}
@@ -231,7 +238,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Find unscheduled epics (epics not under a milestone)
 	var unscheduledEpics []epicGroup
 	for _, b := range allBeans {
-		if b.Type != "epic" {
+		if !isRank(b, 2) {
 			continue
 		}
 		if underMilestone[b.ID] {
@@ -250,7 +257,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// milestone or epic (orphan features, e.g. created without --parent).
 	var unscheduledFeatures []featureGroup
 	for _, b := range allBeans {
-		if b.Type != "feature" {
+		if !isRank(b, 3) {
 			continue
 		}
 		if underMilestone[b.ID] {
@@ -263,7 +270,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		// ValidateParent via the CLI, but beans are hand-editable markdown --
 		// this guard keeps hand-edited data from double-rendering.)
 		if b.Parent != "" {
-			if parent, ok := byID[b.Parent]; ok && (parent.Type == "epic" || parent.Type == "feature") {
+			if parent, ok := byID[b.Parent]; ok && (isRank(parent, 2) || isRank(parent, 3)) {
 				continue
 			}
 		}
@@ -278,10 +285,10 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	var orphanItems []*bean.Bean
 	for _, b := range allBeans {
 		// Skip milestones and epics -- always containers, never flat leaves.
-		if b.Type == "milestone" {
+		if isRank(b, 1) {
 			continue
 		}
-		if b.Type == "epic" {
+		if isRank(b, 2) {
 			// Epics with >=1 leaf descendant or feature are rendered via the
 			// unscheduledEpics loop above as an epicGroup; skip them
 			// here to avoid double-rendering. Childless epics (beans-36fa)
@@ -291,7 +298,7 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 				continue
 			}
 		}
-		if b.Type == "feature" {
+		if isRank(b, 3) {
 			// Features with >=1 leaf descendant are rendered via the
 			// unscheduledFeatures loop above as a featureGroup; skip them
 			// here to avoid double-rendering. Childless features (D01,
@@ -335,6 +342,18 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	}
 }
 
+// isRank reports whether a bean sits on the given hierarchy rank.
+func isRank(b *bean.Bean, rank int) bool {
+	return cfg.RankOf(b.Type) == rank
+}
+
+// isContainerRank reports whether a bean sits on one of the three container
+// ranks. Leaves (rank 4) are rendered inside a container, never as one.
+func isContainerRank(b *bean.Bean) bool {
+	r := cfg.RankOf(b.Type)
+	return r >= 1 && r <= 3
+}
+
 // childrenIndex maps each bean ID to the beans that have it as a parent.
 func childrenIndex(allBeans []*bean.Bean) map[string][]*bean.Bean {
 	children := make(map[string][]*bean.Bean)
@@ -351,8 +370,8 @@ func childrenIndex(allBeans []*bean.Bean) map[string][]*bean.Bean {
 // via validateRoadmapRootType; any other type panics, since that would be a
 // caller bug, not user input.
 func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData {
-	switch root.Type {
-	case "milestone":
+	switch cfg.RankOf(root.Type) {
+	case 1:
 		data := buildRoadmap(allBeans, includeDone, nil, nil)
 		for _, mg := range data.Milestones {
 			if mg.Milestone.ID == root.ID {
@@ -363,26 +382,32 @@ func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean
 		// root was still found and matched by type/ID, so render it as an
 		// empty container rather than silently returning nothing.
 		return &roadmapData{Milestones: []milestoneGroup{{Milestone: root}}}
-	case "epic":
+	case 2:
 		eg := buildEpicGroup(root, childrenIndex(allBeans), includeDone)
 		return &roadmapData{Root: &rootGroup{Epic: &eg}}
-	case "feature":
+	case 3:
 		fg := buildFeatureGroup(root, childrenIndex(allBeans), includeDone)
 		return &roadmapData{Root: &rootGroup{Feature: &fg}}
 	default:
+		// validateRoadmapRootType is checked by every caller before this
+		// runs, so reaching a non-container rank here would be a caller
+		// bug, not user input.
 		panic("buildScopedRoadmap: unsupported root type " + root.Type)
 	}
 }
 
-// validateRoadmapRootType returns an error if b is not a valid roadmap scope
-// root (milestone, epic, or feature).
+// validateRoadmapRootType returns an error if b does not sit on one of the
+// three container ranks (rank 1 through 3).
 func validateRoadmapRootType(b *bean.Bean) error {
-	switch b.Type {
-	case "milestone", "epic", "feature":
+	if isContainerRank(b) {
 		return nil
-	default:
-		return fmt.Errorf("roadmap root must be a milestone, epic, or feature, got %s (%s)", b.Type, b.ID)
 	}
+	var containers []string
+	for rank := 1; rank <= 3; rank++ {
+		containers = append(containers, cfg.TypesAtRank(rank)...)
+	}
+	return fmt.Errorf("roadmap root must be one of %s, got %s (%s)",
+		strings.Join(containers, ", "), b.Type, b.ID)
 }
 
 // buildMilestoneGroup builds a milestone group with its epics and other items.
@@ -396,7 +421,7 @@ func buildMilestoneGroup(m *bean.Bean, children map[string][]*bean.Bean, include
 	var epics []*bean.Bean
 	var rest []*bean.Bean
 	for _, child := range directChildren {
-		if child.Type == "epic" {
+		if isRank(child, 2) {
 			epics = append(epics, child)
 		} else {
 			rest = append(rest, child)
@@ -535,7 +560,7 @@ func filterChildren(children []*bean.Bean, includeDone bool) []*bean.Bean {
 // (anything that isn't a feature) and feature-typed children.
 func splitByContainerType(beans []*bean.Bean) (leafs []*bean.Bean, features []*bean.Bean) {
 	for _, b := range beans {
-		if b.Type == "feature" {
+		if isRank(b, 3) {
 			features = append(features, b)
 		} else {
 			leafs = append(leafs, b)
@@ -564,7 +589,7 @@ func collectLeafDescendantsVisited(parentID string, children map[string][]*bean.
 
 	var leafs []*bean.Bean
 	for _, child := range children[parentID] {
-		if child.Type == "feature" {
+		if isRank(child, 3) {
 			leafs = append(leafs, collectLeafDescendantsVisited(child.ID, children, includeDone, visited)...)
 			continue
 		}

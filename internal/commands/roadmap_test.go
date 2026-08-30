@@ -1095,3 +1095,54 @@ func TestRenderRoadmapMarkdownRootFeature(t *testing.T) {
 		t.Errorf("expected item OIDC to be rendered, got %q", got)
 	}
 }
+
+func TestRoadmapPlacesAConfiguredRank2TypeInTheEpicSlot(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{{Name: "package", Rank: &rank}}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "p1", Type: "package", Status: "todo", Title: "A package", Parent: "m1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "A task", Parent: "p1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if len(data.Milestones) != 1 {
+		t.Fatalf("got %d milestone groups, want 1", len(data.Milestones))
+	}
+	group := data.Milestones[0]
+	if len(group.Epics) != 1 {
+		t.Fatalf("got %d rank-2 groups, want 1 — a configured rank-2 type belongs in the epic slot", len(group.Epics))
+	}
+	if group.Epics[0].Epic.ID != "p1" {
+		t.Errorf("rank-2 slot holds %q, want \"p1\"", group.Epics[0].Epic.ID)
+	}
+	if len(group.Epics[0].Items) != 1 {
+		t.Errorf("got %d leaves under the package, want 1", len(group.Epics[0].Items))
+	}
+}
+
+func TestRoadmapAcceptsAConfiguredRank1TypeAsScopeRoot(t *testing.T) {
+	rank := 1
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{{Name: "release", Rank: &rank}}}
+	defer func() { cfg = prev }()
+
+	root := &bean.Bean{ID: "r1", Type: "release", Status: "todo", Title: "v1"}
+	if err := validateRoadmapRootType(root); err != nil {
+		t.Errorf("validateRoadmapRootType(release) = %v, want nil", err)
+	}
+}
+
+func TestRoadmapRejectsALeafAsScopeRoot(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{}
+	defer func() { cfg = prev }()
+
+	if err := validateRoadmapRootType(&bean.Bean{ID: "t1", Type: "task"}); err == nil {
+		t.Error("a leaf type must not be accepted as a roadmap root")
+	}
+}

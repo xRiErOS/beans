@@ -141,7 +141,7 @@ func TestRoadmapCmdRejectsNonContainerRootType(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected an error for a task-typed root")
 	}
-	if !strings.Contains(err.Error(), "milestone, epic, or feature") {
+	if !strings.Contains(err.Error(), "milestone, epic, feature") {
 		t.Errorf("expected error to name the allowed types, got %q", err.Error())
 	}
 }
