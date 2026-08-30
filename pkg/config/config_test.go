@@ -2485,6 +2485,96 @@ func TestColourOnlyOverrideKeepsTheBuiltInRank(t *testing.T) {
 	}
 }
 
+// An explicit "color: ''"/"description: ''"/"short: ''" in the YAML source
+// is a real value - clear the built-in default - not the same as never
+// naming the key at all, which leaves the default alone. This only applies
+// to configs loaded from YAML: UnmarshalYAML is what records which keys
+// were actually named (see StatusOverride.colorSet et al.); a struct built
+// directly in Go can never make that distinction and keeps the old
+// non-empty-always-applies behaviour, which every other override literal
+// in this codebase already relies on.
+func TestExplicitEmptyOverrideClearsTheBuiltInValue(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ConfigFileName)
+	body := "beans:\n  prefix: test-\n" +
+		"types:\n  - name: bug\n    color: \"\"\n    description: \"\"\n    short: \"\"\n" +
+		"statuses:\n  - name: completed\n    color: \"\"\n    description: \"\"\n" +
+		"priorities:\n  - name: critical\n    color: \"\"\n    description: \"\"\n"
+	if err := os.WriteFile(configPath, []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	bug := cfg.GetType("bug")
+	if bug == nil {
+		t.Fatal("GetType(\"bug\") = nil")
+	}
+	if bug.Color != "" {
+		t.Errorf("bug.Color = %q, want \"\" (explicit clear)", bug.Color)
+	}
+	if bug.Description != "" {
+		t.Errorf("bug.Description = %q, want \"\" (explicit clear)", bug.Description)
+	}
+	if bug.Short != "" {
+		t.Errorf("bug.Short = %q, want \"\" (explicit clear)", bug.Short)
+	}
+
+	completed := cfg.GetStatus("completed")
+	if completed == nil {
+		t.Fatal("GetStatus(\"completed\") = nil")
+	}
+	if completed.Color != "" {
+		t.Errorf("completed.Color = %q, want \"\" (explicit clear)", completed.Color)
+	}
+	if completed.Description != "" {
+		t.Errorf("completed.Description = %q, want \"\" (explicit clear)", completed.Description)
+	}
+
+	critical := cfg.GetPriority("critical")
+	if critical == nil {
+		t.Fatal("GetPriority(\"critical\") = nil")
+	}
+	if critical.Color != "" {
+		t.Errorf("critical.Color = %q, want \"\" (explicit clear)", critical.Color)
+	}
+	if critical.Description != "" {
+		t.Errorf("critical.Description = %q, want \"\" (explicit clear)", critical.Description)
+	}
+}
+
+// A Save() -> Load() round trip must not lose the explicit clear either:
+// toYAMLNode() has to write "color: ''" back out, not skip the key the way
+// it would for a genuinely-unset override.
+func TestSaveRoundTripsAnExplicitlyEmptyOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ConfigFileName)
+	body := "beans:\n  prefix: test-\ntypes:\n  - name: bug\n    color: \"\"\n"
+	if err := os.WriteFile(configPath, []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	cfg.SetConfigDir(tmpDir)
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("second Load() error = %v", err)
+	}
+	if bug := reloaded.GetType("bug"); bug == nil || bug.Color != "" {
+		t.Errorf("GetType(\"bug\").Color after round trip = %+v, want empty", bug)
+	}
+}
+
 func TestTypesAtRankReturnsListOrder(t *testing.T) {
 	rank := 2
 	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}

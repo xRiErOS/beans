@@ -117,6 +117,33 @@ type StatusOverride struct {
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Archive     *bool  `yaml:"archive,omitempty"`
+
+	// colorSet and descriptionSet record whether "color"/"description" were
+	// named in the YAML source at all, so a merge can tell an explicit
+	// "color: ''" apart from color simply never being named. Color and
+	// Description are not pointers like Archive because an empty string is
+	// a legitimate value in their own right (an uncoloured/undescribed
+	// status) - a pointer would only move the ambiguity onto every
+	// Go-constructed StatusOverride elsewhere in the codebase, which never
+	// populates the field and would then look identically "unset". These
+	// flags are populated by UnmarshalYAML below and default to false for
+	// any override built directly in Go, which keeps that existing
+	// non-empty-always-applies behaviour unchanged.
+	colorSet, descriptionSet bool
+}
+
+// UnmarshalYAML decodes a StatusOverride while recording which optional
+// string keys the source named explicitly (see colorSet/descriptionSet).
+func (o *StatusOverride) UnmarshalYAML(value *yaml.Node) error {
+	type plain StatusOverride
+	var raw plain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*o = StatusOverride(raw)
+	o.colorSet = yamlNodeHasKey(value, "color")
+	o.descriptionSet = yamlNodeHasKey(value, "description")
+	return nil
 }
 
 // TypeOverride is one entry of Config.Types: a type the config wants to
@@ -142,6 +169,26 @@ type TypeOverride struct {
 	// Short is the single-character code the narrow list view renders. Empty
 	// means the first letter of the name, upper-cased.
 	Short string `yaml:"short,omitempty"`
+
+	// colorSet, descriptionSet and shortSet record whether their YAML keys
+	// were named at all - see StatusOverride.colorSet for why these three
+	// stay plain strings (not pointers) and get this treatment instead.
+	colorSet, descriptionSet, shortSet bool
+}
+
+// UnmarshalYAML decodes a TypeOverride while recording which optional
+// string keys the source named explicitly (see colorSet/descriptionSet/shortSet).
+func (o *TypeOverride) UnmarshalYAML(value *yaml.Node) error {
+	type plain TypeOverride
+	var raw plain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*o = TypeOverride(raw)
+	o.colorSet = yamlNodeHasKey(value, "color")
+	o.descriptionSet = yamlNodeHasKey(value, "description")
+	o.shortSet = yamlNodeHasKey(value, "short")
+	return nil
 }
 
 // PriorityOverride is one entry of Config.Priorities: a priority the config
@@ -150,6 +197,39 @@ type PriorityOverride struct {
 	Name        string `yaml:"name"`
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
+
+	// colorSet and descriptionSet record whether their YAML keys were named
+	// at all - see StatusOverride.colorSet.
+	colorSet, descriptionSet bool
+}
+
+// UnmarshalYAML decodes a PriorityOverride while recording which optional
+// string keys the source named explicitly (see colorSet/descriptionSet).
+func (o *PriorityOverride) UnmarshalYAML(value *yaml.Node) error {
+	type plain PriorityOverride
+	var raw plain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*o = PriorityOverride(raw)
+	o.colorSet = yamlNodeHasKey(value, "color")
+	o.descriptionSet = yamlNodeHasKey(value, "description")
+	return nil
+}
+
+// yamlNodeHasKey reports whether a YAML mapping node names the given key,
+// regardless of the value assigned to it. Presence, not value, is what
+// distinguishes an omitted key from an explicit empty one.
+func yamlNodeHasKey(value *yaml.Node, key string) bool {
+	if value.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // PermissionMode represents the default agent permission mode.
@@ -787,13 +867,13 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	for _, s := range c.Statuses {
 		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		m.Content = append(m.Content, strNode("name"), strNode(s.Name))
-		if s.Color != "" {
+		if s.colorSet || s.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(s.Color))
 		}
 		if s.Archive != nil {
 			m.Content = append(m.Content, strNode("archive"), scalar(fmt.Sprintf("%t", *s.Archive), "!!bool"))
 		}
-		if s.Description != "" {
+		if s.descriptionSet || s.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(s.Description))
 		}
 		statusesSeq.Content = append(statusesSeq.Content, m)
@@ -803,7 +883,7 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	for _, t := range c.Types {
 		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		m.Content = append(m.Content, strNode("name"), strNode(t.Name))
-		if t.Color != "" {
+		if t.colorSet || t.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(t.Color))
 		}
 		if t.Rank != nil {
@@ -815,10 +895,10 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Roadmap != nil {
 			m.Content = append(m.Content, strNode("roadmap"), scalar(fmt.Sprintf("%t", *t.Roadmap), "!!bool"))
 		}
-		if t.Short != "" {
+		if t.shortSet || t.Short != "" {
 			m.Content = append(m.Content, strNode("short"), strNode(t.Short))
 		}
-		if t.Description != "" {
+		if t.descriptionSet || t.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
 		}
 		typesSeq.Content = append(typesSeq.Content, m)
@@ -828,10 +908,10 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	for _, p := range c.Priorities {
 		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		m.Content = append(m.Content, strNode("name"), strNode(p.Name))
-		if p.Color != "" {
+		if p.colorSet || p.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(p.Color))
 		}
-		if p.Description != "" {
+		if p.descriptionSet || p.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(p.Description))
 		}
 		prioritiesSeq.Content = append(prioritiesSeq.Content, m)
@@ -975,10 +1055,10 @@ func (c *Config) StatusList() []StatusConfig {
 		func(o StatusOverride) string { return o.Name },
 		func(t *StatusConfig, o StatusOverride) {
 			t.Name = o.Name
-			if o.Color != "" {
+			if o.colorSet || o.Color != "" {
 				t.Color = o.Color
 			}
-			if o.Description != "" {
+			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
 			}
 			// Archive is a pointer: only an explicit archive: key (true or
@@ -1145,10 +1225,10 @@ func (c *Config) TypeList() []TypeConfig {
 		func(o TypeOverride) string { return o.Name },
 		func(t *TypeConfig, o TypeOverride) {
 			t.Name = o.Name
-			if o.Color != "" {
+			if o.colorSet || o.Color != "" {
 				t.Color = o.Color
 			}
-			if o.Description != "" {
+			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
 			}
 			if o.Rank != nil {
@@ -1166,7 +1246,7 @@ func (c *Config) TypeList() []TypeConfig {
 			if o.Roadmap != nil {
 				t.Roadmap = o.Roadmap
 			}
-			if o.Short != "" {
+			if o.shortSet || o.Short != "" {
 				t.Short = o.Short
 			}
 			// An appended type starts from a zero TypeConfig, so an entry
@@ -1266,10 +1346,10 @@ func (c *Config) PriorityList() []PriorityConfig {
 		func(o PriorityOverride) string { return o.Name },
 		func(t *PriorityConfig, o PriorityOverride) {
 			t.Name = o.Name
-			if o.Color != "" {
+			if o.colorSet || o.Color != "" {
 				t.Color = o.Color
 			}
-			if o.Description != "" {
+			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
 			}
 		},
