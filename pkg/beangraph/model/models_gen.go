@@ -8,7 +8,7 @@ import (
 	"io"
 	"strconv"
 
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/bean"
 )
 
 // Lightweight status for tracking which beans have running agents

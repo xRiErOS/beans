@@ -3,7 +3,7 @@ package search
 import (
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/bean"
 )
 
 func mustNewID(t *testing.T) string {

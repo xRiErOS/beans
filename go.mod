@@ -1,4 +1,4 @@
-module github.com/hmans/beans
+module github.com/xRiErOS/beans
 
 go 1.24.6
 

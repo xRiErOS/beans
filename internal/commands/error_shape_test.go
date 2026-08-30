@@ -9,7 +9,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hmans/beans/internal/output"
+	"github.com/xRiErOS/beans/internal/output"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )

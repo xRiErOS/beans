@@ -4,7 +4,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hmans/beans/internal/ui"
+	"github.com/xRiErOS/beans/internal/ui"
 )
 
 // pickerModalConfig holds configuration for rendering a picker modal

@@ -7,8 +7,8 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hmans/beans/pkg/config"
-	"github.com/hmans/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/config"
+	"github.com/xRiErOS/beans/internal/ui"
 )
 
 // statusSelectedMsg is sent when a status is selected from the picker

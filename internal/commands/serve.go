@@ -19,17 +19,17 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 
-	"github.com/hmans/beans/internal/agent"
-	"github.com/hmans/beans/internal/gitutil"
-	"github.com/hmans/beans/internal/cors"
-	"github.com/hmans/beans/internal/graph"
-	"github.com/hmans/beans/internal/portalloc"
-	"github.com/hmans/beans/internal/terminal"
-	"github.com/hmans/beans/internal/web"
-	"github.com/hmans/beans/internal/worktree"
-	"github.com/hmans/beans/pkg/beangraph"
-	"github.com/hmans/beans/pkg/config"
-	"github.com/hmans/beans/pkg/forge"
+	"github.com/xRiErOS/beans/internal/agent"
+	"github.com/xRiErOS/beans/internal/gitutil"
+	"github.com/xRiErOS/beans/internal/cors"
+	"github.com/xRiErOS/beans/internal/graph"
+	"github.com/xRiErOS/beans/internal/portalloc"
+	"github.com/xRiErOS/beans/internal/terminal"
+	"github.com/xRiErOS/beans/internal/web"
+	"github.com/xRiErOS/beans/internal/worktree"
+	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/forge"
 )
 
 var (

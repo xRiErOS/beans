@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/hmans/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/spf13/cobra"
 )
 

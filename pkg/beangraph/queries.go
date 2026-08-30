@@ -3,10 +3,10 @@ package beangraph
 import (
 	"context"
 
-	"github.com/hmans/beans/internal/gitutil"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/internal/gitutil"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/beancore"
 )
 
 // Bean returns a single bean by ID, or nil if not found.

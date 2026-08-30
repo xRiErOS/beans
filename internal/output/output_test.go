@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/bean"
 )
 
 // captureStdout redirects os.Stdout for the duration of fn and returns

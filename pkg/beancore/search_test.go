@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/bean"
 )
 
 func TestSearch(t *testing.T) {

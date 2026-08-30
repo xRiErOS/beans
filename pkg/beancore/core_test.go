@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 func setupTestCore(t *testing.T) (*Core, string) {

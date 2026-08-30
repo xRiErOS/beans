@@ -53,9 +53,9 @@ touch internal/web/dist/.gitkeep
 depends = ["codegen", "build:embed"]
 run = """
 LDFLAGS="\
-  -X github.com/hmans/beans/internal/version.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
-  -X github.com/hmans/beans/internal/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
-  -X github.com/hmans/beans/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  -X github.com/xRiErOS/beans/internal/version.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
+  -X github.com/xRiErOS/beans/internal/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
+  -X github.com/xRiErOS/beans/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 go build -ldflags "$LDFLAGS" -o beans ./cmd/beans
 go build -ldflags "$LDFLAGS" -o beans-serve ./cmd/beans-serve
 go build -ldflags "$LDFLAGS" -o beans-tui ./cmd/beans-tui

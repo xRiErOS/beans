@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hmans/beans/internal/agent"
-	"github.com/hmans/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/internal/agent"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
 )
 
 // recvWithin returns the next value from ch, or fails the test.

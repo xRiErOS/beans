@@ -4,9 +4,9 @@ import (
 	"context"
 	"path/filepath"
 
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/beancore"
 )
 
 // BeanIsDirty returns whether a bean has unsaved runtime changes.

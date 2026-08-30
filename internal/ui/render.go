@@ -6,8 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // cellStyle is the colour and weight a row carries. Type word, id and title

@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hmans/beans/internal/ui"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/spf13/cobra"
 )
 

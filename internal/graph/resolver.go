@@ -3,16 +3,16 @@ package graph
 import (
 	"context"
 
-	"github.com/hmans/beans/internal/agent"
-	"github.com/hmans/beans/internal/gitutil"
-	"github.com/hmans/beans/internal/portalloc"
-	"github.com/hmans/beans/internal/terminal"
-	"github.com/hmans/beans/internal/worktree"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/beangraph"
-	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/pkg/forge"
+	"github.com/xRiErOS/beans/internal/agent"
+	"github.com/xRiErOS/beans/internal/gitutil"
+	"github.com/xRiErOS/beans/internal/portalloc"
+	"github.com/xRiErOS/beans/internal/terminal"
+	"github.com/xRiErOS/beans/internal/worktree"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/forge"
 )
 
 //go:generate go tool gqlgen generate

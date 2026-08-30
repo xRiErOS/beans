@@ -8,10 +8,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // resolverWithBeans builds a resolver over a throwaway store with a small

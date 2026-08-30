@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/hmans/beans/internal/version"
+	"github.com/xRiErOS/beans/internal/version"
 	"github.com/spf13/cobra"
 )
 

@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 func TestResolveWidthPrefersTheFlag(t *testing.T) {

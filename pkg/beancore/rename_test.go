@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // newTestCore builds a Core over a temp .beans dir with one bean file.

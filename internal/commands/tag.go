@@ -3,11 +3,11 @@ package commands
 import (
 	"context"
 
-	"github.com/hmans/beans/internal/output"
-	"github.com/hmans/beans/internal/ui"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beangraph"
-	"github.com/hmans/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/internal/output"
+	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
 	"github.com/spf13/cobra"
 )
 

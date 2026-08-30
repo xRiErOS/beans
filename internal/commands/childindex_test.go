@@ -3,7 +3,7 @@ package commands
 import (
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/bean"
 )
 
 // TestBuildChildrenIndexEmptyTree verifies that an empty input yields an

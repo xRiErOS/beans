@@ -13,10 +13,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"github.com/hmans/beans/internal/ui"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // setupProgressTest installs a throwaway core and default config into the

@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hmans/beans/internal/ui"
+	"github.com/xRiErOS/beans/internal/ui"
 )
 
 // tagWithCount holds a tag and its usage count

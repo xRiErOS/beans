@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // beans-xqsq AC1/AC2: the etag `list`, `show` and the write path each expose

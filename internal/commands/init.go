@@ -8,10 +8,10 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-	"github.com/hmans/beans/internal/gitutil"
-	"github.com/hmans/beans/internal/output"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/internal/gitutil"
+	"github.com/xRiErOS/beans/internal/output"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 var initJSON bool

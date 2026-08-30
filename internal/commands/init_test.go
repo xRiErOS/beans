@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // runInitCmd runs the real initCmd.RunE against a fresh temp directory as the

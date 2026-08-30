@@ -16,13 +16,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/hmans/beans/internal/agent"
-	"github.com/hmans/beans/internal/gitutil"
-	"github.com/hmans/beans/internal/worktree"
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/beangraph/model"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/internal/agent"
+	"github.com/xRiErOS/beans/internal/gitutil"
+	"github.com/xRiErOS/beans/internal/worktree"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // IsDirty is the resolver for the isDirty field.

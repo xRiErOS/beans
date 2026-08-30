@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"github.com/hmans/beans/internal/commands"
+	"github.com/xRiErOS/beans/internal/commands"
 )
 
 func main() {

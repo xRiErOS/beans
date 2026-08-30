@@ -1,7 +1,7 @@
 package commands
 
 import (
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/bean"
 )
 
 // buildChildrenIndex maps each bean ID to its direct children.

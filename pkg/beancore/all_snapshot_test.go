@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // benchCore builds a core holding n beans without the *testing.T-bound

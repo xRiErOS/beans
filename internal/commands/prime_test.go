@@ -6,7 +6,7 @@ import (
 	"testing"
 	"text/template"
 
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // primeCmdOutput runs the real primeCmd.RunE against a fresh temp directory

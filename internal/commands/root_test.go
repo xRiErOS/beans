@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/hmans/beans/internal/ui"
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 func TestResolveBeansPath(t *testing.T) {

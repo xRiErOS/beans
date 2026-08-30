@@ -4,7 +4,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/hmans/beans/internal/ui"
+	"github.com/xRiErOS/beans/internal/ui"
 )
 
 // beanCreatedMsg is sent when a new bean is created

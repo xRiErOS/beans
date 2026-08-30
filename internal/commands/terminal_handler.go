@@ -8,8 +8,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
-	"github.com/hmans/beans/internal/terminal"
-	"github.com/hmans/beans/internal/worktree"
+	"github.com/xRiErOS/beans/internal/terminal"
+	"github.com/xRiErOS/beans/internal/worktree"
 )
 
 // terminalInitMsg is the initial message sent by the client to start a PTY session.

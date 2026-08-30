@@ -8,7 +8,7 @@ import (
 	"strings"
 	"text/template"
 
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/spf13/cobra"
 )
 

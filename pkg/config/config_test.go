@@ -1037,7 +1037,7 @@ func TestSaveIncludesComments(t *testing.T) {
 	if !strings.Contains(content, "# Beans configuration") {
 		t.Error("missing header comment 'Beans configuration'")
 	}
-	if !strings.Contains(content, "# See: https://github.com/hmans/beans") {
+	if !strings.Contains(content, "# See: https://github.com/xRiErOS/beans") {
 		t.Error("missing header comment with URL")
 	}
 

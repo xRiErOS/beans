@@ -6,9 +6,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/hmans/beans/internal/output"
-	"github.com/hmans/beans/internal/ui"
-	"github.com/hmans/beans/pkg/bean"
+	"github.com/xRiErOS/beans/internal/output"
+	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/spf13/cobra"
 )
 

@@ -5,7 +5,7 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/hmans/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 const (

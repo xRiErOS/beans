@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/hmans/beans/pkg/bean"
-	"github.com/hmans/beans/pkg/beancore"
-	"github.com/hmans/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
 )
 
 // CreateBean creates a new bean from the given input.
