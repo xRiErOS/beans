@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/spf13/cobra"
@@ -30,6 +31,9 @@ var (
 	roadmapLinkPrefix  string
 	roadmapDepth       int
 	roadmapTags        bool
+	roadmapView        string
+	roadmapFormat      string
+	roadmapWidthFlag   int
 )
 
 // roadmapData holds the structured roadmap for JSON output.
@@ -108,6 +112,22 @@ argument the root is that item, so --depth 1 lists its direct children.
 			return err
 		}
 
+		if _, ok := ui.ParseForm(roadmapView); !ok {
+			return fmt.Errorf("invalid --view %q: must be one of \"tree\", \"table\"", roadmapView)
+		}
+
+		var formatOverride roadmapFormatOverride
+		switch roadmapFormat {
+		case "":
+			formatOverride = roadmapFormatAuto
+		case "tty":
+			formatOverride = roadmapFormatTTY
+		case "markdown":
+			formatOverride = roadmapFormatMarkdown
+		default:
+			return fmt.Errorf("invalid --format %q: must be one of \"tty\", \"markdown\"", roadmapFormat)
+		}
+
 		// Build the roadmap
 		var data *roadmapData
 		scoped := len(args) == 1
@@ -147,17 +167,24 @@ argument the root is that item, so --depth 1 lists its direct children.
 		}
 
 		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
-		cols := 0
-		if isTTY {
-			if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-				cols = w
-			}
-		}
+		cols := resolveWidth(roadmapWidthFlag, cmd.Flags().Changed("max-width"), cfg)
 
-		fmt.Print(roadmapOutput(data, isTTY, cols, links, linkPrefix, roadmapTags))
+		fmt.Print(roadmapOutput(data, isTTY, formatOverride, cols, links, linkPrefix, roadmapTags))
 		return nil
 	},
 }
+
+// roadmapFormatOverride lets --format force which branch roadmapOutput takes,
+// independent of isTTY detection. roadmapFormatAuto preserves today's
+// detection-only behaviour exactly -- this step does not change what either
+// branch renders, only how the branch is chosen.
+type roadmapFormatOverride int
+
+const (
+	roadmapFormatAuto roadmapFormatOverride = iota
+	roadmapFormatTTY
+	roadmapFormatMarkdown
+)
 
 // roadmapOutput is the testable TTY switch (EARS-1/EARS-2/EARS-5): TTY gets
 // the plain-text tree via renderRoadmapPretty, everything else (pipe,
@@ -165,9 +192,18 @@ argument the root is that item, so --depth 1 lists its direct children.
 // identical to calling renderRoadmapMarkdown directly (Q07/D02). cols is
 // clamped via roadmapClampWidth regardless of what the caller passed in; a
 // caller that could not determine a terminal width passes 0, which lands on
-// the 80-column floor (D08).
-func roadmapOutput(data *roadmapData, isTTY bool, cols int, links bool, linkPrefix string, showTags bool) string {
-	if isTTY {
+// the 80-column floor (D08). format overrides the isTTY-derived choice when
+// it is not roadmapFormatAuto, so a caller can force either branch (e.g. for
+// tests, or a user explicitly asking for --format markdown/tty).
+func roadmapOutput(data *roadmapData, isTTY bool, format roadmapFormatOverride, cols int, links bool, linkPrefix string, showTags bool) string {
+	renderTTY := isTTY
+	switch format {
+	case roadmapFormatTTY:
+		renderTTY = true
+	case roadmapFormatMarkdown:
+		renderTTY = false
+	}
+	if renderTTY {
 		return renderRoadmapPretty(data, roadmapClampWidth(cols), showTags)
 	}
 	return renderRoadmapMarkdown(data, links, linkPrefix, showTags)
@@ -504,7 +540,6 @@ func classifyEpicChild(epic *bean.Bean, children map[string][]*bean.Bean, includ
 	return nil, epic
 }
 
-
 // buildFeatureGroup builds a feature group: all leaf descendants found
 // anywhere beneath the feature, flattened and sorted.
 func buildFeatureGroup(feature *bean.Bean, children map[string][]*bean.Bean, includeDone bool) featureGroup {
@@ -739,5 +774,8 @@ func RegisterRoadmapCmd(root *cobra.Command) {
 	roadmapCmd.Flags().StringVar(&roadmapLinkPrefix, "link-prefix", "", "URL prefix for links")
 	roadmapCmd.Flags().IntVar(&roadmapDepth, "depth", 0, "Limit output to n levels below the roadmap root (default: no limit)")
 	roadmapCmd.Flags().BoolVar(&roadmapTags, "tags", false, "Render each item's tags")
+	roadmapCmd.Flags().StringVar(&roadmapView, "view", "tree", `Layout: "tree" or "table"`)
+	roadmapCmd.Flags().StringVar(&roadmapFormat, "format", "", `Output format: "tty" or "markdown" (default: detect)`)
+	roadmapCmd.Flags().IntVar(&roadmapWidthFlag, "max-width", 0, "Cap rendering width in columns (0: no cap)")
 	root.AddCommand(roadmapCmd)
 }

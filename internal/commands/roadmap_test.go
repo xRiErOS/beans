@@ -728,7 +728,7 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	data := roadmapOutputFixture()
 
 	t.Run("pipe (non-tty) renders markdown", func(t *testing.T) {
-		got := roadmapOutput(data, false, 0, true, "", false)
+		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false)
 		if !strings.HasPrefix(got, "# Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
 		}
@@ -738,7 +738,7 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	})
 
 	t.Run("tty renders plain-text table", func(t *testing.T) {
-		got := roadmapOutput(data, true, 80, true, "", false)
+		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false)
 		if !strings.HasPrefix(got, "Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
 		}
@@ -770,7 +770,7 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 	}
 
 	t.Run("pipe (non-tty) renders markdown with Root", func(t *testing.T) {
-		got := roadmapOutput(data, false, 0, true, "", false)
+		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false)
 		if !strings.HasPrefix(got, "# Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
 		}
@@ -789,7 +789,7 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 	})
 
 	t.Run("tty renders plain-text table with Root", func(t *testing.T) {
-		got := roadmapOutput(data, true, 80, true, "", false)
+		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false)
 		if !strings.HasPrefix(got, "Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
 		}
@@ -838,7 +838,7 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := roadmapOutput(data, false, 0, tt.links, "some/prefix", false)
+			got := roadmapOutput(data, false, roadmapFormatAuto, 0, tt.links, "some/prefix", false)
 			want := renderRoadmapMarkdown(data, tt.links, "some/prefix", false)
 			if got != want {
 				t.Errorf("roadmapOutput(non-tty, links=%v, false) diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", tt.links, got, want)
@@ -862,7 +862,7 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 // a 0-width render.
 func TestRoadmapOutputZeroColsFallsBackTo80(t *testing.T) {
 	data := roadmapOutputFixture()
-	got := roadmapOutput(data, true, 0, true, "", false)
+	got := roadmapOutput(data, true, roadmapFormatAuto, 0, true, "", false)
 
 	lines := strings.SplitN(got, "\n", 3)
 	if len(lines) < 2 {
