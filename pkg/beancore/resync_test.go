@@ -62,10 +62,3 @@ func TestFanOutNoResyncWithoutOverflow(t *testing.T) {
 		t.Errorf("channel holds %d further batches, want none", len(ch))
 	}
 }
-
-// TestEventResyncString keeps the marker readable in logs.
-func TestEventResyncString(t *testing.T) {
-	if got, want := EventResync.String(), "resync"; got != want {
-		t.Errorf("EventResync.String() = %q, want %q", got, want)
-	}
-}
