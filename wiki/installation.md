@@ -1,16 +1,47 @@
 # Installation
 
-This page covers building the xRiErOS fork of Beans from source and explains the difference between its three binaries. It reflects the fork's current build configuration, not the upstream project's published release channel.
+This page covers the four ways to install the xRiErOS fork of Beans and explains the difference between its three binaries.
 
-## Origin and current distribution state
+## Origin
 
-Beans was originally created by [hmans](https://github.com/hmans/beans); this fork, maintained at [xRiErOS/beans](https://github.com/xRiErOS/beans), is an actively maintained independent continuation of that project.
+Beans was originally created by [hmans](https://github.com/hmans/beans); this fork, maintained at [xRiErOS/beans](https://github.com/xRiErOS/beans), is an actively maintained independent continuation of that project. The fork's Go module path is `github.com/xRiErOS/beans`.
 
-The fork's `go.mod` still declares its module path as `github.com/hmans/beans`, so `go install github.com/xRiErOS/beans/cmd/beans@latest` does not work: Go's module resolver would fetch the fork's source under a path that does not match its own module declaration and fail. Build from a local clone instead, as shown below.
+## Installation channels
 
-The repository's `.goreleaser.yaml` builds all three binaries for Linux, macOS, and Windows and configures no Homebrew tap; a tag push runs that pipeline through GitHub Actions and attaches the archives to a GitHub Release of this fork. The fork's [Releases page](https://github.com/xRiErOS/beans/releases) carries no artifacts yet, so building from source as described below is currently the only installation path.
+All four channels install the same three binaries described below. Pick one:
 
-## Prerequisites
+### Homebrew (macOS)
+
+```sh
+brew install xRiErOS/beans/beans
+```
+
+Upgrade with `brew upgrade --cask beans`.
+
+### Install script (Linux, macOS)
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/xRiErOS/beans/main/install.sh | sh
+```
+
+Configurable via environment variables: `BEANS_VERSION` (default: latest release), `BEANS_BIN_DIR` (default: `$HOME/.local/bin`), `BEANS_REPO` (default: `xRiErOS/beans`).
+
+### go install (Linux, macOS, Windows)
+
+```sh
+go install github.com/xRiErOS/beans/cmd/beans@latest
+go install github.com/xRiErOS/beans/cmd/beans-tui@latest
+```
+
+A `beans-serve` built this way embeds no web assets — the repository tracks only a placeholder (`internal/web/dist/.gitkeep`) so the `//go:embed` directive in `internal/web/embed.go` compiles, but the actual frontend build is not part of the module source. Requesting `/` returns 404. Use Homebrew, the install script, or a release archive for a working `beans-serve`.
+
+A binary installed this way still reports a real version, commit, and date: `internal/version/buildinfo.go` reads them from `runtime/debug.ReadBuildInfo()` when the build did not receive `-ldflags` (which `go install` never does).
+
+### GitHub Releases
+
+Download the `linux`/`darwin`/`windows` × `amd64`/`arm64` (`i386` on Linux only) archive for your platform from the [Releases page](https://github.com/xRiErOS/beans/releases), verify against the accompanying `checksums.txt`, and extract `beans`, `beans-serve`, `beans-tui` onto your `PATH`.
+
+## Prerequisites (build from source only)
 
 Install [mise](https://mise.jdx.dev/getting-started.html) first. The repository's `mise.toml` declares the Go, Node.js, and pnpm toolchains the build needs and installs them; the current Go module requires Go 1.24.6.
 
@@ -54,7 +85,7 @@ beans version
 beans --help
 ```
 
-A plain local `go build` or `go install` does not inject those linker values and is not the documented installation path. Installing the fork directly by remote module path also remains invalid while `go.mod` retains `github.com/hmans/beans`.
+A plain local `go build` does not inject those linker values (it also has no embedded frontend, see the `go install` section above); use `mise run build` for a fully stamped binary with the web UI, or one of the release-artifact channels above.
 
 ## License
 

@@ -94,7 +94,30 @@ Profiles are expanded into the repository's `.beans.yml` when `beans init --prof
 
 ## Installation
 
-The fork publishes no downloadable release artifacts yet. Build the checkout with the repository's `mise` pipeline, which generates the frontend assets required by the embedded web UI and stamps all three binaries with version metadata.
+Pick the channel that matches your platform. All four install the same three binaries: `beans` (CLI), `beans-serve` (web UI and GraphQL API), `beans-tui` (terminal UI).
+
+### Homebrew (macOS)
+
+````sh
+brew install xRiErOS/beans/beans
+````
+
+### Install script (Linux, macOS)
+
+````sh
+curl -fsSL https://raw.githubusercontent.com/xRiErOS/beans/main/install.sh | sh
+````
+
+### go install (Linux, macOS, Windows)
+
+````sh
+go install github.com/xRiErOS/beans/cmd/beans@latest
+go install github.com/xRiErOS/beans/cmd/beans-tui@latest
+````
+
+A `beans-serve` built this way has no embedded web assets (only a placeholder is tracked in the source tree) and serves 404 for the browser UI. Use Homebrew, the install script, or a release archive if you need `beans-serve` with the web UI.
+
+### Build from source
 
 ````sh
 git clone https://github.com/xRiErOS/beans.git
@@ -110,8 +133,6 @@ export PATH="$HOME/.local/bin:$PATH"
 
 beans version
 ````
-
-The repository currently keeps the historical `github.com/hmans/beans` Go module path. Consequently, `go install github.com/xRiErOS/beans/cmd/beans@latest` is not a valid fork installation command.
 
 [Installation details and prerequisites](wiki/installation.md)
 
