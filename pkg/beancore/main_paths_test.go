@@ -96,6 +96,46 @@ func TestFindMainBeanFile(t *testing.T) {
 		}
 	})
 
+	t.Run("follows an ID rename", func(t *testing.T) {
+		core, _ := setupTestCore(t)
+		createTestBean(t, core, "old-1", "Renamed", "todo")
+
+		plan, err := core.PlanRenameID("old-1", "new-1")
+		if err != nil {
+			t.Fatalf("PlanRenameID(): %v", err)
+		}
+		if err := core.ApplyRename(plan); err != nil {
+			t.Fatalf("ApplyRename(): %v", err)
+		}
+
+		if got := mainPathRel(t, core, "old-1"); got != "" {
+			t.Errorf("the old ID still maps to %q, want %q", got, "")
+		}
+		if got, want := mainPathRel(t, core, "new-1"), "new-1--renamed.md"; got != want {
+			t.Errorf("findMainBeanFile() = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("follows LoadAndUnarchive moving the file out of the archive", func(t *testing.T) {
+		core, _ := setupTestCore(t)
+		createTestBean(t, core, "load-1", "Reopened", "todo")
+		if err := core.Archive("load-1"); err != nil {
+			t.Fatalf("Archive(): %v", err)
+		}
+
+		if _, err := core.LoadAndUnarchive("load-1"); err != nil {
+			t.Fatalf("LoadAndUnarchive(): %v", err)
+		}
+
+		// LoadAndUnarchive moved the file; a stale mainPaths entry pointing at
+		// the now-empty .archive/ location makes findMainBeanFile drop the
+		// entry and answer "", which handleWorktreeChanges reads as
+		// "worktree-only" and turns into a phantom EventDeleted.
+		if got, want := mainPathRel(t, core, "load-1"), "load-1--reopened.md"; got != want {
+			t.Errorf("findMainBeanFile() = %q, want %q", got, want)
+		}
+	})
+
 	t.Run("returns nothing for a bean that never existed", func(t *testing.T) {
 		core, _ := setupTestCore(t)
 

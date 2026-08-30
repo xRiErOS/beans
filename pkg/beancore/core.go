@@ -803,15 +803,20 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 
 	// The main-store file backs both checks below: the etag If-Match is
 	// validated against, and the previous status the field policy is measured
-	// from. Read it once, and read it here rather than before taking the lock:
-	// a read outside the lock leaves a window in which another writer replaces
-	// the file, which would turn a stale If-Match into a silent accept — the
-	// exact lost update the etag exists to prevent.
+	// from. On the common path — a write to main — both want the same bytes, so
+	// read them once. Read them here rather than before taking the lock: a read
+	// outside the lock leaves a window in which another writer replaces the
+	// file, which would turn a stale If-Match into a silent accept — the exact
+	// lost update the etag exists to prevent.
+	//
+	// The If-Match etag always comes from the main store, worktree write or
+	// not; the status policy measures against whichever file is being written,
+	// so under a worktree path it keeps reading the worktree copy below.
 	var mainContent []byte
 	var haveMainContent bool
-	readsMainFile := storedBean.Path != "" && !c.dirty[b.ID] && wtPath == ""
+	readsMainFile := storedBean.Path != "" && !c.dirty[b.ID]
 	wantsETagFromDisk := ifMatch != nil && *ifMatch != ""
-	wantsStatusFromDisk := len(c.requiredFieldsFor(b.Status)) > 0
+	wantsStatusFromDisk := wtPath == "" && len(c.requiredFieldsFor(b.Status)) > 0
 	if readsMainFile && (wantsETagFromDisk || wantsStatusFromDisk) {
 		if content, err := os.ReadFile(filepath.Join(c.root, storedBean.Path)); err == nil {
 			mainContent, haveMainContent = content, true
@@ -842,7 +847,7 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
 		var prev string
 		var ok bool
-		if haveMainContent {
+		if haveMainContent && wtPath == "" {
 			prev, ok = statusOfContent(mainContent)
 		} else {
 			prev, ok = c.statusOnDisk(storedBean.Path, wtPath)
@@ -1183,6 +1188,7 @@ func (c *Core) LoadAndUnarchive(id string) (*bean.Bean, error) {
 
 	// Update bean's path
 	b.Path = newRelPath
+	c.mainPaths[targetID] = newRelPath
 	c.setBeanLocked(targetID, b)
 
 	return b, nil
