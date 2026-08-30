@@ -2,8 +2,10 @@ package commands
 
 import (
 	_ "embed"
+	"fmt"
 	"os"
 	"sort"
+	"strings"
 	"text/template"
 
 	"github.com/hmans/beans/pkg/config"
@@ -40,6 +42,23 @@ type promptData struct {
 	// needs `--commit`. A project can gate CommitField on another status
 	// (e.g. "accepted") without gating completion at all.
 	CompletionCommitGated bool
+	// TypeRanks lists one formatted line per occupied hierarchy rank, e.g.
+	// "rank 1: milestone", reflecting this project's actual config.
+	TypeRanks []string
+}
+
+// rankLines renders one line per occupied hierarchy rank. The prompt template
+// is parsed without a FuncMap, so the joining happens here rather than there.
+func rankLines(c *config.Config) []string {
+	var out []string
+	for rank := 1; rank <= config.LeafRank; rank++ {
+		names := c.TypesAtRank(rank)
+		if len(names) == 0 {
+			continue
+		}
+		out = append(out, fmt.Sprintf("rank %d: %s", rank, strings.Join(names, ", ")))
+	}
+	return out
 }
 
 var primeCmd = &cobra.Command{
@@ -128,6 +147,7 @@ var primeCmd = &cobra.Command{
 			CommitField:           commitField,
 			CommitFieldGated:      commitFieldGated,
 			CompletionCommitGated: completionCommitGated,
+			TypeRanks:             rankLines(loadedCfg),
 		}
 
 		return tmpl.Execute(os.Stdout, data)

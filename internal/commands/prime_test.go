@@ -115,3 +115,40 @@ func TestPrimeCmdDocumentsFailureShape(t *testing.T) {
 		}
 	}
 }
+
+func TestRankLinesListEveryOccupiedRank(t *testing.T) {
+	got := rankLines(&config.Config{})
+	want := []string{
+		"rank 1: milestone",
+		"rank 2: epic",
+		"rank 3: feature",
+		"rank 4: bug, task",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("rankLines() = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("rankLines()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+func TestRankLinesSkipAnEmptyRank(t *testing.T) {
+	rank := 1
+	c := &config.Config{Types: []config.TypeOverride{{Name: "release", Rank: &rank}}}
+	for _, line := range rankLines(c) {
+		if strings.HasPrefix(line, "rank 3:") && !strings.Contains(line, "feature") {
+			t.Errorf("empty rank rendered: %q", line)
+		}
+	}
+}
+
+func TestPromptTemplateNoLongerCarriesTheLinearChain(t *testing.T) {
+	if strings.Contains(agentPromptTemplate, "milestone → epic → feature → task/bug") {
+		t.Error("the template still hands agents the misleading linear chain")
+	}
+	if !strings.Contains(agentPromptTemplate, "higher rank") {
+		t.Error("the template does not explain the rank rule")
+	}
+}
