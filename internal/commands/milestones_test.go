@@ -2,11 +2,14 @@ package commands
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
@@ -39,10 +42,97 @@ func setupMilestonesTest(t *testing.T) {
 func resetMilestonesFlags(t *testing.T) {
 	t.Helper()
 	oldJSON, oldAll := milestonesJSON, milestonesAll
+	oldView, oldMaxWidth, oldTags := milestonesView, milestonesMaxWidth, milestonesTags
 	milestonesJSON, milestonesAll = false, false
+	milestonesView, milestonesMaxWidth, milestonesTags = "table", 0, false
 	t.Cleanup(func() {
 		milestonesJSON, milestonesAll = oldJSON, oldAll
+		milestonesView, milestonesMaxWidth, milestonesTags = oldView, oldMaxWidth, oldTags
 	})
+}
+
+// milestonesCmdWithFlags returns a throwaway *cobra.Command carrying every
+// flag RunE reads, bound to the same package-level vars as the real
+// milestonesCmd singleton. milestonesCmd itself only gets its flags from
+// RegisterMilestonesCmd, which production wiring calls but these tests
+// don't, and RunE needs a cmd whose Flags().Changed("max-width") can be
+// queried — mirrors createCmdWithOrderFlag.
+func milestonesCmdWithFlags() *cobra.Command {
+	c := &cobra.Command{Use: "milestones"}
+	c.Flags().BoolVar(&milestonesJSON, "json", false, "")
+	c.Flags().BoolVar(&milestonesAll, "all", false, "")
+	c.Flags().StringVar(&milestonesView, "view", "table", "")
+	c.Flags().IntVar(&milestonesMaxWidth, "max-width", 0, "")
+	c.Flags().BoolVar(&milestonesTags, "tags", false, "")
+	return c
+}
+
+// runMilestonesInTestStore seeds one active milestone with a descendant and
+// one archived-status milestone, runs milestonesCmd with the given extra
+// flags, and returns everything written to stdout.
+func runMilestonesInTestStore(t *testing.T, args []string) string {
+	t.Helper()
+	setupMilestonesTest(t)
+	resetMilestonesFlags(t)
+
+	active := &bean.Bean{ID: "beans-mile1", Slug: bean.Slugify("Active milestone"), Title: "Active milestone", Status: "todo", Type: "milestone"}
+	task := &bean.Bean{ID: "beans-task1", Slug: bean.Slugify("Task"), Title: "Task", Status: "completed", Type: "task", Parent: "beans-mile1"}
+	archived := &bean.Bean{ID: "beans-mile2", Slug: bean.Slugify("an archived milestone"), Title: "an archived milestone", Status: "completed", Type: "milestone"}
+	for _, b := range []*bean.Bean{active, task, archived} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	cmd := milestonesCmdWithFlags()
+	if err := cmd.Flags().Parse(args); err != nil {
+		t.Fatalf("parsing flags %v: %v", args, err)
+	}
+
+	return string(captureMilestonesStdout(t, func() {
+		if err := milestonesCmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("milestonesCmd.RunE() error = %v", err)
+		}
+	}))
+}
+
+// runMilestonesWithProgress seeds a single milestone with total direct-child
+// task beans, done of which are completed, and returns the default (table)
+// rendering. It exists to prove the progress counter's column width is
+// measured from the actual data, not a hardcoded constant.
+func runMilestonesWithProgress(t *testing.T, done, total int) string {
+	t.Helper()
+	setupMilestonesTest(t)
+	resetMilestonesFlags(t)
+
+	milestone := &bean.Bean{ID: "beans-milew", Slug: bean.Slugify("Wide milestone"), Title: "Wide milestone", Status: "todo", Type: "milestone"}
+	if err := core.Create(milestone); err != nil {
+		t.Fatalf("core.Create(milestone) error = %v", err)
+	}
+	for i := 0; i < total; i++ {
+		status := "todo"
+		if i < done {
+			status = "completed"
+		}
+		task := &bean.Bean{
+			ID:     fmt.Sprintf("beans-wt%d", i),
+			Slug:   bean.Slugify(fmt.Sprintf("wide task %d", i)),
+			Title:  fmt.Sprintf("wide task %d", i),
+			Status: status,
+			Type:   "task",
+			Parent: milestone.ID,
+		}
+		if err := core.Create(task); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", task.ID, err)
+		}
+	}
+
+	cmd := milestonesCmdWithFlags()
+	return string(captureMilestonesStdout(t, func() {
+		if err := milestonesCmd.RunE(cmd, nil); err != nil {
+			t.Fatalf("milestonesCmd.RunE() error = %v", err)
+		}
+	}))
 }
 
 // captureMilestonesStdout redirects os.Stdout for the duration of fn and
@@ -231,4 +321,46 @@ func TestMilestonesJSONOutput(t *testing.T) {
 	if entries[0].Completed != 1 || entries[0].Total != 1 {
 		t.Errorf("expected completed=1 total=1, got completed=%d total=%d", entries[0].Completed, entries[0].Total)
 	}
+}
+
+// TestMilestonesShowsAProgressColumn verifies the shared layout engine
+// renders a PROGRESS column with an n/m counter, not the old ad hoc
+// "(n/m completed)" suffix.
+func TestMilestonesShowsAProgressColumn(t *testing.T) {
+	out := runMilestonesInTestStore(t, []string{})
+	if !strings.Contains(out, "PROGRESS") {
+		t.Errorf("milestones must carry a PROGRESS column:\n%s", out)
+	}
+	if !strings.Contains(out, "/") {
+		t.Errorf("progress must show n/m:\n%s", out)
+	}
+}
+
+// TestMilestonesStillHidesArchivedByDefault guards the one thing this task
+// must not touch: the default filter already hid archive-status milestones
+// before the engine migration, and it must survive it unchanged in both
+// directions.
+func TestMilestonesStillHidesArchivedByDefault(t *testing.T) {
+	out := runMilestonesInTestStore(t, []string{})
+	if strings.Contains(out, "an archived milestone") {
+		t.Errorf("archived milestones must stay hidden without --all:\n%s", out)
+	}
+	all := runMilestonesInTestStore(t, []string{"--all"})
+	if !strings.Contains(all, "an archived milestone") {
+		t.Errorf("--all must bring archived milestones back:\n%s", all)
+	}
+}
+
+// TestMilestonesCounterWidthFollowsTheData guards against the regression
+// this plan already shipped once: a progress column hardcoded to a width of
+// five tears a three-digit counter like 131/139 across the column boundary.
+// The width must come from the widest n/m actually present in the rows.
+func TestMilestonesCounterWidthFollowsTheData(t *testing.T) {
+	out := runMilestonesWithProgress(t, 131, 139)
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "131/139") {
+			return
+		}
+	}
+	t.Errorf("the counter 131/139 did not survive on one line:\n%s", out)
 }
