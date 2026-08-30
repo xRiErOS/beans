@@ -75,6 +75,14 @@ var milestonesCmd = &cobra.Command{
 	Long:  `Lists all beans on the top container rank, each annotated with how many of its descendants (via any number of parent levels, e.g. epics and their tasks) are completed. Completed and scrapped milestones are hidden by default; use --all to include them.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Flag validation comes before any data access and before every
+		// early return: an empty result set or --json must not swallow a
+		// typo in --view (beans-cfky).
+		form, ok := ui.ParseForm(milestonesView)
+		if !ok {
+			return cmdError(milestonesJSON, output.ErrValidation,
+				"unknown --view %q: expected table or tree", milestonesView)
+		}
 		ctx := context.Background()
 		resolver := &beangraph.CoreResolver{Core: core}
 
@@ -108,12 +116,6 @@ var milestonesCmd = &cobra.Command{
 			return nil
 		}
 
-		form, ok := ui.ParseForm(milestonesView)
-		if !ok {
-			return cmdError(milestonesJSON, output.ErrValidation,
-				"unknown --view %q: expected table or tree", milestonesView)
-		}
-
 		// Every row carries a Progress, even at 0/0 — that is what buys the
 		// PROGRESS column from the shared engine without a separate opt-in.
 		rows := make([]ui.Row, 0, len(entries))
@@ -131,6 +133,15 @@ var milestonesCmd = &cobra.Command{
 }
 
 func RegisterMilestonesCmd(root *cobra.Command) {
+	// Registration is idempotent: the command is a package-level singleton,
+	// so a second Register call in the same process (tests build several
+	// roots) would panic in pflag with "flag redefined". list.go carries the
+	// same guard; without it here, adding a test that registers this command
+	// alongside another one panics rather than failing.
+	if milestonesCmd.Flags().Lookup("json") != nil {
+		root.AddCommand(milestonesCmd)
+		return
+	}
 	milestonesCmd.Flags().BoolVar(&milestonesJSON, "json", false, "Output as JSON")
 	milestonesCmd.Flags().BoolVar(&milestonesAll, "all", false, "Include completed and scrapped milestones")
 	milestonesCmd.Flags().StringVar(&milestonesView, "view", "table",

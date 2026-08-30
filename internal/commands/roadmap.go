@@ -1061,6 +1061,15 @@ func firstParagraph(body string) string {
 }
 
 func RegisterRoadmapCmd(root *cobra.Command) {
+	// Registration is idempotent: the command is a package-level singleton,
+	// so a second Register call in the same process (tests build several
+	// roots) would panic in pflag with "flag redefined". list.go carries the
+	// same guard; without it here, adding a test that registers this command
+	// alongside another one panics rather than failing.
+	if roadmapCmd.Flags().Lookup("json") != nil {
+		root.AddCommand(roadmapCmd)
+		return
+	}
 	roadmapCmd.Flags().BoolVar(&roadmapJSON, "json", false, "Output as JSON")
 	roadmapCmd.Flags().BoolVar(&roadmapIncludeDone, "include-done", false, "Include completed items")
 	roadmapCmd.Flags().StringArrayVar(&roadmapStatus, "status", nil, "Filter milestones by status (can be repeated)")

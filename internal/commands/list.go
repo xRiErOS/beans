@@ -63,6 +63,14 @@ Search Syntax (--search/-S):
   title:login    Search only in title field
   body:auth      Search only in body field`,
 	RunE: func(cmd *cobra.Command, args []string) error {
+		// Flag validation comes before any data access and before every
+		// early return: an empty result set or --json must not swallow a
+		// typo in --view (beans-cfky).
+		form, ok := ui.ParseForm(listView)
+		if !ok {
+			return cmdError(listJSON, output.ErrValidation,
+				"unknown --view %q: expected table or tree", listView)
+		}
 		// Validate --where up front (usage errors, reserved keys) before
 		// running the query, analogous to validateExtraKeys in create.go/update.go.
 		if err := validateWhereKeys(listWhere); err != nil {
@@ -190,12 +198,6 @@ Search Syntax (--search/-S):
 		if len(tree) == 0 {
 			fmt.Println(ui.Muted.Render("No beans found. Create one with: beans new <title>"))
 			return nil
-		}
-
-		form, ok := ui.ParseForm(listView)
-		if !ok {
-			return cmdError(listJSON, output.ErrValidation,
-				"unknown --view %q: expected table or tree", listView)
 		}
 
 		width := resolveWidth(listMaxWidth, cmd.Flags().Changed("max-width"), cfg)

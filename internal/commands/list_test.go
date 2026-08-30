@@ -911,3 +911,52 @@ func TestListShowsTagsOnlyWithTheFlag(t *testing.T) {
 		t.Errorf("list --tags must render the tag column:\n%s", out)
 	}
 }
+
+// TestViewFlagIsValidatedBeforeAnyEarlyReturn pins the fix for beans-cfky.
+// The three view-aware commands validated --view at the point where they
+// were about to render, which is AFTER their empty-result return and, for
+// milestones, after the --json return as well. A typo therefore vanished
+// silently: `beans milestones --json --view bogus` printed [] and exited 0,
+// and `beans list --view bogus` against an empty store printed the
+// no-beans hint. An agent reading prime as authoritative would get the
+// default arrangement and no indication it had asked for something else.
+//
+// Mutation: move any of the three ParseForm checks back below its command's
+// empty-result return and the matching case goes red.
+func TestViewFlagIsValidatedBeforeAnyEarlyReturn(t *testing.T) {
+	setupListTest(t) // empty store: no beans, no milestones
+
+	root := &cobra.Command{Use: "beans"}
+	RegisterListCmd(root)
+	RegisterMilestonesCmd(root)
+	RegisterRoadmapCmd(root)
+
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"list", []string{"list", "--view", "bogus"}},
+		{"list --json", []string{"list", "--json", "--view", "bogus"}},
+		{"milestones", []string{"milestones", "--view", "bogus"}},
+		{"milestones --json", []string{"milestones", "--json", "--view", "bogus"}},
+		{"roadmap", []string{"roadmap", "--view", "bogus"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// One root for the whole test: milestonesCmd and roadmapCmd are
+			// package singletons without list's idempotence guard, so
+			// registering them twice panics in pflag.
+			resetListViewFlags(t, root)
+			oldM, oldR := milestonesView, roadmapView
+			t.Cleanup(func() { milestonesView, roadmapView = oldM, oldR })
+
+			root.SetArgs(tc.args)
+			root.SetOut(io.Discard)
+			root.SetErr(io.Discard)
+			var err error
+			captureListStdout(t, func() { err = root.Execute() })
+			if err == nil {
+				t.Errorf("%v: an invalid --view was accepted against an empty store", tc.args)
+			}
+		})
+	}
+}
