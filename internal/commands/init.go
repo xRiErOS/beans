@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/hmans/beans/internal/gitutil"
@@ -13,6 +14,7 @@ import (
 )
 
 var initJSON bool
+var initProfile string
 
 var initCmd = &cobra.Command{
 	Use:   "init",
@@ -22,6 +24,10 @@ var initCmd = &cobra.Command{
 		var projectDir string
 		var beansDir string
 		var dirName string
+
+		if beansPath != "" && initProfile != "" {
+			return fmt.Errorf("--profile writes a .beans.yml, which --beans-path skips; use one or the other")
+		}
 
 		if beansPath != "" {
 			// Use explicit path for beans directory
@@ -62,6 +68,20 @@ var initCmd = &cobra.Command{
 			// Config is saved at project root (not inside .beans/)
 			defaultCfg := config.DefaultWithPrefix(dirName + "-")
 			defaultCfg.Project.Name = dirName
+			if initProfile != "" {
+				types, ok := config.ProfileTypes(initProfile)
+				if !ok {
+					if initJSON {
+						return output.Error(output.ErrValidation,
+							fmt.Sprintf("unknown profile %q (must be %s)", initProfile, strings.Join(config.ProfileNames(), ", ")))
+					}
+					return fmt.Errorf("unknown profile %q (must be %s)", initProfile, strings.Join(config.ProfileNames(), ", "))
+				}
+				defaultCfg.Types = types
+				// The default type must exist in the chosen profile: todo has no
+				// milestone, complex has no plain feature leaf.
+				defaultCfg.Beans.DefaultType = "task"
+			}
 			defaultCfg.SetConfigDir(projectDir)
 
 			// Auto-detect the remote's default branch if we're in a git repo
@@ -87,5 +107,7 @@ var initCmd = &cobra.Command{
 
 func RegisterInitCmd(root *cobra.Command) {
 	initCmd.Flags().BoolVar(&initJSON, "json", false, "Output as JSON")
+	initCmd.Flags().StringVar(&initProfile, "profile", "",
+		fmt.Sprintf("Type profile to write out (%s)", strings.Join(config.ProfileNames(), ", ")))
 	root.AddCommand(initCmd)
 }
