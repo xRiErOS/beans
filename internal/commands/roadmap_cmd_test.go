@@ -359,10 +359,22 @@ func TestRoadmapOutputNoLineExceedsWidthNarrow(t *testing.T) {
 		for _, c := range cols {
 			got := roadmapOutput(data, true, roadmapFormatTTY, c, true, "", true, form, config.Default())
 			clamped := roadmapClampWidth(c)
-			for _, line := range strings.Split(got, "\n") {
+			lines := strings.Split(got, "\n")
+			for _, line := range lines {
 				if w := ui.DisplayWidth(line); w > clamped {
 					t.Errorf("form=%v cols=%d (clamped=%d): line exceeds width (%d): %q", form, c, clamped, w, line)
 				}
+			}
+			// The divider (second line, both forms) is exactly `width` dashes
+			// -- pinning it to `clamped` proves roadmapOutput actually clamps
+			// the raw cols before rendering, not just that nothing overflows
+			// (a render that ignored clamping and used a narrower raw width
+			// throughout would still pass the no-overflow check above).
+			if len(lines) < 2 {
+				t.Fatalf("form=%v cols=%d: expected at least 2 lines, got %d", form, c, len(lines))
+			}
+			if w := ui.DisplayWidth(lines[1]); w != clamped {
+				t.Errorf("form=%v cols=%d: divider width = %d, want %d (roadmapClampWidth(%d))", form, c, w, clamped, c)
 			}
 		}
 	}
