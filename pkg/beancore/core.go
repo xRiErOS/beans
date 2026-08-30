@@ -1258,19 +1258,32 @@ func (c *Core) ValidatePrefixConsistency() string {
 		configPrefix = c.config.Beans.Prefix
 	}
 
-	// Extract unique prefixes from loaded, non-archived beans. Archived beans
-	// are historical/frozen (project memory, cf. Archive()) and may carry a
-	// prefix that predates a rename or, occasionally, belong to a bean that
-	// was physically copied in from another store; neither case is a live
-	// consistency defect of this store, so archived beans never contribute
-	// to the detected prefix set.
+	// Extract, for each loaded, non-archived bean, the prefix it should be
+	// grouped under. Archived beans are historical/frozen (project memory,
+	// cf. Archive()) and may carry a prefix that predates a rename or,
+	// occasionally, belong to a bean that was physically copied in from
+	// another store; neither case is a live consistency defect of this
+	// store, so archived beans never contribute to the detected prefix set.
+	//
+	// A bean is consistent with the configured prefix iff configPrefix is a
+	// literal string prefix of its ID (bean.IDSuffix/RebrandID answer the
+	// same question for `rename --prefix`); everything after that prefix,
+	// hyphens included, is the suffix. So a bean matching configPrefix is
+	// always grouped under configPrefix itself, regardless of how many
+	// hyphens its hand-authored semantic suffix contains (e.g.
+	// "SEL-login-errors" under prefix "SEL-"). Only beans that do NOT match
+	// configPrefix fall back to a naive split at the last hyphen, purely to
+	// produce a readable label for a foreign/legacy ID scheme we don't
+	// otherwise understand.
 	prefixesSeen := make(map[string]bool)
 	for beanID, b := range c.beans {
 		if c.isArchivedPath(b.Path) {
 			continue
 		}
-		// Extract the prefix from the bean ID (everything up to the first dash followed by letters/digits)
-		// Format is typically "prefix-idpart" where prefix ends at first -
+		if configPrefix != "" && strings.HasPrefix(beanID, configPrefix) {
+			prefixesSeen[configPrefix] = true
+			continue
+		}
 		parts := strings.Split(beanID, "-")
 		if len(parts) > 1 {
 			// Take everything except the last part as the prefix

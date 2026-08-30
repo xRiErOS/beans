@@ -2226,6 +2226,64 @@ func TestValidatePrefixConsistency(t *testing.T) {
 		}
 	})
 
+	t.Run("hyphenated semantic suffix is consistent with configured prefix", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "SEL-",
+			},
+		}
+
+		// Hand-authored semantic IDs whose suffix legitimately contains
+		// hyphens must not be split apart into separate invented prefixes.
+		b1 := &bean.Bean{
+			ID:    "SEL-login-errors",
+			Title: "Login errors",
+		}
+		b2 := &bean.Bean{
+			ID:    "SEL-abcd",
+			Title: "Generated suffix",
+		}
+
+		c := New(tmpDir, cfg)
+		c.beans["SEL-login-errors"] = b1
+		c.beans["SEL-abcd"] = b2
+
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg != "" {
+			t.Errorf("ValidatePrefixConsistency() = %q, want empty for hyphenated semantic suffix", errMsg)
+		}
+	})
+
+	t.Run("genuinely prefix-less bean still fails alongside a hyphenated semantic bean", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		cfg := &config.Config{
+			Beans: config.BeansConfig{
+				Path:   tmpDir,
+				Prefix: "SEL-",
+			},
+		}
+
+		b1 := &bean.Bean{
+			ID:    "SEL-login-errors",
+			Title: "Login errors",
+		}
+		b2 := &bean.Bean{
+			ID:    "abcd",
+			Title: "Legacy bean with no prefix at all",
+		}
+
+		c := New(tmpDir, cfg)
+		c.beans["SEL-login-errors"] = b1
+		c.beans["abcd"] = b2
+
+		errMsg := c.ValidatePrefixConsistency()
+		if errMsg == "" {
+			t.Error("ValidatePrefixConsistency() = \"\", want a mismatch reported for the genuinely prefix-less bean")
+		}
+	})
+
 	t.Run("handles empty config prefix", func(t *testing.T) {
 		tmpDir := t.TempDir()
 		cfg := &config.Config{
