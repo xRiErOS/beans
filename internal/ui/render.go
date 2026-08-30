@@ -85,7 +85,7 @@ func progressCell(p *Progress, c Columns) string {
 		Render(strings.Repeat("█", filled)) +
 		lipgloss.NewStyle().Foreground(ResolveColor("surface2")).
 			Render(strings.Repeat("░", progressBarWidth-filled))
-	return bar + "  " + Muted.Render(PadRight(fmt.Sprintf("%d/%d", p.Done, p.Total), c.Counter))
+	return bar + strings.Repeat(" ", c.Gap) + Muted.Render(PadRight(fmt.Sprintf("%d/%d", p.Done, p.Total), c.Counter))
 }
 
 // tagCell renders tags on exactly one line.

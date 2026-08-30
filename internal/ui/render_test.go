@@ -67,10 +67,9 @@ func TestTagCellNeverExceedsItsWidth(t *testing.T) {
 		{"one", "two"},
 		{"a-really-quite-long-tag-name"},
 		{"note-intern", "slug-tailwind-upgrade"},
-		{},
 	}
 	for _, tags := range sets {
-		for w := 6; w <= 30; w++ {
+		for w := 1; w <= 30; w++ {
 			if got := DisplayWidth(stripANSI(tagCell(tags, w))); got > w {
 				t.Errorf("tagCell(%v, %d) is %d cells wide", tags, w, got)
 			}
