@@ -406,17 +406,29 @@ func Load(configPath string) (*Config, error) {
 		cfg.Beans.DefaultStatus = "todo"
 	}
 	if cfg.Beans.DefaultType == "" {
-		// DefaultTypes[0].Name via the merged list: harmless today (an
-		// override never changes an entry's Name, only its Color and
-		// Description), kept this way only because a future merge that did
-		// allow renaming should not have to remember this call site too.
+		// "task" is the canonical fallback: Default() (used by `beans init`
+		// and whenever no config file exists) hardcodes it, and it is the
+		// leaf/most common type for day-to-day work. Prefer it here too, so
+		// a config that merely omits default_type behaves identically
+		// whether or not a .beans.yml happens to exist yet - Save() used to
+		// persist whichever value this branch picked, so disagreeing with
+		// Default() meant a config file with no default_type at all would
+		// get "milestone" baked in on first save.
 		//
 		// TypesExclusive can make TypeList() legitimately empty (an exclusive
-		// config with no types of its own); there is nothing to derive a
-		// default from in that case, so DefaultType is left as it is rather
-		// than indexing into an empty slice.
-		if types := cfg.TypeList(); len(types) > 0 {
+		// config with no types of its own), or exclude "task" entirely (a
+		// profile with its own type vocabulary); fall back to the first
+		// merged type in that case, and leave DefaultType empty when there is
+		// nothing to derive one from.
+		types := cfg.TypeList()
+		if len(types) > 0 {
 			cfg.Beans.DefaultType = types[0].Name
+			for _, t := range types {
+				if t.Name == "task" {
+					cfg.Beans.DefaultType = "task"
+					break
+				}
+			}
 		}
 	}
 

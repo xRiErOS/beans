@@ -281,9 +281,10 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.GetDefaultStatus() != "todo" {
 		t.Errorf("DefaultStatus: got %q, want \"todo\"", cfg.GetDefaultStatus())
 	}
-	// DefaultType should be first type name when not specified
-	if cfg.Beans.DefaultType != "milestone" {
-		t.Errorf("DefaultType default not applied: got %q, want \"milestone\"", cfg.Beans.DefaultType)
+	// DefaultType should agree with Default(): "task" when the merged type
+	// list carries it, which the built-in table always does.
+	if cfg.Beans.DefaultType != "task" {
+		t.Errorf("DefaultType default not applied: got %q, want \"task\"", cfg.Beans.DefaultType)
 	}
 }
 
