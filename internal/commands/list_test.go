@@ -514,3 +514,117 @@ func idsOf(beans []*bean.Bean) []string {
 	}
 	return ids
 }
+
+// TestListCmdUnblockedEndToEnd covers `beans list --unblocked` (beans-8olg):
+// beans with an active blocker drop out, beans whose only blocker is
+// resolved stay in, and — unlike --ready — no status is excluded, so
+// draft/in-progress/completed beans survive the filter. The last block
+// pins the combination with another flag, since --unblocked mutates the
+// same filter object list.go already built from --status et al.
+func TestListCmdUnblockedEndToEnd(t *testing.T) {
+	setupListTest(t)
+
+	oldJSON, oldFull, oldUnblocked, oldStatus := listJSON, listFull, listUnblocked, listStatus
+	listJSON, listFull, listUnblocked = true, false, true
+	t.Cleanup(func() {
+		listJSON, listFull, listUnblocked, listStatus = oldJSON, oldFull, oldUnblocked, oldStatus
+	})
+
+	openBlocker := &bean.Bean{
+		ID:     "beans-unb1",
+		Slug:   bean.Slugify("open blocker"),
+		Title:  "open blocker",
+		Status: "todo",
+		Type:   "task",
+	}
+	doneBlocker := &bean.Bean{
+		ID:     "beans-unb2",
+		Slug:   bean.Slugify("done blocker"),
+		Title:  "done blocker",
+		Status: "completed",
+		Type:   "task",
+	}
+	blocked := &bean.Bean{
+		ID:        "beans-unb3",
+		Slug:      bean.Slugify("blocked by open"),
+		Title:     "blocked by open",
+		Status:    "todo",
+		Type:      "task",
+		BlockedBy: []string{openBlocker.ID},
+	}
+	unblocked := &bean.Bean{
+		ID:        "beans-unb4",
+		Slug:      bean.Slugify("blocker is done"),
+		Title:     "blocker is done",
+		Status:    "todo",
+		Type:      "task",
+		BlockedBy: []string{doneBlocker.ID},
+	}
+	draft := &bean.Bean{
+		ID:     "beans-unb5",
+		Slug:   bean.Slugify("draft task"),
+		Title:  "draft task",
+		Status: "draft",
+		Type:   "task",
+	}
+	for _, b := range []*bean.Bean{openBlocker, doneBlocker, blocked, unblocked, draft} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	listIDs := func(t *testing.T) map[string]bool {
+		t.Helper()
+		out := captureListStdout(t, func() {
+			if err := listCmd.RunE(listCmd, nil); err != nil {
+				t.Fatalf("listCmd.RunE() error = %v", err)
+			}
+		})
+		var got []*bean.Bean
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+		}
+		ids := make(map[string]bool, len(got))
+		for _, b := range got {
+			ids[b.ID] = true
+		}
+		return ids
+	}
+
+	gotIDs := listIDs(t)
+	if gotIDs[blocked.ID] {
+		t.Errorf("bean with an active blocker must be excluded, got IDs = %v", gotIDs)
+	}
+	if !gotIDs[unblocked.ID] {
+		t.Errorf("bean whose only blocker is completed must be included, got IDs = %v", gotIDs)
+	}
+	// --unblocked is purely about blockers: it must not imply --ready's
+	// status exclusions, so draft and the completed blocker stay in.
+	if !gotIDs[draft.ID] || !gotIDs[doneBlocker.ID] || !gotIDs[openBlocker.ID] {
+		t.Errorf("--unblocked must not exclude any status, got IDs = %v", gotIDs)
+	}
+
+	// Combined with --status: both filters apply to the same query.
+	listStatus = []string{"todo"}
+	gotIDs = listIDs(t)
+	if !gotIDs[unblocked.ID] || !gotIDs[openBlocker.ID] {
+		t.Errorf("expected unblocked todo beans, got IDs = %v", gotIDs)
+	}
+	if gotIDs[blocked.ID] || gotIDs[draft.ID] || gotIDs[doneBlocker.ID] {
+		t.Errorf("expected blocked and non-todo beans excluded, got IDs = %v", gotIDs)
+	}
+}
+
+// TestListCmdUnblockedRejectsIsBlocked pins the mutual exclusion through
+// the command's own RunE rather than restating the condition in the test.
+func TestListCmdUnblockedRejectsIsBlocked(t *testing.T) {
+	setupListTest(t)
+
+	oldUnblocked, oldIsBlocked := listUnblocked, listIsBlocked
+	listUnblocked, listIsBlocked = true, true
+	t.Cleanup(func() { listUnblocked, listIsBlocked = oldUnblocked, oldIsBlocked })
+
+	if err := listCmd.RunE(listCmd, nil); err == nil {
+		t.Fatal("expected --unblocked with --is-blocked to be rejected, got nil error")
+	}
+}
