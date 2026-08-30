@@ -14,6 +14,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterCompleteCmd(root)
 	RegisterCreateCmd(root)
 	RegisterDeleteCmd(root)
+	RegisterGraphCmd(root)
 	RegisterGraphqlCmd(root)
 	RegisterInitCmd(root)
 	RegisterListCmd(root)
