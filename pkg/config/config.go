@@ -34,6 +34,11 @@ const (
 	// an explicit rank lands here, which keeps the old behaviour where an
 	// unknown type was treated like "task".
 	LeafRank = 4
+	// DefaultMaxWidth is the rendered width cap used when display.max_width
+	// is unset. GetMaxWidth() and internal/commands' resolveWidth() both
+	// need this exact number - it used to be a literal duplicated in both
+	// packages, one edit away from drifting apart.
+	DefaultMaxWidth = 110
 )
 
 // DefaultStatuses defines the built-in status table. Config.Statuses can
@@ -1533,11 +1538,11 @@ func (c *Config) GetTheme() string {
 	return c.Display.Theme
 }
 
-// GetMaxWidth returns the configured width cap: 110 when unset, -1 when the
-// cap is explicitly disabled.
+// GetMaxWidth returns the configured width cap: DefaultMaxWidth when unset,
+// -1 when the cap is explicitly disabled.
 func (c *Config) GetMaxWidth() int {
 	if c == nil || c.Display.MaxWidth == 0 {
-		return 110
+		return DefaultMaxWidth
 	}
 	return c.Display.MaxWidth
 }
