@@ -140,7 +140,7 @@ var primeCmd = &cobra.Command{
 		}
 
 		data := promptData{
-			Types:                 config.DefaultTypes,
+			Types:                 loadedCfg.TypeList(),
 			Statuses:              config.DefaultStatuses,
 			Priorities:            config.DefaultPriorities,
 			RequiredFields:        requiredFields,

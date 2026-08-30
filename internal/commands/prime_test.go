@@ -9,6 +9,34 @@ import (
 	"github.com/hmans/beans/pkg/config"
 )
 
+// primeCmdOutput runs the real primeCmd.RunE against a fresh temp directory
+// holding cfg's saved .beans.yml, and returns everything it writes to
+// stdout. Like runInitCmd (see init_test.go), it drives the package-level
+// flag variables RunE reads directly rather than going through cobra's flag
+// parsing, and captures stdout the same way captureListStdout does for
+// listCmd's --json path.
+func primeCmdOutput(t *testing.T, cfg *config.Config) string {
+	t.Helper()
+
+	dir := t.TempDir()
+	cfg.SetConfigDir(dir)
+	if err := cfg.Save(dir); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	t.Chdir(dir)
+
+	origBeansPath, origConfigPath := beansPath, configPath
+	beansPath, configPath = "", ""
+	t.Cleanup(func() { beansPath, configPath = origBeansPath, origConfigPath })
+
+	out := captureListStdout(t, func() {
+		if err := primeCmd.RunE(primeCmd, nil); err != nil {
+			t.Fatalf("primeCmd.RunE: %v", err)
+		}
+	})
+	return string(out)
+}
+
 // renderPrimeTemplate executes the embedded agent prompt template with a
 // minimal but representative promptData, the same shape primeCmd.RunE
 // builds, and returns the rendered text.
@@ -150,5 +178,67 @@ func TestPromptTemplateNoLongerCarriesTheLinearChain(t *testing.T) {
 	}
 	if !strings.Contains(agentPromptTemplate, "higher rank") {
 		t.Error("the template does not explain the rank rule")
+	}
+}
+
+// issueTypesSection extracts the "## Issue Types" section of a rendered
+// prime prompt (up to the next "## " heading), so assertions about it don't
+// also match an unrelated illustrative example elsewhere in the document
+// (e.g. the Recipes section's "...descendants (e.g. a milestone or epic)").
+func issueTypesSection(t *testing.T, out string) string {
+	t.Helper()
+	start := strings.Index(out, "## Issue Types")
+	if start == -1 {
+		t.Fatalf("prompt has no ## Issue Types section:\n%s", out)
+	}
+	rest := out[start+len("## Issue Types"):]
+	if end := strings.Index(rest, "\n## "); end != -1 {
+		rest = rest[:end]
+	}
+	return rest
+}
+
+// An exclusive config (beans init --profile todo, say) is its own complete
+// type table: DefaultTypes' milestone/epic/feature/bug must not leak into
+// the "## Issue Types" section, and that section must name exactly the same
+// types as the "## Relationships" rank lines -- both are derived from the
+// one live config an agent is actually working in.
+func TestPrimeExclusiveConfigTypesAndRanksAgree(t *testing.T) {
+	rank := config.LeafRank
+	cfg := config.DefaultWithPrefix("demo-")
+	cfg.TypesExclusive = true
+	cfg.Types = []config.TypeOverride{{Name: "task", Rank: &rank, Short: "T"}}
+
+	out := primeCmdOutput(t, cfg)
+	issueTypes := issueTypesSection(t, out)
+
+	for _, name := range []string{"milestone", "epic", "feature", "bug"} {
+		if strings.Contains(issueTypes, name) {
+			t.Errorf("exclusive config's issue types section still mentions %q:\n%s", name, issueTypes)
+		}
+	}
+	if !strings.Contains(out, "rank 4: task") {
+		t.Errorf("rank section does not name the only configured type:\n%s", out)
+	}
+	if !strings.Contains(issueTypes, "**task**") {
+		t.Errorf("issue types section does not name the only configured type:\n%s", issueTypes)
+	}
+}
+
+// The ordinary (non-exclusive) path stays pinned: a project that never
+// touches types_exclusive still gets the full built-in table in both
+// sections.
+func TestPrimeDefaultConfigTypesAndRanksAgree(t *testing.T) {
+	cfg := config.DefaultWithPrefix("demo-")
+
+	out := primeCmdOutput(t, cfg)
+
+	for _, name := range []string{"milestone", "epic", "feature", "bug", "task"} {
+		if !strings.Contains(out, name) {
+			t.Errorf("default config's prompt is missing built-in type %q:\n%s", name, out)
+		}
+	}
+	if !strings.Contains(out, "rank 1: milestone") {
+		t.Errorf("rank section does not list the default rank-1 type:\n%s", out)
 	}
 }
