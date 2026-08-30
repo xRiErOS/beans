@@ -8,10 +8,27 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/hmans/beans/internal/gitutil"
+	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
 	"github.com/hmans/beans/internal/ui"
 )
+
+// unknownTypeBeans returns every bean whose type the current configuration
+// does not carry. A config edit or a profile switch can leave beans behind
+// that no longer match any known type.
+func unknownTypeBeans(allBeans []*bean.Bean) []*bean.Bean {
+	var out []*bean.Bean
+	for _, b := range allBeans {
+		if b.Type == "" {
+			continue
+		}
+		if !cfg.IsValidType(b.Type) {
+			out = append(out, b)
+		}
+	}
+	return out
+}
 
 var (
 	checkJSON   bool
@@ -41,6 +58,7 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		var configErrors []string
 		var fixed int
+		allBeans := core.All()
 
 		// === Configuration checks ===
 		if !checkJSON {
@@ -64,6 +82,16 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			if !checkJSON {
 				fmt.Printf("  %s Default type '%s' is valid\n", ui.Success.Render("✓"), cfg.GetDefaultType())
 			}
+		}
+
+		// 2b-2. Check every bean's type against the current configuration
+		if stray := unknownTypeBeans(allBeans); len(stray) > 0 {
+			for _, b := range stray {
+				configErrors = append(configErrors,
+					fmt.Sprintf("bean %s carries type '%s', which the configuration does not define", b.ID, b.Type))
+			}
+		} else if !checkJSON {
+			fmt.Printf("  %s Every bean carries a known type\n", ui.Success.Render("✓"))
 		}
 
 		// 2c. Check agent.default_effort is a valid effort level
@@ -197,7 +225,7 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			var shas []string
 			seenSha := make(map[string]bool)
 
-			for _, b := range core.All() {
+			for _, b := range allBeans {
 				if fields := cfg.RequiredFieldsFor(b.Status); len(fields) > 0 {
 					missing := beancore.MissingRequiredFields(b, fields)
 					if len(missing) > 0 {
