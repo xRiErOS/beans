@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/config"
 )
 
@@ -434,4 +435,24 @@ func TestResolveBeansPathConfigFileOutranksEnv(t *testing.T) {
 			t.Errorf("expected error to suggest 'beans init', got %q", err.Error())
 		}
 	})
+}
+
+// TestFeedTypeTablesSetsFullWidthFromLongestTypeName drives the actual
+// "follows the longest name" computation in feedTypeTables (longest+1),
+// which internal/ui's own setter/getter test cannot reach: internal/ui must
+// not import pkg/config, so the config-derived fixture has to live here.
+// "extraordinarily-long-type-name" is 31 characters, one longer than any
+// DefaultTypes entry, so it must drive the merged type list's longest name.
+func TestFeedTypeTablesSetsFullWidthFromLongestTypeName(t *testing.T) {
+	t.Cleanup(func() { ui.SetTypeColumnWidths(3, 10) })
+
+	const longName = "extraordinarily-long-type-name"
+	c := &config.Config{Types: []config.TypeOverride{{Name: longName}}}
+
+	feedTypeTables(c)
+
+	want := len(longName) + 1
+	if got := ui.FullTypeColumnWidth(); got != want {
+		t.Errorf("FullTypeColumnWidth() = %d, want %d (len(%q)+1)", got, want, longName)
+	}
 }
