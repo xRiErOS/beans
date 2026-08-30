@@ -96,7 +96,7 @@ func newParentPickerModel(beanIDs []string, beanTitle string, beanTypes []string
 	// Get valid parent types - for multi-select, find types valid for ALL beans
 	var validParentTypes []string
 	for i, beanType := range beanTypes {
-		typeParents := beancore.ValidParentTypes(beanType)
+		typeParents := beancore.ValidParentTypes(cfg, beanType)
 		if i == 0 {
 			validParentTypes = typeParents
 		} else {

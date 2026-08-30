@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/config"
 )
 
 // IncomingLink represents a link from another bean to a target bean.
@@ -441,21 +442,21 @@ func (c *Core) FixBrokenLinks() (int, error) {
 	return fixed, nil
 }
 
-// ValidParentTypes returns the valid parent types for a given bean type.
-// Returns nil if the bean type cannot have a parent.
-func ValidParentTypes(beanType string) []string {
-	switch beanType {
-	case "milestone":
-		return nil // milestones cannot have parents
-	case "epic":
-		return []string{"milestone"}
-	case "feature":
-		return []string{"milestone", "epic"}
-	case "task", "bug":
-		return []string{"milestone", "epic", "feature"}
-	default:
-		return []string{"milestone", "epic", "feature"} // default for unknown types
+// ValidParentTypes returns the type names a bean of beanType may hang under:
+// every type on a strictly lower rank, in rank order. Returns nil when no such
+// type exists, which is how "cannot have a parent" is expressed.
+func ValidParentTypes(cfg *config.Config, beanType string) []string {
+	childRank := cfg.RankOf(beanType)
+	var out []string
+	for rank := 1; rank < childRank; rank++ {
+		out = append(out, cfg.TypesAtRank(rank)...)
 	}
+	return out
+}
+
+// IsValidParentRank reports whether parentType may hold childType.
+func IsValidParentRank(cfg *config.Config, childType, parentType string) bool {
+	return cfg.RankOf(childType) > cfg.RankOf(parentType)
 }
 
 // ValidateParent checks if a parent is valid for the given bean.
@@ -465,22 +466,19 @@ func (c *Core) ValidateParent(b *bean.Bean, parentID string) error {
 		return nil
 	}
 
-	validTypes := ValidParentTypes(b.Type)
-	if validTypes == nil {
-		return fmt.Errorf("%s beans cannot have a parent", b.Type)
-	}
-
 	parent, err := c.Get(parentID)
 	if err != nil {
 		return fmt.Errorf("parent bean not found: %s", parentID)
 	}
 
-	for _, t := range validTypes {
-		if parent.Type == t {
-			return nil
-		}
+	if IsValidParentRank(c.config, b.Type, parent.Type) {
+		return nil
 	}
 
+	validTypes := ValidParentTypes(c.config, b.Type)
+	if len(validTypes) == 0 {
+		return fmt.Errorf("%s beans cannot have a parent", b.Type)
+	}
 	return fmt.Errorf("%s beans can only have %s as parent, not %s",
 		b.Type, joinWithOr(validTypes), parent.Type)
 }

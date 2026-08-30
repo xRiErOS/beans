@@ -278,7 +278,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case openParentPickerMsg:
 		// Check if all bean types can have parents
 		for _, beanType := range msg.beanTypes {
-			if beancore.ValidParentTypes(beanType) == nil {
+			if beancore.ValidParentTypes(a.config, beanType) == nil {
 				// At least one bean type (e.g., milestone) cannot have parents - don't open the picker
 				return a, nil
 			}
