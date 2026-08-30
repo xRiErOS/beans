@@ -753,6 +753,7 @@ func renderRoadmapMarkdown(data *roadmapData, links bool, linkPrefix string, sho
 		template.New("roadmap").Funcs(template.FuncMap{
 			"firstParagraph": firstParagraph,
 			"typeBadge":      typeBadge,
+			"typeLabel":      typeHeadingLabel,
 			"beanRef": func(b *bean.Bean) string {
 				return renderBeanRef(b, links, linkPrefix)
 			},
@@ -782,6 +783,25 @@ func renderBeanRef(b *bean.Bean, asLink bool, linkPrefix string) string {
 		linkPrefix += "/"
 	}
 	return fmt.Sprintf("([%s](%s%s))", b.ID, linkPrefix, b.Path)
+}
+
+// typeHeadingLabel renders a bean's own type name for a roadmap heading: the
+// name (identity, D03/D05) with its first letter upper-cased, purely a
+// display transform on the string itself -- not a config lookup, so it
+// renders the same whether or not cfg still knows the type (beans check's
+// unknownTypeBeans). This mirrors the same first-letter-uppercase idiom
+// Config.ShortOf already uses for the one-character type code, rather than
+// progressStatusLabel's per-word title-casing, which exists to turn a
+// hyphenated status like "in-progress" into "In Progress" and does not fit a
+// single-word type name. An empty type -- RankOf("") resolves to LeafRank,
+// so buildRoadmap itself never hands an empty-typed bean to a heading, but a
+// hand-built roadmapData could -- falls back to "Untyped" rather than
+// rendering an empty label.
+func typeHeadingLabel(typeName string) string {
+	if typeName == "" {
+		return "Untyped"
+	}
+	return strings.ToUpper(typeName[:1]) + typeName[1:]
 }
 
 // typeBadge returns a shields.io badge markdown for the bean type.

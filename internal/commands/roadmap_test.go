@@ -1099,7 +1099,7 @@ func TestRenderRoadmapMarkdownRootEpic(t *testing.T) {
 	if strings.Contains(got, "## Milestone") {
 		t.Errorf("root-scoped output must not contain a Milestone heading, got %q", got)
 	}
-	if strings.Contains(got, "No Milestone") {
+	if strings.Contains(got, "Unscheduled") {
 		t.Errorf("root-scoped output must not contain the Unscheduled heading, got %q", got)
 	}
 }
@@ -1596,5 +1596,140 @@ func TestTypeBadgeAcceptsARawHexColour(t *testing.T) {
 	want := "![chore](https://img.shields.io/badge/chore-123abc?style=flat-square)"
 	if got != want {
 		t.Errorf("typeBadge() = %q, want %q", got, want)
+	}
+}
+
+// --- Heading labels follow the bean's own type (beans-0mvv fix wave 2) -----
+//
+// Task 4 moved the roadmap's container *selection* to rank but left the
+// *labels* hardcoded to "Milestone"/"Epic"/"Feature" in both renderers. On a
+// non-classic profile every rank-1 container rendered as "Milestone" and
+// every rank-2 container as "Epic", regardless of its configured type name.
+
+// TestTypeHeadingLabel pins typeHeadingLabel in isolation: first-letter
+// upper-case as a pure display transform (D05 keeps the stored/configured
+// name lowercase), plus the empty-type fallback. A mutation that returns the
+// name unchanged fails the "chore"/"a" cases; a mutation that drops the
+// empty-string fallback fails the "" case.
+func TestTypeHeadingLabel(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{"milestone", "Milestone"},
+		{"chore", "Chore"},
+		{"a", "A"},
+		{"", "Untyped"},
+	}
+	for _, tt := range tests {
+		t.Run("\""+tt.name+"\"", func(t *testing.T) {
+			if got := typeHeadingLabel(tt.name); got != tt.want {
+				t.Errorf("typeHeadingLabel(%q) = %q, want %q", tt.name, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestRoadmapMarkdownHeadingsUseTheBeansOwnType is the direct regression
+// test for the defect: on a project whose rank-1 type is "release" and
+// whose rank-2 type is "chore" (the "complex" profile shape), the roadmap
+// heading must say "Release"/"Chore", not the classic-profile words. A
+// reversion to the hardcoded "## Milestone:"/"### Epic:" text keeps the
+// bean data and structure identical but changes only the literal template
+// text, so it would leave every other test in this file green while
+// failing the "contains Release/Chore" and "does not contain Milestone/
+// Epic" assertions below -- exactly the defect reported against a real
+// store ("Parking lot" rendering as "## Milestone: Parking lot").
+func TestRoadmapMarkdownHeadingsUseTheBeansOwnType(t *testing.T) {
+	rank1, rank2 := 1, 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "release", Rank: &rank1},
+		{Name: "chore", Rank: &rank2},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "r1", Type: "release", Status: "todo", Title: "v2.0"},
+		{ID: "c1", Type: "chore", Status: "todo", Title: "Tidy the store", Parent: "r1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Sweep", Parent: "c1"},
+	}
+	data := buildRoadmap(beans, false, nil, nil)
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "## Release: v2.0") {
+		t.Errorf("expected the rank-1 heading to name the bean's own type (Release), got %q", got)
+	}
+	if !strings.Contains(got, "### Chore: Tidy the store") {
+		t.Errorf("expected the rank-2 heading to name the bean's own type (Chore), got %q", got)
+	}
+	if strings.Contains(got, "Milestone") || strings.Contains(got, "Epic") {
+		t.Errorf("heading must not fall back to the classic-profile words when they are not configured, got %q", got)
+	}
+}
+
+// TestRoadmapMarkdownHeadingForUnknownType covers a bean whose type the
+// config no longer knows (surfaced by `beans check`'s unknownTypeBeans): the
+// heading must still show the bean's own type name, capitalised, rather than
+// an empty or nonsensical heading. This bypasses buildRoadmap (an
+// unknown-typed bean is never classified onto a container rank by RankOf)
+// and drives renderRoadmapMarkdown directly with a hand-built rootGroup, the
+// same way TestRenderRoadmapMarkdownRootEpic does, since the heading
+// renderer itself must tolerate whatever string reaches it.
+func TestRoadmapMarkdownHeadingForUnknownType(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{}}
+	defer func() { cfg = prev }()
+
+	e := &bean.Bean{ID: "beans-legacy1", Type: "legacy", Title: "Old container", Status: "todo"}
+	data := &roadmapData{Root: &rootGroup{Epic: &epicGroup{Epic: e}}}
+
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "### Legacy: Old container") {
+		t.Errorf("expected the heading to capitalise the bean's own unknown type, got %q", got)
+	}
+}
+
+// TestRoadmapMarkdownHeadingForEmptyType covers an empty type string
+// reaching the heading renderer directly (defensive: RankOf("") resolves to
+// LeafRank via cfg.GetType, so buildRoadmap itself never classifies an
+// empty-typed bean onto a container rank -- but a hand-built roadmapData, or
+// a future caller, could still hand the renderer one). "Untyped" must
+// appear rather than an empty "### : Title" heading.
+func TestRoadmapMarkdownHeadingForEmptyType(t *testing.T) {
+	f := &bean.Bean{ID: "beans-notype1", Type: "", Title: "Mystery container", Status: "todo"}
+	data := &roadmapData{Root: &rootGroup{Feature: &featureGroup{Feature: f}}}
+
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "#### Untyped: Mystery container") {
+		t.Errorf("expected the empty-type fallback heading, got %q", got)
+	}
+	if strings.Contains(got, "#### : ") {
+		t.Errorf("must not render an empty type label, got %q", got)
+	}
+}
+
+// TestRoadmapMarkdownUnscheduledHeadingSaysUnscheduled pins the wording
+// chosen for the orphan section (formerly the classic-profile-specific
+// "No Milestone"): "Unscheduled" says something true whether the project's
+// rank-1 type is named "milestone", is one of several rank-1 types, or does
+// not exist at all (the "todo" profile). A reversion to the literal
+// "No Milestone" string would fail this on any of those projects.
+func TestRoadmapMarkdownUnscheduledHeadingSaysUnscheduled(t *testing.T) {
+	m := &bean.Bean{ID: "m1", Type: "milestone", Status: "todo", Title: "v1"}
+	orphanTask := &bean.Bean{ID: "t1", Type: "task", Status: "todo", Title: "Loose end"}
+	data := &roadmapData{
+		Milestones:  []milestoneGroup{{Milestone: m, Other: []*bean.Bean{}}},
+		Unscheduled: &unscheduledGroup{Other: []*bean.Bean{orphanTask}},
+	}
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	if !strings.Contains(got, "## Unscheduled") {
+		t.Errorf("expected the orphan section heading to say Unscheduled, got %q", got)
+	}
+	if strings.Contains(got, "No Milestone") {
+		t.Errorf("orphan section heading must not hardcode the classic-profile word, got %q", got)
 	}
 }

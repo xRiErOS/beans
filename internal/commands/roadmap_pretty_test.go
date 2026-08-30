@@ -6,6 +6,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/hmans/beans/pkg/bean"
+	"github.com/hmans/beans/pkg/config"
 )
 
 func TestRoadmapShortID(t *testing.T) {
@@ -210,7 +211,7 @@ func TestRoadmapLineOverlongPrefix(t *testing.T) {
 // Integration -> Epic Checkout Flow -> (task, bug, Feature Stripe card
 // entry -> task), plus Feature Apple Pay express button (direct under the
 // milestone) -> task, plus a loose task directly under the milestone, and a
-// "No Milestone" section with an orphan Epic Observability -> task and an
+// "Unscheduled" section with an orphan Epic Observability -> task and an
 // orphan task. IDs/titles/types/status/priority/parent per beans-g5hz
 // "Notes for T3".
 func prettyFixture() *roadmapData {
@@ -300,7 +301,7 @@ func TestRenderRoadmapPrettyAt80(t *testing.T) {
     - task       Wire up sheet                                 todo         lnff
   - task         Update pricing copy                      low  todo         635g
 
-No Milestone
+Unscheduled
 
   ▸ Epic         Observability                                 todo         h5km
     - task       Add trace IDs                                 todo         xm6j
@@ -328,7 +329,7 @@ func TestRenderRoadmapPrettyLineWidths(t *testing.T) {
 // TestRenderRoadmapPrettyTitleColumn pins SC-404: every non-trivial rendered
 // line (bean first-lines and their wrapped continuations) carries a
 // non-space rune at column 17 -- the title never drifts off the fixed
-// raster. Lines shorter than 18 runes (header, blank lines, "No Milestone")
+// raster. Lines shorter than 18 runes (header, blank lines, "Unscheduled")
 // are skipped, since indexing rune 17 would be meaningless/out of range.
 func TestRenderRoadmapPrettyTitleColumn(t *testing.T) {
 	got := renderRoadmapPretty(prettyFixture(), 80, false)
@@ -414,13 +415,13 @@ func TestRenderRoadmapPrettyUnscheduledFeature(t *testing.T) {
 	}
 	got := renderRoadmapPretty(data, 80, false)
 	lines := strings.Split(got, "\n")
-	// [0] Roadmap, [1] separator, [2] blank, [3] "No Milestone", [4] blank,
+	// [0] Roadmap, [1] separator, [2] blank, [3] "Unscheduled", [4] blank,
 	// [5] the feature row, [6] its leaf.
 	if len(lines) < 7 {
 		t.Fatalf("expected at least 7 lines, got %d:\n%s", len(lines), got)
 	}
-	if lines[3] != "No Milestone" {
-		t.Fatalf("line 3 = %q, want %q", lines[3], "No Milestone")
+	if lines[3] != "Unscheduled" {
+		t.Fatalf("line 3 = %q, want %q", lines[3], "Unscheduled")
 	}
 	featureLine, leafLine := lines[5], lines[6]
 
@@ -507,7 +508,7 @@ func TestRenderRoadmapPrettyRootEpic(t *testing.T) {
 	if !strings.Contains(leafLine, "Login") {
 		t.Errorf("leaf line missing title: %q", leafLine)
 	}
-	if strings.Contains(got, "No Milestone") {
+	if strings.Contains(got, "Unscheduled") {
 		t.Errorf("root-scoped output must not contain the Unscheduled heading: %q", got)
 	}
 	if strings.Contains(got, "■ Milestone") {
@@ -545,5 +546,68 @@ func TestRenderRoadmapPrettyRootFeature(t *testing.T) {
 	}
 	if !strings.Contains(leafLine, "OIDC") {
 		t.Errorf("leaf line missing title: %q", leafLine)
+	}
+}
+
+// --- Heading labels follow the bean's own type (beans-0mvv fix wave 2) -----
+
+// TestRenderRoadmapPrettyHeadingsUseTheBeansOwnType is the TTY-side sibling
+// of TestRoadmapMarkdownHeadingsUseTheBeansOwnType: a rank-1 "release" and a
+// rank-2 "chore" must render as "■ Release" / "▸ Chore", not the
+// hardcoded classic-profile glyph lines. A reversion to the hardcoded
+// "■ Milestone"/"▸ Epic" prefixes changes only the literal glyph-line text,
+// so it would leave every other pretty-renderer test in this file green
+// while failing the assertions below.
+func TestRenderRoadmapPrettyHeadingsUseTheBeansOwnType(t *testing.T) {
+	release := &bean.Bean{ID: "beans-rel1", Title: "v2.0", Type: "release", Status: "todo"}
+	chore := &bean.Bean{ID: "beans-cho1", Title: "Tidy the store", Type: "chore", Status: "todo"}
+
+	data := &roadmapData{
+		Milestones: []milestoneGroup{
+			{Milestone: release, Epics: []epicGroup{{Epic: chore}}},
+		},
+	}
+	got := renderRoadmapPretty(data, 80, false)
+
+	if !strings.Contains(got, "■ Release") {
+		t.Errorf("expected the rank-1 glyph line to name the bean's own type (Release), got %q", got)
+	}
+	if !strings.Contains(got, "▸ Chore") {
+		t.Errorf("expected the rank-2 glyph line to name the bean's own type (Chore), got %q", got)
+	}
+	if strings.Contains(got, "Milestone") || strings.Contains(got, "Epic") {
+		t.Errorf("must not fall back to the classic-profile words when they are not configured, got %q", got)
+	}
+}
+
+// TestRenderRoadmapPrettyHeadingForUnknownType covers a bean whose type the
+// config no longer knows: the glyph line must still name the bean's own
+// type, capitalised, rather than falling back to a hardcoded word or an
+// empty label.
+func TestRenderRoadmapPrettyHeadingForUnknownType(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{}}
+	defer func() { cfg = prev }()
+
+	e := &bean.Bean{ID: "beans-legacy2", Title: "Old container", Type: "legacy", Status: "todo"}
+	data := &roadmapData{Root: &rootGroup{Epic: &epicGroup{Epic: e}}}
+
+	got := renderRoadmapPretty(data, 80, false)
+	if !strings.Contains(got, "▸ Legacy") {
+		t.Errorf("expected the glyph line to capitalise the bean's own unknown type, got %q", got)
+	}
+}
+
+// TestRenderRoadmapPrettyHeadingForEmptyType covers an empty type string
+// reaching the renderer directly (defensive, see the markdown-side sibling
+// test for why buildRoadmap itself cannot produce this case): "Untyped"
+// must appear rather than a bare glyph with no label.
+func TestRenderRoadmapPrettyHeadingForEmptyType(t *testing.T) {
+	f := &bean.Bean{ID: "beans-notype2", Title: "Mystery container", Type: "", Status: "todo"}
+	data := &roadmapData{Root: &rootGroup{Feature: &featureGroup{Feature: f}}}
+
+	got := renderRoadmapPretty(data, 80, false)
+	if !strings.Contains(got, "▪ Untyped") {
+		t.Errorf("expected the empty-type fallback glyph line, got %q", got)
 	}
 }

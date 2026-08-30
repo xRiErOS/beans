@@ -199,7 +199,7 @@ func renderRoadmapPretty(data *roadmapData, width int, showTags bool) string {
 
 	for _, mg := range data.Milestones {
 		sb.WriteString("\n")
-		sb.WriteString(roadmapLine("■ Milestone", mg.Milestone, false, width, showTags))
+		sb.WriteString(roadmapLine("■ "+typeHeadingLabel(mg.Milestone.Type), mg.Milestone, false, width, showTags))
 		sb.WriteString("\n")
 		for _, eg := range mg.Epics {
 			renderRoadmapEpicGroup(&sb, eg, 2, width, showTags)
@@ -213,15 +213,19 @@ func renderRoadmapPretty(data *roadmapData, width int, showTags bool) string {
 		}
 	}
 
-	// D18: "No Milestone" renders whenever data.Unscheduled is non-nil,
+	// D18: "Unscheduled" renders whenever data.Unscheduled is non-nil,
 	// independent of whether any milestones were rendered above (EARS-6) --
 	// unlike the Markdown template, which only headers it when milestones
 	// exist. buildRoadmap already excludes milestone-typed beans from
 	// Unscheduled.Other (roadmap.go's orphanItems loop), so this walker
-	// does not need to filter by type itself.
+	// does not need to filter by type itself. The wording is rank-agnostic
+	// on purpose (beans-0mvv fix wave 2): it says something true whether the
+	// project's rank-1 type is named "milestone", is one of several rank-1
+	// types, or does not exist at all (the "todo" profile) -- unlike the
+	// literal word "Milestone" it replaced.
 	if data.Unscheduled != nil {
 		sb.WriteString("\n")
-		sb.WriteString("No Milestone\n")
+		sb.WriteString("Unscheduled\n")
 		sb.WriteString("\n")
 		for _, eg := range data.Unscheduled.Epics {
 			renderRoadmapEpicGroup(&sb, eg, 2, width, showTags)
@@ -242,7 +246,7 @@ func renderRoadmapPretty(data *roadmapData, width int, showTags bool) string {
 // priority, D10), its direct leaf items, then its nested Feature branches --
 // items before features, per roadmap.tmpl.
 func renderRoadmapEpicGroup(sb *strings.Builder, eg epicGroup, indent int, width int, showTags bool) {
-	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▸ Epic", eg.Epic, false, width, showTags))
+	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▸ "+typeHeadingLabel(eg.Epic.Type), eg.Epic, false, width, showTags))
 	sb.WriteString("\n")
 	for _, it := range eg.Items {
 		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width, showTags))
@@ -256,7 +260,7 @@ func renderRoadmapEpicGroup(sb *strings.Builder, eg epicGroup, indent int, width
 // renderRoadmapFeatureGroup renders a Feature branch: the feature row
 // itself (with priority, D15) followed by its flattened leaf items.
 func renderRoadmapFeatureGroup(sb *strings.Builder, fg featureGroup, indent int, width int, showTags bool) {
-	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▪ Feature", fg.Feature, true, width, showTags))
+	sb.WriteString(roadmapLine(strings.Repeat(" ", indent)+"▪ "+typeHeadingLabel(fg.Feature.Type), fg.Feature, true, width, showTags))
 	sb.WriteString("\n")
 	for _, it := range fg.Items {
 		sb.WriteString(roadmapLine(roadmapLeafPrefix(indent+2, it), it, true, width, showTags))
