@@ -564,16 +564,28 @@ func seedListTree(t *testing.T) {
 // or just its Changed bit — set by one test leaks into the next.
 //
 // Both reset values are read back from each flag's own registered DefValue
-// rather than hardcoded: an earlier, hardcoded version of this helper (just
-// listView) masked a mutated default (RegisterListCmd's "table" literal
-// changed to "tree") because it forced listView back to "table" regardless
-// of what RegisterListCmd actually registered — the mutation proof for
-// TestListDefaultsToTheTableForm caught this. listMaxWidth carried the same
-// defect one line down (a hardcoded 0) until fix-round-1 review pointed out
-// the pattern, not just the instance, needed fixing. Deriving both resets
-// from DefValue means a test exercises the registered default instead of
-// one this helper invented independently. Requires RegisterListCmd(root) to
-// have already run so Lookup succeeds.
+// rather than hardcoded, so this helper never invents a value independently
+// of what RegisterListCmd actually declares.
+//
+// listView's case is load-bearing: an earlier, hardcoded version of this
+// helper masked a mutated default (RegisterListCmd's "table" literal changed
+// to "tree") because it forced listView back to "table" regardless of the
+// registration — the mutation proof for TestListDefaultsToTheTableForm
+// caught this, since RunE reads listView unconditionally via ui.ParseForm.
+//
+// listMaxWidth's case is hygiene rather than a proven defect: resolveWidth
+// (width.go) only ever reads its flagValue argument when flagChanged is
+// true, so a stale or wrong *value* in listMaxWidth is inert whenever
+// --max-width was not passed — mutating the registered default from 0 to 42
+// and rerunning TestListDefaultMaxWidthFallsBackToConfig confirmed this
+// (stayed green, because flagChanged gates flagValue out of resolveWidth
+// entirely). Deriving from DefValue here still matches the source-of-truth
+// principle and costs nothing; it just is not provably load-bearing the way
+// listView's is, and I am not overstating it as such. What genuinely mattered
+// for --max-width test isolation is resetting widthFlag.Changed to false,
+// which this helper also does.
+//
+// Requires RegisterListCmd(root) to have already run so Lookup succeeds.
 func resetListViewFlags(t *testing.T, root *cobra.Command) {
 	t.Helper()
 	oldView, oldWidth := listView, listMaxWidth
