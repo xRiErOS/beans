@@ -190,10 +190,25 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 
 	children := childrenIndex(allBeans)
 
+	// A type that opted out of the aggregate views takes its whole subtree
+	// with it: the roadmap shows planned work, and a parking lot is not
+	// that. hidden also catches a container nested under another hidden
+	// container -- markSubtree walks every descendant regardless of type,
+	// so a visible-typed epic under a hidden milestone is hidden too.
+	hidden := make(map[string]bool)
+	for _, b := range allBeans {
+		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
+			markSubtree(b.ID, children, hidden)
+		}
+	}
+
 	// Find milestones, applying status filters
 	var milestones []*bean.Bean
 	for _, b := range allBeans {
 		if !isRank(b, 1) {
+			continue
+		}
+		if hidden[b.ID] {
 			continue
 		}
 		// Apply status filters to milestones
@@ -241,6 +256,9 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 		if !isRank(b, 2) {
 			continue
 		}
+		if hidden[b.ID] {
+			continue
+		}
 		if underMilestone[b.ID] {
 			continue
 		}
@@ -258,6 +276,9 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	var unscheduledFeatures []featureGroup
 	for _, b := range allBeans {
 		if !isRank(b, 3) {
+			continue
+		}
+		if hidden[b.ID] {
 			continue
 		}
 		if underMilestone[b.ID] {
@@ -284,6 +305,12 @@ func buildRoadmap(allBeans []*bean.Bean, includeDone bool, statusFilter, noStatu
 	// Find orphan items (not milestone, not epic, no parent or parent is not milestone/epic)
 	var orphanItems []*bean.Bean
 	for _, b := range allBeans {
+		// A hidden container's whole subtree stays out of the roadmap --
+		// including here, where its orphaned children would otherwise
+		// resurface as unscheduled items.
+		if hidden[b.ID] {
+			continue
+		}
 		// Skip milestones and epics -- always containers, never flat leaves.
 		if isRank(b, 1) {
 			continue
@@ -363,6 +390,17 @@ func childrenIndex(allBeans []*bean.Bean) map[string][]*bean.Bean {
 		}
 	}
 	return children
+}
+
+// markSubtree records id and every descendant of it in seen.
+func markSubtree(id string, children map[string][]*bean.Bean, seen map[string]bool) {
+	if seen[id] {
+		return
+	}
+	seen[id] = true
+	for _, child := range children[id] {
+		markSubtree(child.ID, children, seen)
+	}
 }
 
 // buildScopedRoadmap builds a roadmapData scoped to a single milestone,

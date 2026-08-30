@@ -1146,3 +1146,87 @@ func TestRoadmapRejectsALeafAsScopeRoot(t *testing.T) {
 		t.Error("a leaf type must not be accepted as a roadmap root")
 	}
 }
+
+func TestHiddenContainerAndItsSubtreeStayOutOfTheRoadmap(t *testing.T) {
+	rank := 1
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Planned", Parent: "m1"},
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"},
+		{ID: "t2", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	for _, g := range data.Milestones {
+		if g.Milestone.ID == "b1" {
+			t.Fatal("a hidden container must not render as its own section")
+		}
+	}
+	if data.Unscheduled != nil {
+		for _, b := range data.Unscheduled.Other {
+			if b.ID == "t2" {
+				t.Fatal("a leaf under a hidden container must not resurface as unscheduled")
+			}
+		}
+	}
+	if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
+		t.Errorf("the visible milestone must still render")
+	}
+}
+
+// TestHiddenContainerHidesEveryRankBeneathIt covers the full container depth
+// the rank scheme allows: a hidden rank-1 bucket with a rank-2 child that
+// itself has a rank-3 child with a leaf, plus a rank-3 child parented
+// directly under the hidden rank-1 (skipping rank 2). A visible-typed
+// container nested under a hidden one must vanish too -- markSubtree walks
+// every descendant regardless of its own type -- and none of it may resurface
+// in any of the unscheduled buckets.
+func TestHiddenContainerHidesEveryRankBeneathIt(t *testing.T) {
+	rank := 1
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"},
+		{ID: "e1", Type: "epic", Status: "todo", Title: "Nested epic", Parent: "b1"},
+		{ID: "f1", Type: "feature", Status: "todo", Title: "Nested feature", Parent: "e1"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Deep leaf", Parent: "f1"},
+		{ID: "f2", Type: "feature", Status: "todo", Title: "Direct feature", Parent: "b1"},
+		{ID: "t2", Type: "task", Status: "todo", Title: "Leaf under direct feature", Parent: "f2"},
+	}
+
+	data := buildRoadmap(beans, false, nil, nil)
+
+	if data.Unscheduled != nil {
+		for _, eg := range data.Unscheduled.Epics {
+			if eg.Epic.ID == "e1" {
+				t.Fatal("a rank-2 container nested under a hidden rank-1 container must not resurface as unscheduled")
+			}
+		}
+		for _, fg := range data.Unscheduled.Features {
+			if fg.Feature.ID == "f1" || fg.Feature.ID == "f2" {
+				t.Fatalf("a rank-3 container under a hidden rank-1 container must not resurface as unscheduled, got %q", fg.Feature.ID)
+			}
+		}
+		for _, b := range data.Unscheduled.Other {
+			if b.ID == "t1" || b.ID == "t2" {
+				t.Fatalf("a leaf at any depth under a hidden rank-1 container must not resurface as unscheduled, got %q", b.ID)
+			}
+		}
+	}
+	if len(data.Milestones) != 0 {
+		t.Errorf("got %d milestone groups, want 0 — the hidden bucket is the only rank-1 bean", len(data.Milestones))
+	}
+}
