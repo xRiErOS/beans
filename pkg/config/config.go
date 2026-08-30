@@ -88,7 +88,9 @@ type TypeConfig struct {
 	Emphasis bool `yaml:"emphasis,omitempty"`
 	// Roadmap decides whether this type gets its own section in `beans roadmap`
 	// and an entry in `beans milestones`. Nil means visible; only an explicit
-	// roadmap: false hides the type, and it hides its whole subtree with it.
+	// roadmap: false hides the type. On a container rank (1-3) this also
+	// hides its whole subtree; on the leaf rank it is inert, since a leaf is
+	// never itself a container to hide beneath.
 	Roadmap *bool `yaml:"roadmap,omitempty"`
 	// Short is the single-character code the narrow list view renders. Empty
 	// means the first letter of the name, upper-cased.
@@ -131,7 +133,9 @@ type TypeOverride struct {
 	Emphasis    *bool  `yaml:"emphasis,omitempty"`
 	// Roadmap decides whether this type gets its own section in `beans roadmap`
 	// and an entry in `beans milestones`. Nil means visible; only an explicit
-	// roadmap: false hides the type, and it hides its whole subtree with it.
+	// roadmap: false hides the type. On a container rank (1-3) this also
+	// hides its whole subtree; on the leaf rank it is inert, since a leaf is
+	// never itself a container to hide beneath.
 	Roadmap *bool `yaml:"roadmap,omitempty"`
 	// Short is the single-character code the narrow list view renders. Empty
 	// means the first letter of the name, upper-cased.
