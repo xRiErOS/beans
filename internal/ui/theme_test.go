@@ -77,9 +77,23 @@ func TestIsValidThemeNamesEveryBundledFlavour(t *testing.T) {
 	if !IsValidTheme("") {
 		t.Error(`IsValidTheme("") = false, want true -- unset must stay valid`)
 	}
-	for _, name := range []string{"moccha", "Mocha", "dracula", "  mocha"} {
+	for _, name := range []string{"moccha", "dracula", "  mocha"} {
 		if IsValidTheme(name) {
 			t.Errorf("IsValidTheme(%q) = true, want false", name)
 		}
+	}
+}
+
+// TestThemeLookupIsCaseInsensitive guards the same convention ResolveColor
+// already applies to tone names: "Mocha" and "mocha" must resolve to the
+// same flavour, or the two lookups silently disagree on case sensitivity
+// (beans-it8t).
+func TestThemeLookupIsCaseInsensitive(t *testing.T) {
+	if !IsValidTheme("Mocha") {
+		t.Error(`IsValidTheme("Mocha") = false, want true`)
+	}
+	th, ok := ThemeByName("MOCHA")
+	if !ok || th.Name != "mocha" {
+		t.Errorf(`ThemeByName("MOCHA") = %+v, %v, want the mocha theme`, th, ok)
 	}
 }
