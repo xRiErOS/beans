@@ -85,6 +85,19 @@ func TestRenderMarkdownWrapsProse(t *testing.T) {
 	}
 }
 
+// TestRenderMarkdownHonoursANarrowWidth guards against silently overriding
+// the requested width with an unrequested minimum: RenderMarkdown(body, 12)
+// used to always emit 20-cell-wide lines regardless of what the caller (and
+// the actual terminal) asked for (beans-g27k).
+func TestRenderMarkdownHonoursANarrowWidth(t *testing.T) {
+	long := strings.Repeat("word ", 20)
+	for _, line := range strings.Split(RenderMarkdown(long, 12), "\n") {
+		if got := DisplayWidth(stripANSI(line)); got > 12 {
+			t.Errorf("line is %d cells, want at most 12: %q", got, stripANSI(line))
+		}
+	}
+}
+
 func TestRenderMarkdownWrapsBeforeColouring(t *testing.T) {
 	withTrueColor(t)
 	// WrapText enforces its width bound on whatever bytes it is given, so a
