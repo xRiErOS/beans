@@ -235,3 +235,86 @@ func TestShowNonTTYPreservesLineStructure(t *testing.T) {
 		t.Errorf("expected the %d-character paragraph as exactly 1 line, found %d", len(longLine), found)
 	}
 }
+
+// runShowInTestStore returns the styled (TTY) show output for one bean
+// carrying the given body. It calls showOutput directly with isTTY forced
+// true, the same way the other styled-output tests in this file do --
+// routing through showCmd.RunE would capture stdout via an os.Pipe, which is
+// itself not a terminal and would silently select the non-TTY branch instead.
+func runShowInTestStore(t *testing.T, body string) string {
+	t.Helper()
+	setupShowTest(t)
+	b := showTestBean("beans-detail1", "A detail bean", body)
+	out, err := showOutput(b, true)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	return out
+}
+
+// TestShowEmitsNoGlamourPadding guards against glamour's signature defect:
+// trailing spaces -- often colour-painted -- running to the right margin of
+// every line. withTrueColor forces a real colour profile so stripANSITest
+// has ANSI codes to strip; without it, `go test` has no controlling tty, no
+// colour is ever emitted, and colour-painted padding would disappear before
+// the trailing-space check could see it.
+func TestShowEmitsNoGlamourPadding(t *testing.T) {
+	withTrueColor(t)
+	out := runShowInTestStore(t, "a bean with a body")
+	for _, line := range strings.Split(out, "\n") {
+		plain := stripANSITest(line)
+		if plain != strings.TrimRight(plain, " ") {
+			t.Errorf("line carries trailing padding: %q", plain)
+		}
+	}
+}
+
+// TestShowHeaderCarriesTypeIDAndStatus pins the minimum content of the new
+// attribute header: the bean's type and status must both still be visible
+// once colour is stripped.
+func TestShowHeaderCarriesTypeIDAndStatus(t *testing.T) {
+	withTrueColor(t)
+	out := stripANSITest(runShowInTestStore(t, "a bean with a body"))
+	for _, want := range []string{"task", "todo"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detail header is missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// TestShowHeaderOrdersTypeIDTitleThenStatus pins the vertical reading order
+// the task requires: type, id, then title, then status (and priority, when
+// present) -- the same order the beans table reads across, read down
+// instead. It asserts on index positions rather than a fixed line layout, so
+// it survives spacing changes but still catches the order flipping.
+func TestShowHeaderOrdersTypeIDTitleThenStatus(t *testing.T) {
+	withTrueColor(t)
+	out := stripANSITest(runShowInTestStore(t, "a bean with a body"))
+
+	typeIdx := strings.Index(out, "task")
+	idIdx := strings.Index(out, "beans-detail1")
+	titleIdx := strings.Index(out, "A detail bean")
+	statusIdx := strings.Index(out, "todo")
+
+	if typeIdx < 0 || idIdx < 0 || titleIdx < 0 || statusIdx < 0 {
+		t.Fatalf("expected all of type/id/title/status present, got indices %d/%d/%d/%d in:\n%s",
+			typeIdx, idIdx, titleIdx, statusIdx, out)
+	}
+	if !(typeIdx < idIdx && idIdx < titleIdx && titleIdx < statusIdx) {
+		t.Errorf("header order wrong: type=%d id=%d title=%d status=%d, want type < id < title < status\n%s",
+			typeIdx, idIdx, titleIdx, statusIdx, out)
+	}
+}
+
+// TestShowUsesNoBackgroundBadges guards against glamour's other signature
+// defect: background-painted badges that don't survive next to a flat
+// raster. withTrueColor forces a real colour profile so this failure mode --
+// a Background() call slipping back into the attribute header -- would
+// actually emit the escape sequence for the assertion to catch.
+func TestShowUsesNoBackgroundBadges(t *testing.T) {
+	withTrueColor(t)
+	out := runShowInTestStore(t, "a bean with a body")
+	if strings.Contains(out, "\x1b[48;") {
+		t.Error("detail view still paints background badges")
+	}
+}
