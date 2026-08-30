@@ -533,6 +533,7 @@ func seedListTree(t *testing.T) {
 		Title:  "Parent über",
 		Status: "todo",
 		Type:   "epic",
+		Tags:   []string{"seeded"},
 	}
 	if err := core.Create(parent); err != nil {
 		t.Fatalf("core.Create(parent) error = %v", err)
@@ -588,13 +589,14 @@ func seedListTree(t *testing.T) {
 // Requires RegisterListCmd(root) to have already run so Lookup succeeds.
 func resetListViewFlags(t *testing.T, root *cobra.Command) {
 	t.Helper()
-	oldView, oldWidth := listView, listMaxWidth
-	t.Cleanup(func() { listView, listMaxWidth = oldView, oldWidth })
+	oldView, oldWidth, oldTags := listView, listMaxWidth, listTags
+	t.Cleanup(func() { listView, listMaxWidth, listTags = oldView, oldWidth, oldTags })
 
 	viewFlag := listCmd.Flags().Lookup("view")
 	widthFlag := listCmd.Flags().Lookup("max-width")
-	if viewFlag == nil || widthFlag == nil {
-		t.Fatalf("--view/--max-width not registered; call RegisterListCmd(root) first")
+	tagsFlag := listCmd.Flags().Lookup("tags")
+	if viewFlag == nil || widthFlag == nil || tagsFlag == nil {
+		t.Fatalf("--view/--max-width/--tags not registered; call RegisterListCmd(root) first")
 	}
 	defWidth, err := strconv.Atoi(widthFlag.DefValue)
 	if err != nil {
@@ -602,8 +604,14 @@ func resetListViewFlags(t *testing.T, root *cobra.Command) {
 	}
 	listView = viewFlag.DefValue
 	listMaxWidth = defWidth
+	// Read the default from the registration rather than writing `false`
+	// here: a reset that does not match what the flag actually registers
+	// silently overrides the real default, which has already bitten this
+	// branch three times.
+	listTags = tagsFlag.DefValue == "true"
 	viewFlag.Changed = false
 	widthFlag.Changed = false
+	tagsFlag.Changed = false
 }
 
 // runListThroughRoot drives listCmd via a real cobra root.Execute() rather
@@ -768,5 +776,24 @@ func TestListDefaultMaxWidthFallsBackToConfig(t *testing.T) {
 	want := config.Default().GetMaxWidth()
 	if w := ui.DisplayWidth(separator); w != want {
 		t.Errorf("separator width = %d, want %d (config default, since --max-width was not given): %q", w, want, separator)
+	}
+}
+
+// TestListShowsTagsOnlyWithTheFlag pins list to the same contract as
+// milestones and roadmap: the tag column is the caller's choice. It used to
+// appear automatically whenever any listed bean happened to carry a tag,
+// which made the same query render two different layouts depending on the
+// data -- the kind of quiet disagreement between commands this whole branch
+// exists to remove (PO decision, beans-jbgs).
+//
+// Mutation: restore the `hasTags` loop in list.go's RunE and pass it to
+// ui.Render instead of listTags; the first half goes red because the seeded
+// parent carries a tag.
+func TestListShowsTagsOnlyWithTheFlag(t *testing.T) {
+	if out := runListInTestStore(t, []string{}); strings.Contains(out, "#seeded") {
+		t.Errorf("list without --tags must not render a tag column:\n%s", out)
+	}
+	if out := runListInTestStore(t, []string{"--tags"}); !strings.Contains(out, "#seeded") {
+		t.Errorf("list --tags must render the tag column:\n%s", out)
 	}
 }

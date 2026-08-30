@@ -39,6 +39,7 @@ var (
 	listWhere       []string
 	listView        string
 	listMaxWidth    int
+	listTags        bool
 )
 
 var listCmd = &cobra.Command{
@@ -181,14 +182,6 @@ Search Syntax (--search/-S):
 				"unknown --view %q: expected table or tree", listView)
 		}
 
-		hasTags := false
-		for _, b := range beans {
-			if len(b.Tags) > 0 {
-				hasTags = true
-				break
-			}
-		}
-
 		width := resolveWidth(listMaxWidth, cmd.Flags().Changed("max-width"), cfg)
 
 		// The row source differs by form, not just by what Render does with
@@ -207,7 +200,7 @@ Search Syntax (--search/-S):
 		} else {
 			rows = ui.FlatRows(beans)
 		}
-		fmt.Print(ui.Render(rows, form, "Beans", width, hasTags, cfg))
+		fmt.Print(ui.Render(rows, form, "Beans", width, listTags, cfg))
 		return nil
 	},
 }
@@ -441,6 +434,7 @@ func RegisterListCmd(root *cobra.Command) {
 			"Arrangement: table (flat, sortable) or tree (nested)")
 		listCmd.Flags().IntVar(&listMaxWidth, "max-width", 0,
 			"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
+		listCmd.Flags().BoolVar(&listTags, "tags", false, "Render each bean's tags")
 	}
 	root.AddCommand(listCmd)
 }

@@ -244,7 +244,7 @@ Terminal output is arranged in one of two forms, and which one you get is the ca
 | `--view` | `list`, `milestones`, `roadmap` | `table` (flat, has a header, sortable) or `tree` (nested, no header) | `table` for `list` and `milestones`, `tree` for `roadmap` |
 | `--max-width` | `list`, `milestones`, `roadmap` | columns; `0` disables the cap | unset -- falls back to `display.max_width`, else 110 |
 | `--format` | `roadmap` only | `tty` or `markdown` | unset -- detected from whether stdout is a terminal |
-| `--tags` | `milestones`, `roadmap` | boolean | off. `list` has no such flag: it shows a tag column whenever any listed bean carries tags |
+| `--tags` | `list`, `milestones`, `roadmap` | boolean | off |
 | `--depth` | `roadmap` only | levels below the roadmap root; `0` means no limit | `0` |
 
 `table` drops the hierarchy rather than hiding it, because a tree you can re-sort would be lying about what its indentation means. Use `--parent` to narrow the scope, or `--view tree` when you need to see what belongs to what.
