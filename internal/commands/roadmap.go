@@ -265,6 +265,13 @@ func roadmapRows(data *roadmapData) []ui.Row {
 // epics, features, and other leaf items (depth 1), in that order -- matching
 // renderRoadmapPretty's mg.Epics / mg.Features / mg.Other walk.
 func appendRoadmapMilestoneGroup(items *[]ui.FlatItem, mg milestoneGroup) {
+	// Unreachable in production -- every construction site sets Milestone --
+	// but a hand-built roadmapData literal in a test would otherwise panic
+	// inside ui.Render instead of producing an empty render (beans-dbph
+	// review F5).
+	if mg.Milestone == nil {
+		return
+	}
 	*items = append(*items, ui.FlatItem{Bean: mg.Milestone, Depth: 0, IsLast: true})
 
 	total := len(mg.Epics) + len(mg.Features) + len(mg.Other)
@@ -308,6 +315,12 @@ func appendRoadmapUnscheduledGroup(items *[]ui.FlatItem, ug unscheduledGroup) {
 // leaf items and nested feature groups at depth+1 -- items before features,
 // per renderRoadmapEpicGroup / roadmap.tmpl.
 func appendRoadmapEpicGroup(items *[]ui.FlatItem, eg epicGroup, depth int, isLast bool) {
+	// Unreachable in production -- every construction site sets Epic -- but
+	// a hand-built epicGroup literal in a test would otherwise panic inside
+	// ui.Render instead of producing an empty render (beans-dbph review F5).
+	if eg.Epic == nil {
+		return
+	}
 	*items = append(*items, ui.FlatItem{Bean: eg.Epic, Depth: depth, IsLast: isLast})
 
 	childDepth := depth + 1
@@ -326,6 +339,13 @@ func appendRoadmapEpicGroup(items *[]ui.FlatItem, eg epicGroup, depth int, isLas
 // appendRoadmapFeatureGroup appends a feature at depth, followed by its
 // flattened leaf items at depth+1.
 func appendRoadmapFeatureGroup(items *[]ui.FlatItem, fg featureGroup, depth int, isLast bool) {
+	// Unreachable in production -- every construction site sets Feature --
+	// but a hand-built featureGroup literal in a test would otherwise panic
+	// inside ui.Render instead of producing an empty render (beans-dbph
+	// review F5).
+	if fg.Feature == nil {
+		return
+	}
 	*items = append(*items, ui.FlatItem{Bean: fg.Feature, Depth: depth, IsLast: isLast})
 
 	childDepth := depth + 1

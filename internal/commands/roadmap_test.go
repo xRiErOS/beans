@@ -721,6 +721,56 @@ func roadmapOutputFixture() *roadmapData {
 	}
 }
 
+// TestRoadmapRowsNestItemsUnderTheirEpic asserts roadmapRows' Depth mapping
+// directly, on a four-level fixture (milestone -> epic -> feature -> task).
+// TestRoadmapCmdTreeViewRendersConnectors only checks that a "└─" connector
+// appears somewhere in rendered output, which stays green even if nesting
+// past the first level collapses -- e.g. the mutation
+// `childDepth := depth + 1` -> `childDepth := depth` in
+// appendRoadmapEpicGroup/appendRoadmapFeatureGroup flattens feature and task
+// onto depth 1/2 instead of 2/3, and a connector is still drawn. Asserting
+// Depth on roadmapRows' own output is the only thing that catches that.
+func TestRoadmapRowsNestItemsUnderTheirEpic(t *testing.T) {
+	now := time.Now()
+	m := &bean.Bean{ID: "beans-m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now, Path: "m1--v10.md"}
+	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "Auth", Status: "todo", Path: "e1--auth.md"}
+	f := &bean.Bean{ID: "beans-f1", Type: "feature", Title: "Login flow", Status: "todo", Path: "f1--login-flow.md"}
+	task := &bean.Bean{ID: "beans-t1", Type: "task", Title: "Login", Status: "todo", Priority: "high", Path: "t1--login.md"}
+	data := &roadmapData{
+		Milestones: []milestoneGroup{
+			{
+				Milestone: m,
+				Epics: []epicGroup{
+					{Epic: e, Features: []featureGroup{{Feature: f, Items: []*bean.Bean{task}}}},
+				},
+			},
+		},
+	}
+
+	rows := roadmapRows(data)
+
+	want := []struct {
+		id    string
+		depth int
+	}{
+		{"beans-m1", 0},
+		{"beans-e1", 1},
+		{"beans-f1", 2},
+		{"beans-t1", 3},
+	}
+	if len(rows) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(rows), len(want), rows)
+	}
+	for i, w := range want {
+		if rows[i].Bean == nil || rows[i].Bean.ID != w.id {
+			t.Errorf("row %d: bean = %v, want id %s", i, rows[i].Bean, w.id)
+		}
+		if rows[i].Depth != w.depth {
+			t.Errorf("row %d (%s): Depth = %d, want %d", i, w.id, rows[i].Depth, w.depth)
+		}
+	}
+}
+
 // SC-501: the TTY flag alone must decide which renderer roadmapOutput picks
 // -- pipe gets the markdown artifact (badges + links), TTY gets the plain
 // table (no badges, no markdown link syntax, glyph tree).
