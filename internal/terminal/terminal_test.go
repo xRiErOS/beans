@@ -7,6 +7,54 @@ import (
 	"time"
 )
 
+// testInactivityTimeout is the maximum gap allowed between output chunks
+// while waiting for a marker. It is reset on every chunk received, so slow
+// PTY startup (fork/exec/profile sourcing) does not race a fixed deadline.
+const testInactivityTimeout = 2 * time.Second
+
+// testOverallBudget bounds the total wait regardless of activity, so a
+// session that keeps producing unrelated output cannot hang a test forever.
+const testOverallBudget = 20 * time.Second
+
+// waitForMarker collects chunks from output until they contain marker,
+// using an inactivity timeout (reset on every chunk) plus an overall budget
+// instead of one fixed absolute deadline. If done is non-nil and fires
+// first, the marker is checked against whatever was collected before
+// failing. Fails the test via t.Fatalf on timeout or premature session end.
+func waitForMarker(t *testing.T, output <-chan []byte, done <-chan struct{}, marker string) []byte {
+	t.Helper()
+
+	overall := time.NewTimer(testOverallBudget)
+	defer overall.Stop()
+
+	inactivity := time.NewTimer(testInactivityTimeout)
+	defer inactivity.Stop()
+
+	var collected []byte
+	for {
+		select {
+		case data := <-output:
+			collected = append(collected, data...)
+			if containsSubstring(collected, marker) {
+				return collected
+			}
+			if !inactivity.Stop() {
+				<-inactivity.C
+			}
+			inactivity.Reset(testInactivityTimeout)
+		case <-done:
+			if containsSubstring(collected, marker) {
+				return collected
+			}
+			t.Fatalf("session ended without expected output; got: %q", string(collected))
+		case <-inactivity.C:
+			t.Fatalf("timed out waiting for output (inactivity); collected: %q", string(collected))
+		case <-overall.C:
+			t.Fatalf("timed out waiting for output (overall budget); collected: %q", string(collected))
+		}
+	}
+}
+
 func TestRingBufferBasic(t *testing.T) {
 	rb := NewRingBuffer(8)
 
@@ -135,7 +183,7 @@ func TestSessionWriteAndAttach(t *testing.T) {
 		if len(data) == 0 {
 			t.Error("received empty data")
 		}
-	case <-time.After(5 * time.Second):
+	case <-time.After(testOverallBudget):
 		t.Fatal("timed out waiting for output")
 	}
 }
@@ -156,7 +204,7 @@ func TestSessionScrollback(t *testing.T) {
 	// Wait for some output
 	select {
 	case <-output:
-	case <-time.After(5 * time.Second):
+	case <-time.After(testOverallBudget):
 		t.Fatal("timed out waiting for output")
 	}
 
@@ -208,7 +256,7 @@ func TestGetOrCreateReplacesDeadSession(t *testing.T) {
 	// Wait for done channel to close
 	select {
 	case <-sess1.Done():
-	case <-time.After(2 * time.Second):
+	case <-time.After(testOverallBudget):
 		t.Fatal("timed out waiting for session to die")
 	}
 
@@ -242,7 +290,7 @@ func TestSessionAlive(t *testing.T) {
 	// Wait for done
 	select {
 	case <-sess.Done():
-	case <-time.After(2 * time.Second):
+	case <-time.After(testOverallBudget):
 		t.Fatal("timed out waiting for done")
 	}
 
@@ -291,20 +339,7 @@ func TestEnvFuncInjection(t *testing.T) {
 		t.Fatalf("Write failed: %v", err)
 	}
 
-	// Collect output for a short time looking for the PORT= line
-	deadline := time.After(5 * time.Second)
-	var collected []byte
-	for {
-		select {
-		case data := <-output:
-			collected = append(collected, data...)
-			if containsSubstring(collected, "PORT=44000") {
-				return // success
-			}
-		case <-deadline:
-			t.Fatalf("timed out; collected output: %q", string(collected))
-		}
-	}
+	waitForMarker(t, output, nil, "PORT=44000")
 }
 
 func containsSubstring(data []byte, sub string) bool {
@@ -324,26 +359,7 @@ func TestCreateWithCommand(t *testing.T) {
 	_, output := sess.Attach()
 
 	// Collect output until the command finishes
-	deadline := time.After(5 * time.Second)
-	var collected []byte
-	for {
-		select {
-		case data := <-output:
-			collected = append(collected, data...)
-			if containsSubstring(collected, "cmd-output") {
-				// Command produced expected output
-				return
-			}
-		case <-sess.Done():
-			// Session ended — check what we collected
-			if containsSubstring(collected, "cmd-output") {
-				return
-			}
-			t.Fatalf("session ended without expected output; got: %q", string(collected))
-		case <-deadline:
-			t.Fatalf("timed out; collected output: %q", string(collected))
-		}
-	}
+	waitForMarker(t, output, sess.Done(), "cmd-output")
 }
 
 func TestCreateWithCommandExits(t *testing.T) {
@@ -360,7 +376,7 @@ func TestCreateWithCommandExits(t *testing.T) {
 	select {
 	case <-sess.Done():
 		// Success — command exited and session closed
-	case <-time.After(5 * time.Second):
+	case <-time.After(testOverallBudget):
 		t.Fatal("timed out waiting for command to exit")
 	}
 
@@ -406,23 +422,6 @@ func TestCreateWithCommandEnvFunc(t *testing.T) {
 
 	_, output := sess.Attach()
 
-	deadline := time.After(5 * time.Second)
-	var collected []byte
-	for {
-		select {
-		case data := <-output:
-			collected = append(collected, data...)
-			if containsSubstring(collected, "PORT=12345") {
-				return
-			}
-		case <-sess.Done():
-			if containsSubstring(collected, "PORT=12345") {
-				return
-			}
-			t.Fatalf("session ended without expected output; got: %q", string(collected))
-		case <-deadline:
-			t.Fatalf("timed out; collected output: %q", string(collected))
-		}
-	}
+	waitForMarker(t, output, sess.Done(), "PORT=12345")
 }
 
