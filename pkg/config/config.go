@@ -255,6 +255,13 @@ type Config struct {
 	Types      []TypeOverride     `yaml:"types,omitempty"`
 	Priorities []PriorityOverride `yaml:"priorities,omitempty"`
 
+	// TypesExclusive switches the merge in TypeList() off: when true, Types is
+	// the complete type table on its own, not an override list layered onto
+	// DefaultTypes. beans init --profile sets this so a profile gives a
+	// project exactly its own types; a hand-written config that never sets it
+	// keeps the existing entry-by-entry override behaviour unchanged.
+	TypesExclusive bool `yaml:"types_exclusive,omitempty"`
+
 	// configDir is the directory containing the config file (not serialized)
 	// Used to resolve relative paths
 	configDir string `yaml:"-"`
@@ -803,9 +810,19 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		topMapping.Content = append(topMapping.Content, key, statusesSeq)
 	}
 
+	if c.TypesExclusive {
+		key := strNode("types_exclusive")
+		key.HeadComment = "true: types below is the complete type table, not overrides merged onto the built-in defaults"
+		topMapping.Content = append(topMapping.Content, key, scalar("true", "!!bool"))
+	}
+
 	if len(typesSeq.Content) > 0 {
 		key := strNode("types")
-		key.HeadComment = "Type overrides, merged entry by entry with the built-in defaults"
+		if c.TypesExclusive {
+			key.HeadComment = "The complete type table (types_exclusive: true)"
+		} else {
+			key.HeadComment = "Type overrides, merged entry by entry with the built-in defaults"
+		}
 		topMapping.Content = append(topMapping.Content, key, typesSeq)
 	}
 
@@ -1045,7 +1062,13 @@ func (c *Config) TypeList() []TypeConfig {
 		copy(out, DefaultTypes)
 		return out
 	}
-	return mergeDefaults(DefaultTypes, c.Types,
+	defaults := DefaultTypes
+	if c.TypesExclusive {
+		// An exclusive config is its own complete type table: nothing from
+		// DefaultTypes should be merged in underneath it.
+		defaults = nil
+	}
+	return mergeDefaults(defaults, c.Types,
 		func(t TypeConfig) string { return t.Name },
 		func(o TypeOverride) string { return o.Name },
 		func(t *TypeConfig, o TypeOverride) {

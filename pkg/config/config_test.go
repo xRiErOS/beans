@@ -2476,3 +2476,104 @@ func TestSaveRoundTripsATypeShortOverride(t *testing.T) {
 		t.Errorf("reloaded ShortOf(\"package\") = %q, want \"X\" - the saved short must survive", got)
 	}
 }
+
+// Task 9 fix round 2: TypesExclusive is a new top-level key, not one of the
+// TypeOverride fields, so it needs its own node in toYAMLNode()'s hand-built
+// mapping next to "types" - the same trap that TestSaveRoundTripsATypeShortOverride
+// and its siblings pin for the per-entry override fields.
+func TestSaveRoundTripsTypesExclusive(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.TypesExclusive = true
+	cfg.Types = []TypeOverride{{Name: "task", Rank: intPtr(LeafRank)}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if !reloaded.TypesExclusive {
+		t.Error("reloaded TypesExclusive = false, want true - the saved flag must survive a write-and-read cycle")
+	}
+}
+
+// A plain Save() (no TypesExclusive set) must not introduce the new key at
+// all: every config written before this change, and every beans init without
+// --profile, has TypesExclusive false and must round-trip to the same false.
+func TestSaveOmitsTypesExclusiveWhenFalse(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if strings.Contains(string(raw), "types_exclusive") {
+		t.Errorf("Save() wrote a types_exclusive key for a config that never set it:\n%s", raw)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if reloaded.TypesExclusive {
+		t.Error("reloaded TypesExclusive = true, want false")
+	}
+}
+
+// With TypesExclusive, TypeList() must be exactly the config's own Types -
+// nothing merged in from DefaultTypes. A profile like "todo" carries only
+// "task", so every other built-in name must fall back to the leaf rank as an
+// unknown name would, and no type occupies rank 1.
+func TestTypesExclusiveDropsTheBuiltInDefaults(t *testing.T) {
+	types, ok := ProfileTypes("todo")
+	if !ok {
+		t.Fatal("todo profile missing")
+	}
+	cfg := &Config{TypesExclusive: true, Types: types}
+
+	if got := cfg.RankOf("milestone"); got != LeafRank {
+		t.Errorf("RankOf(\"milestone\") = %d, want %d (unknown name falls back to the leaf rank)", got, LeafRank)
+	}
+	if got := cfg.TypesAtRank(1); len(got) != 0 {
+		t.Errorf("TypesAtRank(1) = %v, want empty - an exclusive todo config carries no rank-1 type", got)
+	}
+	if got := cfg.TypeList(); len(got) != 1 || got[0].Name != "task" {
+		t.Errorf("TypeList() = %+v, want exactly one type named \"task\"", got)
+	}
+}
+
+// The "complex" side of the same behaviour: an exclusive config with eight
+// types must not carry the two rank-1/rank-2 names ("milestone", "epic")
+// that DefaultTypes contributes under merge semantics.
+func TestTypesExclusiveOmitsDefaultsNotNamedByTheProfile(t *testing.T) {
+	types, ok := ProfileTypes("complex")
+	if !ok {
+		t.Fatal("complex profile missing")
+	}
+	cfg := &Config{TypesExclusive: true, Types: types}
+
+	list := cfg.TypeList()
+	if len(list) != 8 {
+		t.Fatalf("TypeList() has %d types, want 8", len(list))
+	}
+	for _, name := range []string{"milestone", "epic"} {
+		for _, ty := range list {
+			if ty.Name == name {
+				t.Errorf("TypeList() carries %q, which the complex profile does not name", name)
+			}
+		}
+	}
+}
