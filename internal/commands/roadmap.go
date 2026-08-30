@@ -12,6 +12,7 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/spf13/cobra"
@@ -768,17 +769,12 @@ func typeBadge(b *bean.Bean) string {
 	if b.Type == "" {
 		return ""
 	}
-	// Map types to colors
-	colors := map[string]string{
-		"bug":       "d73a4a",
-		"feature":   "0e8a16",
-		"task":      "1d76db",
-		"epic":      "5319e7",
-		"milestone": "fbca04",
-	}
-	color := colors[b.Type]
-	if color == "" {
-		color = "gray"
+	// One colour source: the badge shows the same tone the terminal renders,
+	// resolved through the active theme. shields.io wants the hex without the
+	// leading hash.
+	color := "gray"
+	if t := cfg.GetType(b.Type); t != nil && t.Color != "" {
+		color = strings.TrimPrefix(string(ui.ResolveColor(t.Color)), "#")
 	}
 	return fmt.Sprintf("![%s](https://img.shields.io/badge/%s-%s?style=flat-square)", b.Type, b.Type, color)
 }

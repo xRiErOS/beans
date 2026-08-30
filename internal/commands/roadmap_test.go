@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -1416,5 +1417,102 @@ func TestScopedRoadmapRank3RootBypassesItsOwnHiddenType(t *testing.T) {
 	}
 	if !found {
 		t.Error("a scoped hidden rank-3 root must render its own full content")
+	}
+}
+
+func TestTypeBadgeUsesTheConfiguredColour(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "chore", Rank: &rank, Color: "peach"},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "c1", Type: "chore"})
+
+	if strings.Contains(got, "gray") {
+		t.Errorf("badge fell back to gray: %s", got)
+	}
+	if !strings.Contains(got, "chore-") {
+		t.Errorf("badge does not name the type: %s", got)
+	}
+}
+
+func TestTypeBadgeStaysEmptyForATypelessBean(t *testing.T) {
+	if got := typeBadge(&bean.Bean{ID: "x1"}); got != "" {
+		t.Errorf("typeBadge() = %q, want empty", got)
+	}
+}
+
+// badgeURLPattern pins the exact shape shields.io needs: a bare 6-digit hex
+// (no leading '#') or the literal fallback "gray" after the type-dash. A
+// stray '#' would make the URL fail to match and thus fail the test, where
+// the badge itself would just silently not render.
+var badgeURLPattern = regexp.MustCompile(`^!\[([a-z]+)\]\(https://img\.shields\.io/badge/([a-z]+)-([0-9a-f]{6}|gray)\?style=flat-square\)$`)
+
+func TestTypeBadgeURLOmitsTheLeadingHash(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "chore", Rank: &rank, Color: "peach"},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "c1", Type: "chore"})
+
+	m := badgeURLPattern.FindStringSubmatch(got)
+	if m == nil {
+		t.Fatalf("typeBadge() = %q, does not match expected badge URL shape %s", got, badgeURLPattern)
+	}
+	if m[3] == "gray" {
+		t.Errorf("typeBadge() = %q, resolved colour fell back to gray", got)
+	}
+	if strings.Contains(got, "#") {
+		t.Errorf("typeBadge() = %q, badge URL carries a stray '#'", got)
+	}
+}
+
+func TestTypeBadgeFallsBackToGrayForATypeWithNoColour(t *testing.T) {
+	rank := 4
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "task", Rank: &rank},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "t1", Type: "task"})
+
+	want := "![task](https://img.shields.io/badge/task-gray?style=flat-square)"
+	if got != want {
+		t.Errorf("typeBadge() = %q, want %q", got, want)
+	}
+}
+
+func TestTypeBadgeFallsBackToGrayForAnUnknownType(t *testing.T) {
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "u1", Type: "mystery"})
+
+	want := "![mystery](https://img.shields.io/badge/mystery-gray?style=flat-square)"
+	if got != want {
+		t.Errorf("typeBadge() = %q, want %q", got, want)
+	}
+}
+
+func TestTypeBadgeAcceptsARawHexColour(t *testing.T) {
+	rank := 2
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "chore", Rank: &rank, Color: "#123abc"},
+	}}
+	defer func() { cfg = prev }()
+
+	got := typeBadge(&bean.Bean{ID: "c1", Type: "chore"})
+
+	want := "![chore](https://img.shields.io/badge/chore-123abc?style=flat-square)"
+	if got != want {
+		t.Errorf("typeBadge() = %q, want %q", got, want)
 	}
 }
