@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
@@ -193,7 +195,7 @@ func TestRoadmapCmdRejectsStatusFlagWithRootID(t *testing.T) {
 func TestRoadmapOutputFormatMarkdownOverridesTTY(t *testing.T) {
 	data := roadmapOutputFixture()
 
-	got := roadmapOutput(data, true, roadmapFormatMarkdown, 80, true, "", false)
+	got := roadmapOutput(data, true, roadmapFormatMarkdown, 80, true, "", false, ui.FormTree, config.Default())
 	if !strings.HasPrefix(got, "# Roadmap") {
 		t.Errorf("got prefix %q, want %q (--format markdown must win over isTTY=true)", got[:min(len(got), 20)], "# Roadmap")
 	}
@@ -205,7 +207,7 @@ func TestRoadmapOutputFormatMarkdownOverridesTTY(t *testing.T) {
 func TestRoadmapOutputFormatTTYOverridesNonTTY(t *testing.T) {
 	data := roadmapOutputFixture()
 
-	got := roadmapOutput(data, false, roadmapFormatTTY, 80, true, "", false)
+	got := roadmapOutput(data, false, roadmapFormatTTY, 80, true, "", false, ui.FormTree, config.Default())
 	if !strings.HasPrefix(got, "Roadmap") {
 		t.Errorf("got prefix %q, want %q (--format tty must win over isTTY=false)", got[:min(len(got), 20)], "Roadmap")
 	}
@@ -217,15 +219,19 @@ func TestRoadmapOutputFormatTTYOverridesNonTTY(t *testing.T) {
 // TestRoadmapOutputFormatAutoPreservesDetection guards against this step
 // shifting the no-flag behaviour: roadmapFormatAuto (the zero value, what
 // RunE passes when --format was never given) must produce byte-identical
-// output to the pre-existing isTTY-only switch, in both directions.
+// output to explicitly requesting the branch isTTY alone would pick -- the
+// TTY branch via ui.Render (roadmap.go's TTY branch since beans-dbph Step B,
+// which replaced the renderRoadmapPretty call this test used to compare
+// against), the non-TTY branch via renderRoadmapMarkdown unchanged.
 func TestRoadmapOutputFormatAutoPreservesDetection(t *testing.T) {
 	data := roadmapOutputFixture()
+	cfg := config.Default()
 
-	if got, want := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false),
-		renderRoadmapPretty(data, roadmapClampWidth(80), false); got != want {
-		t.Errorf("roadmapFormatAuto with isTTY=true diverged from renderRoadmapPretty:\ngot:  %q\nwant: %q", got, want)
+	if got, want := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false, ui.FormTree, cfg),
+		ui.Render(roadmapRows(data), ui.FormTree, "Roadmap", roadmapClampWidth(80), false, cfg); got != want {
+		t.Errorf("roadmapFormatAuto with isTTY=true diverged from ui.Render:\ngot:  %q\nwant: %q", got, want)
 	}
-	if got, want := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false),
+	if got, want := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false, ui.FormTree, cfg),
 		renderRoadmapMarkdown(data, true, "", false); got != want {
 		t.Errorf("roadmapFormatAuto with isTTY=false diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", got, want)
 	}
@@ -256,5 +262,108 @@ func TestRoadmapCmdRejectsInvalidFormat(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "tty") || !strings.Contains(err.Error(), "markdown") {
 		t.Errorf("expected error to name both valid --format values (tty, markdown), got %q", err.Error())
+	}
+}
+
+// -- TTY branch through the shared layout engine (beans-dbph Step B):
+// roadmapOutput's TTY branch now calls ui.Render(roadmapRows(data), ...)
+// instead of the bespoke renderRoadmapPretty. These guard the bridge itself
+// (roadmapRows) and the two ui.Form outcomes it feeds.
+
+func TestRoadmapCmdTreeViewRendersConnectors(t *testing.T) {
+	data := roadmapOutputFixture()
+
+	got := roadmapOutput(data, true, roadmapFormatTTY, 90, true, "", false, ui.FormTree, config.Default())
+	if !strings.Contains(got, "└─") {
+		t.Errorf("expected tree form to draw a connector (└─) for the nested task, got %q", got)
+	}
+}
+
+func TestRoadmapCmdTableViewRendersHeaderNoConnectors(t *testing.T) {
+	data := roadmapOutputFixture()
+
+	got := roadmapOutput(data, true, roadmapFormatTTY, 90, true, "", false, ui.FormTable, config.Default())
+	if !strings.Contains(got, "TITLE") {
+		t.Errorf("expected table form to render a column header (TITLE), got %q", got)
+	}
+	if strings.Contains(got, "└─") || strings.Contains(got, "├─") {
+		t.Errorf("table form must not draw tree connectors, got %q", got)
+	}
+}
+
+// roadmapGroupingFixture builds two milestones plus an unscheduled bucket, so
+// a test can check that the milestone/unscheduled grouping survives being
+// flattened into ui.FormTable rows (which drop Depth entirely -- Section is
+// what carries the grouping across that flattening, per ui/columns.go).
+func roadmapGroupingFixture() *roadmapData {
+	now := time.Now()
+	m1 := &bean.Bean{ID: "beans-m1", Type: "milestone", Title: "v1.0", Status: "todo", CreatedAt: &now, Path: "m1--v10.md"}
+	m2 := &bean.Bean{ID: "beans-m2", Type: "milestone", Title: "v2.0", Status: "todo", CreatedAt: &now, Path: "m2--v20.md"}
+	t1 := &bean.Bean{ID: "beans-t1", Type: "task", Title: "In v1", Status: "todo", Path: "t1--in-v1.md"}
+	t2 := &bean.Bean{ID: "beans-t2", Type: "task", Title: "In v2", Status: "todo", Path: "t2--in-v2.md"}
+	orphan := &bean.Bean{ID: "beans-o1", Type: "task", Title: "Orphan", Status: "todo", Path: "o1--orphan.md"}
+	return &roadmapData{
+		Milestones: []milestoneGroup{
+			{Milestone: m1, Other: []*bean.Bean{t1}},
+			{Milestone: m2, Other: []*bean.Bean{t2}},
+		},
+		Unscheduled: &unscheduledGroup{Other: []*bean.Bean{orphan}},
+	}
+}
+
+func TestRoadmapCmdMilestoneGroupingSurvivesTableFlattening(t *testing.T) {
+	data := roadmapGroupingFixture()
+
+	got := roadmapOutput(data, true, roadmapFormatTTY, 90, true, "", false, ui.FormTable, config.Default())
+	for _, want := range []string{"beans-m1", "beans-m2", "beans-o1", "No Milestone"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("expected table output to contain %q, got %q", want, got)
+		}
+	}
+	// The unscheduled bucket's heading must come after both milestones --
+	// otherwise "No Milestone" is floating free of the group it labels.
+	m2Idx := strings.Index(got, "beans-m2")
+	headingIdx := strings.Index(got, "No Milestone")
+	if m2Idx < 0 || headingIdx < 0 || headingIdx < m2Idx {
+		t.Errorf("expected \"No Milestone\" heading after both milestone rows, got %q", got)
+	}
+}
+
+// TestRoadmapOutputNoLineExceedsWidthNarrow sweeps cols across and below
+// roadmapMinWidth (80), not just comfortably above it -- a sweep that only
+// tries wide values can pass without ever exercising roadmapClampWidth's
+// floor, or NewColumns' short-form/tag-dropping decisions, which is exactly
+// the kind of guard-never-fired false pass this plan has already had to
+// remove once (see the task report). The fixture nests three levels deep
+// (milestone -> epic -> feature -> task) with long titles and tags so the
+// column budget is actually under pressure at these widths.
+func TestRoadmapOutputNoLineExceedsWidthNarrow(t *testing.T) {
+	now := time.Now()
+	m := &bean.Bean{ID: "beans-m1", Type: "milestone", Title: "A moderately long milestone title", Status: "todo", CreatedAt: &now, Tags: []string{"backend", "urgent"}, Path: "m1.md"}
+	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "A moderately long epic title", Status: "todo", Tags: []string{"auth"}, Path: "e1.md"}
+	f := &bean.Bean{ID: "beans-f1", Type: "feature", Title: "A moderately long feature title", Status: "todo", Priority: "high", Path: "f1.md"}
+	leaf := &bean.Bean{ID: "beans-t1", Type: "task", Title: "A moderately long leaf title", Status: "in-progress", Priority: "critical", Tags: []string{"blocked"}, Path: "t1.md"}
+	data := &roadmapData{
+		Milestones: []milestoneGroup{
+			{
+				Milestone: m,
+				Epics: []epicGroup{
+					{Epic: e, Features: []featureGroup{{Feature: f, Items: []*bean.Bean{leaf}}}},
+				},
+			},
+		},
+	}
+
+	cols := []int{1, 10, 40, 79, 80, 81, 95, 109, 110, 111, 200}
+	for _, form := range []ui.Form{ui.FormTree, ui.FormTable} {
+		for _, c := range cols {
+			got := roadmapOutput(data, true, roadmapFormatTTY, c, true, "", true, form, config.Default())
+			clamped := roadmapClampWidth(c)
+			for _, line := range strings.Split(got, "\n") {
+				if w := ui.DisplayWidth(line); w > clamped {
+					t.Errorf("form=%v cols=%d (clamped=%d): line exceeds width (%d): %q", form, c, clamped, w, line)
+				}
+			}
+		}
 	}
 }

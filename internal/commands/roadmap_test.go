@@ -6,6 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/config"
 )
@@ -728,7 +729,7 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	data := roadmapOutputFixture()
 
 	t.Run("pipe (non-tty) renders markdown", func(t *testing.T) {
-		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false)
+		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "# Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
 		}
@@ -738,7 +739,7 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 	})
 
 	t.Run("tty renders plain-text table", func(t *testing.T) {
-		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false)
+		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
 		}
@@ -748,8 +749,11 @@ func TestRoadmapOutputSwitchesOnTTY(t *testing.T) {
 		if strings.Contains(got, "](") {
 			t.Error("TTY output must not contain markdown link syntax (EARS-4)")
 		}
-		if !strings.Contains(got, "■ Milestone") {
-			t.Error("expected TTY output to contain the milestone glyph line")
+		// Since beans-dbph Step B the milestone bean itself is the heading
+		// (a Row of type "milestone"), not a custom "■ Milestone" prefix --
+		// its ID showing up proves the milestone row rendered.
+		if !strings.Contains(got, "beans-m1") {
+			t.Error("expected TTY output to contain the milestone row (beans-m1)")
 		}
 	})
 }
@@ -770,7 +774,7 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 	}
 
 	t.Run("pipe (non-tty) renders markdown with Root", func(t *testing.T) {
-		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false)
+		got := roadmapOutput(data, false, roadmapFormatAuto, 0, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "# Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "# Roadmap")
 		}
@@ -789,12 +793,15 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 	})
 
 	t.Run("tty renders plain-text table with Root", func(t *testing.T) {
-		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false)
+		got := roadmapOutput(data, true, roadmapFormatAuto, 80, true, "", false, ui.FormTree, config.Default())
 		if !strings.HasPrefix(got, "Roadmap") {
 			t.Errorf("got prefix %q, want %q", got[:min(len(got), 20)], "Roadmap")
 		}
-		if !strings.Contains(got, "▸ Epic") {
-			t.Errorf("expected epic glyph line (▸ Epic), got %q", got)
+		// Since beans-dbph Step B the epic bean itself is the heading (a Row
+		// of type "epic"), not a custom "▸ Epic" prefix -- its ID showing up
+		// proves the epic row rendered.
+		if !strings.Contains(got, "beans-epic1") {
+			t.Errorf("expected epic row (beans-epic1), got %q", got)
 		}
 		if strings.Contains(got, "img.shields.io") {
 			t.Error("TTY output must not contain shields.io badges")
@@ -802,8 +809,8 @@ func TestRoadmapOutputSwitchesOnTTYWithRoot(t *testing.T) {
 		if strings.Contains(got, "](") {
 			t.Error("TTY output must not contain markdown link syntax")
 		}
-		if strings.Contains(got, "■ Milestone") {
-			t.Error("root-scoped output must not contain milestone framing")
+		if strings.Contains(got, "No Milestone") {
+			t.Error("root-scoped output must not contain the unscheduled-bucket heading")
 		}
 		if !strings.Contains(got, "Auth") {
 			t.Errorf("expected epic title Auth in output, got %q", got)
@@ -838,7 +845,7 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := roadmapOutput(data, false, roadmapFormatAuto, 0, tt.links, "some/prefix", false)
+			got := roadmapOutput(data, false, roadmapFormatAuto, 0, tt.links, "some/prefix", false, ui.FormTree, config.Default())
 			want := renderRoadmapMarkdown(data, tt.links, "some/prefix", false)
 			if got != want {
 				t.Errorf("roadmapOutput(non-tty, links=%v, false) diverged from renderRoadmapMarkdown:\ngot:  %q\nwant: %q", tt.links, got, want)
@@ -862,7 +869,7 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 // a 0-width render.
 func TestRoadmapOutputZeroColsFallsBackTo80(t *testing.T) {
 	data := roadmapOutputFixture()
-	got := roadmapOutput(data, true, roadmapFormatAuto, 0, true, "", false)
+	got := roadmapOutput(data, true, roadmapFormatAuto, 0, true, "", false, ui.FormTree, config.Default())
 
 	lines := strings.SplitN(got, "\n", 3)
 	if len(lines) < 2 {
