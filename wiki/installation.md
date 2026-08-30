@@ -12,7 +12,7 @@ The repository's `.goreleaser.yaml` can create GitHub Release artifacts, but its
 
 ## Prerequisites
 
-Install [mise](https://mise.jdx.dev/getting-started.html) first. The repository's `mise.toml` pins and installs the required Go, Node.js, and pnpm toolchains; the current Go module declares Go 1.24.6.
+Install [mise](https://mise.jdx.dev/getting-started.html) first. The repository's `mise.toml` declares the Go, Node.js, and pnpm toolchains the build needs and installs them; the current Go module requires Go 1.24.6.
 
 ## The three binaries
 
@@ -33,7 +33,7 @@ mise run setup
 mise run build
 ```
 
-The build pipeline compiles the Svelte frontend into `internal/web/dist` before building the Go entrypoints. That step is required even for the main `beans` binary because the shared Go package embeds the web assets; raw `go build ./cmd/beans` fails on a fresh clone where the generated directory does not exist.
+The build pipeline compiles the Svelte frontend into `internal/web/dist` before building the Go entrypoints, and stamps version, commit, and build date into the binaries. A plain `go build ./cmd/beans` also compiles, because the repository tracks a placeholder in `internal/web/dist` that satisfies the embed directive, but it produces an unstamped binary, and a `beans-serve` built that way embeds no web assets and serves 404 for the browser UI.
 
 `mise run build` writes the stamped `beans`, `beans-serve`, and `beans-tui` binaries to the repository root. Install them in a user-owned directory on `PATH`:
 

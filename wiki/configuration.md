@@ -149,15 +149,15 @@ Beans ships built-in tables for statuses, types, and priorities. `.beans.yml` ca
 
 ### Built-in statuses
 
-| Name | Color | Archive | Description |
-| --- | --- | --- | --- |
-| `in-progress` | `peach` | no | Currently being worked on |
-| `todo` | `green` | no | Ready to be worked on |
-| `draft` | `overlay2` | no | Needs refinement before it can be worked on |
-| `completed` | `overlay1` | yes | Finished successfully |
-| `scrapped` | `surface2` | yes | Will not be done |
+| Name | Color | Archive | Short | Description |
+| --- | --- | --- | --- | --- |
+| `in-progress` | `peach` | no | `I` | Currently being worked on |
+| `todo` | `green` | no | `T` | Ready to be worked on |
+| `draft` | `overlay2` | no | `D` | Needs refinement before it can be worked on |
+| `completed` | `overlay1` | yes | `C` | Finished successfully |
+| `scrapped` | `surface2` | yes | `S` | Will not be done |
 
-An entry in `statuses` overrides `color`, `description`, and `archive` on the named status, or defines a new status if the name is not one of the five above:
+`short` is the single-character code narrow terminal views and legends render; a status without one renders `?`. An entry in `statuses` overrides `color`, `description`, `archive`, and `short` on the named status, or defines a new status if the name is not one of the five above:
 
 ```yaml
 statuses:
@@ -207,15 +207,15 @@ See [wiki/project-profiles.md](project-profiles.md) for the bundled profiles (`c
 
 ### Built-in priorities
 
-| Name | Color | Description |
-| --- | --- | --- |
-| `critical` | `red` | Urgent, blocking work. When possible, address immediately |
-| `high` | `yellow` | Important, should be done before normal work |
-| `normal` | `""` | Standard priority |
-| `low` | `overlay0` | Less important, can be delayed |
-| `deferred` | `overlay0` | Explicitly pushed back, avoid doing unless necessary |
+| Name | Color | Symbol | Description |
+| --- | --- | --- | --- |
+| `critical` | `red` | `‼` | Urgent, blocking work. When possible, address immediately |
+| `high` | `yellow` | `!` | Important, should be done before normal work |
+| `normal` | `""` | none | Standard priority |
+| `low` | `overlay0` | `↓` | Less important, can be delayed |
+| `deferred` | `overlay0` | `→` | Explicitly pushed back, avoid doing unless necessary |
 
-Priorities are ordered from highest to lowest urgency. A bean file may omit `priority`; the loader then materializes `normal` in memory without rewriting the file. `priorities` overrides follow the same name-matched, field-by-field rule as `statuses` and `types`.
+Priorities are ordered from highest to lowest urgency, and `symbol` is the compact glyph narrow views and legends render for a priority (a priority without one renders no glyph). A bean file may omit `priority`; the loader then materializes `normal` in memory without rewriting the file. `priorities` overrides follow the same name-matched, field-by-field rule as `statuses` and `types`, including `symbol`.
 
 ```yaml
 priorities:
