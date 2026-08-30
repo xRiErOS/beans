@@ -1006,10 +1006,12 @@ func (c *Config) GetType(name string) *TypeConfig {
 	return nil
 }
 
-// RankOf returns the hierarchy rank of a type name. An unknown type and a
-// type without an explicit rank both sit at LeafRank.
+// RankOf returns the hierarchy rank of a type name. An unknown type sits at
+// LeafRank; a known type's rank is TypeList()'s merged value, which is
+// itself LeafRank when the type carries no explicit rank (see TypeList) -
+// so an explicit "rank: 0" on a known type is returned as 0, not coerced.
 func (c *Config) RankOf(typeName string) int {
-	if t := c.GetType(typeName); t != nil && t.Rank != 0 {
+	if t := c.GetType(typeName); t != nil {
 		return t.Rank
 	}
 	return LeafRank
@@ -1127,8 +1129,10 @@ func (c *Config) TypeList() []TypeConfig {
 			// An appended type starts from a zero TypeConfig, so an entry
 			// without rank: would sit at rank 0 and outrank every container.
 			// Leaf rank is the safe default and matches the old behaviour for
-			// unknown types.
-			if t.Rank == 0 {
+			// unknown types - but only when rank was never named at all: an
+			// explicit "rank: 0" is a real, distinct value (o.Rank != nil)
+			// and must not be silently promoted to LeafRank.
+			if o.Rank == nil && t.Rank == 0 {
 				t.Rank = LeafRank
 			}
 		},

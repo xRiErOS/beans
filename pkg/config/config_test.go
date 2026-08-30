@@ -2278,6 +2278,22 @@ func TestRankOfHonoursAConfiguredRank(t *testing.T) {
 	}
 }
 
+// An explicit "rank: 0" is a real, distinct value - not the same as
+// omitting rank entirely - and must survive the merge as 0, not be silently
+// promoted to LeafRank the way an actually-unset rank is.
+func TestExplicitRankZeroIsNotCoercedToLeafRank(t *testing.T) {
+	rank := 0
+	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}
+	if got := c.RankOf("package"); got != 0 {
+		t.Errorf("RankOf(\"package\") = %d, want 0 (explicit rank must be honoured)", got)
+	}
+	for _, ty := range c.TypeList() {
+		if ty.Name == "package" && ty.Rank != 0 {
+			t.Errorf("TypeList() carries rank %d for \"package\", want 0", ty.Rank)
+		}
+	}
+}
+
 func TestAppendedTypeWithoutRankLandsOnTheLeafRank(t *testing.T) {
 	c := &Config{Types: []TypeOverride{{Name: "chore", Color: "peach"}}}
 	if got := c.RankOf("chore"); got != LeafRank {
