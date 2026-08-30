@@ -77,7 +77,7 @@ release LEVEL='patch': test release-snapshot
     git push {{release_remote}} "$NEW_TAG"
     RUN_ID=""
     for i in $(seq 1 20); do
-        RUN_ID=$(gh run list -R xRiErOS/beans -w release -L1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
+        RUN_ID=$(gh run list -R xRiErOS/beans -w release --branch "$NEW_TAG" -L1 --json databaseId -q '.[0].databaseId' 2>/dev/null || true)
         [ -n "$RUN_ID" ] && break
         sleep 3
     done
