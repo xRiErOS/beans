@@ -13,6 +13,35 @@ import (
 	"github.com/hmans/beans/pkg/config"
 )
 
+// TestMilestonesListsEveryVisibleRank1Type verifies that collectMilestones
+// selects by rank (D08), not by the hardcoded type name "milestone", and
+// that a rank-1 type which opted out via Roadmap: false (D15) is excluded.
+func TestMilestonesListsEveryVisibleRank1Type(t *testing.T) {
+	rank := 1
+	visible := false
+	prev := cfg
+	cfg = &config.Config{Types: []config.TypeOverride{
+		{Name: "release", Rank: &rank},
+		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+	}}
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "r1", Type: "release", Status: "todo", Title: "v1"},
+		{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot"},
+		{ID: "t1", Type: "task", Status: "todo", Title: "Work"},
+	}
+
+	got := collectMilestones(beans, false)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1 — release counts, bucket and task do not", len(got))
+	}
+	if got[0].ID != "r1" {
+		t.Errorf("entry is %q, want \"r1\"", got[0].ID)
+	}
+}
+
 // setupMilestonesTest installs a throwaway core and default config into the
 // package globals milestonesCmd.RunE reads, mirroring setupUpdateTest.
 func setupMilestonesTest(t *testing.T) {
@@ -190,6 +219,52 @@ func TestMilestonesAllFlagIncludesThem(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("expected output to contain %q with --all, got %q", want, got)
 		}
+	}
+}
+
+// TestMilestonesProgressExcludesHiddenSubtree verifies that a hidden
+// container (D15, Roadmap: false) nested under a visible milestone does not
+// leak its descendants into that milestone's completed/total count.
+func TestMilestonesProgressExcludesHiddenSubtree(t *testing.T) {
+	setupMilestonesTest(t)
+	resetMilestonesFlags(t)
+	milestonesJSON = true
+
+	hiddenRank := 2
+	hidden := false
+	cfg.Types = append(cfg.Types, config.TypeOverride{Name: "silo", Rank: &hiddenRank, Roadmap: &hidden})
+
+	milestone := &bean.Bean{ID: "beans-mile1", Slug: bean.Slugify("Milestone"), Title: "Milestone", Status: "todo", Type: "milestone"}
+	silo := &bean.Bean{ID: "beans-silo1", Slug: bean.Slugify("Silo"), Title: "Silo", Status: "todo", Type: "silo", Parent: "beans-mile1"}
+	hiddenTask := &bean.Bean{ID: "beans-task1", Slug: bean.Slugify("Hidden task"), Title: "Hidden task", Status: "completed", Type: "task", Parent: "beans-silo1"}
+	visibleTask := &bean.Bean{ID: "beans-task2", Slug: bean.Slugify("Visible task"), Title: "Visible task", Status: "todo", Type: "task", Parent: "beans-mile1"}
+	for _, b := range []*bean.Bean{milestone, silo, hiddenTask, visibleTask} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	out := captureMilestonesStdout(t, func() {
+		if err := milestonesCmd.RunE(milestonesCmd, nil); err != nil {
+			t.Fatalf("milestonesCmd.RunE() error = %v", err)
+		}
+	})
+
+	var entries []struct {
+		Bean      *bean.Bean `json:"bean"`
+		Completed int        `json:"completed"`
+		Total     int        `json:"total"`
+	}
+	if err := json.Unmarshal(out, &entries); err != nil {
+		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("expected 1 milestone entry, got %d: %s", len(entries), out)
+	}
+	// Only the visible task counts; the hidden silo and its completed task
+	// must not leak into the total or completed count.
+	if entries[0].Total != 1 || entries[0].Completed != 0 {
+		t.Errorf("expected completed=0 total=1 (hidden subtree excluded), got completed=%d total=%d", entries[0].Completed, entries[0].Total)
 	}
 }
 

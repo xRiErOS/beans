@@ -26,10 +26,50 @@ type milestoneEntry struct {
 	Total     int        `json:"total"`
 }
 
+// collectMilestones returns every bean on rank 1 whose type takes part in the
+// aggregate views, filtered by archive status unless all is set.
+func collectMilestones(allBeans []*bean.Bean, all bool) []*bean.Bean {
+	var out []*bean.Bean
+	for _, b := range allBeans {
+		if cfg.RankOf(b.Type) != 1 {
+			continue
+		}
+		if !cfg.IsRoadmapType(b.Type) {
+			continue
+		}
+		if !all && cfg.IsArchiveStatus(b.Status) {
+			continue
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// visibleChildrenIndex returns children with every hidden subtree (D15)
+// filtered out, so a caller walking it -- e.g. descendantProgress -- cannot
+// see into a hidden container or anything beneath it: a hidden epic nested
+// under a visible milestone must not contribute to that milestone's progress
+// count.
+func visibleChildrenIndex(children map[string][]*bean.Bean, hidden map[string]bool) map[string][]*bean.Bean {
+	out := make(map[string][]*bean.Bean, len(children))
+	for parent, kids := range children {
+		var visible []*bean.Bean
+		for _, k := range kids {
+			if !hidden[k.ID] {
+				visible = append(visible, k)
+			}
+		}
+		if len(visible) > 0 {
+			out[parent] = visible
+		}
+	}
+	return out
+}
+
 var milestonesCmd = &cobra.Command{
 	Use:   "milestones",
 	Short: "List milestones with descendant progress",
-	Long:  `Lists all beans of type "milestone", each annotated with how many of its descendants (via any number of parent levels, e.g. epics and their tasks) are completed. Completed and scrapped milestones are hidden by default; use --all to include them.`,
+	Long:  `Lists all beans on the top container rank, each annotated with how many of its descendants (via any number of parent levels, e.g. epics and their tasks) are completed. Completed and scrapped milestones are hidden by default; use --all to include them.`,
 	Args:  cobra.NoArgs,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
@@ -40,24 +80,17 @@ var milestonesCmd = &cobra.Command{
 			return cmdError(milestonesJSON, output.ErrValidation, "querying beans: %v", err)
 		}
 
-		var milestones []*bean.Bean
-		for _, b := range allBeans {
-			if b.Type != "milestone" {
-				continue
-			}
-			if !milestonesAll && cfg.IsArchiveStatus(b.Status) {
-				continue
-			}
-			milestones = append(milestones, b)
-		}
+		milestones := collectMilestones(allBeans, milestonesAll)
 
 		bean.SortByStatusPriorityAndType(milestones, cfg.StatusNames(), cfg.PriorityNames(), cfg.TypeNames())
 
 		idx := buildChildrenIndex(allBeans)
+		hidden := hiddenSubtrees(allBeans, idx)
+		visibleIdx := visibleChildrenIndex(idx, hidden)
 
 		entries := make([]milestoneEntry, 0, len(milestones))
 		for _, m := range milestones {
-			completed, total := descendantProgress(m.ID, idx)
+			completed, total := descendantProgress(m.ID, visibleIdx)
 			entries = append(entries, milestoneEntry{Bean: m, Completed: completed, Total: total})
 		}
 
