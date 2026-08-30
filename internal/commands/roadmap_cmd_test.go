@@ -221,8 +221,8 @@ func TestRoadmapOutputFormatTTYOverridesNonTTY(t *testing.T) {
 // RunE passes when --format was never given) must produce byte-identical
 // output to explicitly requesting the branch isTTY alone would pick -- the
 // TTY branch via ui.Render (roadmap.go's TTY branch since beans-dbph Step B,
-// which replaced the renderRoadmapPretty call this test used to compare
-// against), the non-TTY branch via renderRoadmapMarkdown unchanged.
+// which replaced the bespoke renderer this test used to compare against),
+// the non-TTY branch via renderRoadmapMarkdown unchanged.
 func TestRoadmapOutputFormatAutoPreservesDetection(t *testing.T) {
 	data := roadmapOutputFixture()
 	cfg := config.Default()
@@ -267,7 +267,7 @@ func TestRoadmapCmdRejectsInvalidFormat(t *testing.T) {
 
 // -- TTY branch through the shared layout engine (beans-dbph Step B):
 // roadmapOutput's TTY branch now calls ui.Render(roadmapRows(data), ...)
-// instead of the bespoke renderRoadmapPretty. These guard the bridge itself
+// instead of a bespoke roadmap-only renderer. These guard the bridge itself
 // (roadmapRows) and the two ui.Form outcomes it feeds.
 
 func TestRoadmapCmdTreeViewRendersConnectors(t *testing.T) {
@@ -388,16 +388,16 @@ func TestRoadmapOutputNoLineExceedsWidth(t *testing.T) {
 // TestRoadmapOutputMaxWidthAboveDefaultCapIsHonoured guards the removal of
 // roadmapOutput's own clamp (beans-dbph Step B follow-up): resolveWidth is
 // the one place the render width is decided -- it floors at 80 but has no
-// upper cap, so --max-width can push a caller past the 110-column default
-// (roadmapMaxWidth). Before this fix roadmapOutput ran cols through
-// roadmapClampWidth on top of resolveWidth's own decision, silently
+// upper cap, so --max-width can push a caller past the 110-column default.
+// Before this fix roadmapOutput ran cols through a roadmap-only clamp on
+// top of resolveWidth's own decision, silently
 // re-capping roadmap at 110 while every other width-aware command (list,
 // show, ...) honoured --max-width up to whatever the user asked for -- two
 // commands given the same flag, quietly disagreeing.
 func TestRoadmapOutputMaxWidthAboveDefaultCapIsHonoured(t *testing.T) {
 	data := roadmapOutputFixture()
 
-	// 200 > roadmapMaxWidth (110): this is exactly the case resolveWidth's
+	// 200 > the 110-column default cap: this is exactly the case resolveWidth's
 	// own doc comment describes -- a caller explicitly asking for more than
 	// the default cap via --max-width, which resolveWidth grants unless a
 	// narrower terminal is detected (none is, under go test).

@@ -26,9 +26,9 @@ func tagsFixture() *roadmapData {
 }
 
 // -- TTY tag properties, migrated onto roadmapOutput (beans-dbph Step B
-// review, F2): renderRoadmapPretty is unreachable from any command since the
-// TTY branch now runs through ui.Render, so the six tests that used to call
-// it directly pinned a renderer nothing can reach any more. The value kept
+// review, F2): the bespoke roadmap-only renderer became unreachable from any
+// command once the TTY branch went through ui.Render, so the six tests that
+// used to call it directly pinned a renderer nothing can reach any more. The value kept
 // here is the tag *properties* the ruling named -- tags appear only when
 // --tags is set, they occupy exactly one line, the first tag stays visible
 // even when it must be elided, and overflow becomes "+N" -- not the old

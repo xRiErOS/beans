@@ -215,7 +215,7 @@ func roadmapOutput(data *roadmapData, isTTY bool, format roadmapFormatOverride, 
 
 // roadmapRows bridges the grouped roadmapData produced by buildRoadmap /
 // buildScopedRoadmap into the flat row list ui.Render expects. It mirrors the
-// walk renderRoadmapPretty performs (milestone -> epics -> features -> leafs,
+// walk roadmap.tmpl renders (milestone -> epics -> features -> leafs,
 // then epic/feature/other for the unscheduled bucket), but builds
 // ui.FlatItems instead of writing text directly, and does no sorting of its
 // own -- order comes entirely from the builder's slices.
@@ -263,7 +263,7 @@ func roadmapRows(data *roadmapData) []ui.Row {
 
 // appendRoadmapMilestoneGroup appends a milestone (depth 0) followed by its
 // epics, features, and other leaf items (depth 1), in that order -- matching
-// renderRoadmapPretty's mg.Epics / mg.Features / mg.Other walk.
+// the mg.Epics / mg.Features / mg.Other order roadmap.tmpl renders.
 func appendRoadmapMilestoneGroup(items *[]ui.FlatItem, mg milestoneGroup) {
 	// Unreachable in production -- every construction site sets Milestone --
 	// but a hand-built roadmapData literal in a test would otherwise panic
@@ -313,7 +313,7 @@ func appendRoadmapUnscheduledGroup(items *[]ui.FlatItem, ug unscheduledGroup) {
 
 // appendRoadmapEpicGroup appends an epic at depth, followed by its direct
 // leaf items and nested feature groups at depth+1 -- items before features,
-// per renderRoadmapEpicGroup / roadmap.tmpl.
+// per roadmap.tmpl.
 func appendRoadmapEpicGroup(items *[]ui.FlatItem, eg epicGroup, depth int, isLast bool) {
 	// Unreachable in production -- every construction site sets Epic -- but
 	// a hand-built epicGroup literal in a test would otherwise panic inside
