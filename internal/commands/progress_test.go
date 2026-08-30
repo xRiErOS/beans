@@ -41,13 +41,13 @@ func setupProgressTest(t *testing.T) {
 }
 
 // resetProgressFlags clears every progress* package global the tests below
-// touch and restores the pre-test values afterwards.
+// touch and restores the pre-test value afterwards.
 func resetProgressFlags(t *testing.T) {
 	t.Helper()
-	oldJSON, oldParent := progressJSON, progressParent
-	progressJSON, progressParent = false, ""
+	oldJSON := progressJSON
+	progressJSON = false
 	t.Cleanup(func() {
-		progressJSON, progressParent = oldJSON, oldParent
+		progressJSON = oldJSON
 	})
 }
 
@@ -142,10 +142,10 @@ func TestProgressComputesPercent(t *testing.T) {
 	}
 }
 
-// TestProgressParentFlagScopesToDescendants verifies that --parent limits
-// the counted beans to the given bean's descendants (via
+// TestProgressRootArgScopesToDescendants verifies that a root ID argument
+// limits the counted beans to the given bean's descendants (via
 // buildChildrenIndex/descendants), not the whole workspace.
-func TestProgressParentFlagScopesToDescendants(t *testing.T) {
+func TestProgressRootArgScopesToDescendants(t *testing.T) {
 	setupProgressTest(t)
 	resetProgressFlags(t)
 
@@ -158,11 +158,10 @@ func TestProgressParentFlagScopesToDescendants(t *testing.T) {
 		}
 	}
 
-	progressParent = "beans-mile1"
 	progressJSON = true
 
 	out := captureProgressStdout(t, func() {
-		if err := progressCmd.RunE(progressCmd, nil); err != nil {
+		if err := progressCmd.RunE(progressCmd, []string{"beans-mile1"}); err != nil {
 			t.Fatalf("progressCmd.RunE() error = %v", err)
 		}
 	})
@@ -181,15 +180,16 @@ func TestProgressParentFlagScopesToDescendants(t *testing.T) {
 	}
 }
 
-// TestProgressParentFlagScopesToDescendantsWithPrefix is a regression test
-// for a bug where --parent passed the raw (possibly short) flag value into
-// descendants() instead of the resolved bean's full ID. buildChildrenIndex
-// keys its map by full bean IDs (b.Parent is always a full ID), so looking
-// up a short ID there missed and silently produced 0/0 -- with no error.
-// setupProgressTest uses config.Default(), whose prefix is "" (short IDs ==
-// full IDs there), so that helper alone can't catch this; this test installs
-// a config with a real prefix and resolves a short --parent ID against it.
-func TestProgressParentFlagScopesToDescendantsWithPrefix(t *testing.T) {
+// TestProgressRootArgScopesToDescendantsWithPrefix is a regression test
+// for a bug where the root argument passed the raw (possibly short) value
+// into descendants() instead of the resolved bean's full ID.
+// buildChildrenIndex keys its map by full bean IDs (b.Parent is always a
+// full ID), so looking up a short ID there missed and silently produced
+// 0/0 -- with no error. setupProgressTest uses config.Default(), whose
+// prefix is "" (short IDs == full IDs there), so that helper alone can't
+// catch this; this test installs a config with a real prefix and resolves
+// a short root ID argument against it.
+func TestProgressRootArgScopesToDescendantsWithPrefix(t *testing.T) {
 	tmpDir := t.TempDir()
 	beansDir := filepath.Join(tmpDir, ".beans")
 	if err := os.MkdirAll(beansDir, 0755); err != nil {
@@ -219,11 +219,10 @@ func TestProgressParentFlagScopesToDescendantsWithPrefix(t *testing.T) {
 
 	// "mile1" is a short ID that requires prefix-normalization ("beans-"
 	// prepended) to resolve to the full "beans-mile1" bean ID.
-	progressParent = "mile1"
 	progressJSON = true
 
 	out := captureProgressStdout(t, func() {
-		if err := progressCmd.RunE(progressCmd, nil); err != nil {
+		if err := progressCmd.RunE(progressCmd, []string{"mile1"}); err != nil {
 			t.Fatalf("progressCmd.RunE() error = %v", err)
 		}
 	})
@@ -233,25 +232,133 @@ func TestProgressParentFlagScopesToDescendantsWithPrefix(t *testing.T) {
 		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
 	}
 	if result.Total != 1 {
-		t.Errorf("expected total=1 (scoped to descendants via short --parent ID), got %d", result.Total)
+		t.Errorf("expected total=1 (scoped to descendants via short root ID), got %d", result.Total)
 	}
 	if result.Completed != 1 {
 		t.Errorf("expected completed=1, got %d", result.Completed)
 	}
 }
 
-// TestProgressParentFlagErrorsOnUnknownID verifies that --parent with an
-// ID that does not resolve to any bean returns an error instead of
-// silently reporting 0/0 progress (resolver.Bean returns (nil, nil) for
-// unknown IDs, so this must be checked explicitly).
-func TestProgressParentFlagErrorsOnUnknownID(t *testing.T) {
+// TestProgressRootArgErrorsOnUnknownID verifies that a root ID argument
+// that does not resolve to any bean returns an error instead of silently
+// reporting 0/0 progress (resolver.Bean returns (nil, nil) for unknown
+// IDs, so this must be checked explicitly).
+func TestProgressRootArgErrorsOnUnknownID(t *testing.T) {
 	setupProgressTest(t)
 	resetProgressFlags(t)
-	progressParent = "beans-doesnotexist"
 
-	err := progressCmd.RunE(progressCmd, nil)
+	err := progressCmd.RunE(progressCmd, []string{"beans-doesnotexist"})
 	if err == nil {
-		t.Fatal("expected an error for an unknown --parent ID, got nil")
+		t.Fatal("expected an error for an unknown root ID argument, got nil")
+	}
+}
+
+// TestProgressRejectsMoreThanOneRootArg verifies that Args wires
+// cobra.MaximumNArgs(1), rejecting two positional arguments.
+func TestProgressRejectsMoreThanOneRootArg(t *testing.T) {
+	if err := progressCmd.Args(progressCmd, []string{"a", "b"}); err == nil {
+		t.Fatal("expected an error for more than one root argument, got nil")
+	}
+}
+
+// TestProgressJSONCarriesResolvedRootID verifies that --json with a short
+// root ID argument returns the resolved full ID in the "root" field, never
+// the typed short form.
+func TestProgressJSONCarriesResolvedRootID(t *testing.T) {
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	testCfg := config.DefaultWithPrefix("beans-")
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	resetProgressFlags(t)
+
+	milestone := &bean.Bean{ID: "beans-mile1", Slug: bean.Slugify("Milestone"), Title: "Milestone", Status: "todo", Type: "milestone"}
+	inScope := &bean.Bean{ID: "beans-task1", Slug: bean.Slugify("In scope"), Title: "In scope", Status: "completed", Type: "task", Parent: "beans-mile1"}
+	for _, b := range []*bean.Bean{milestone, inScope} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	progressJSON = true
+
+	out := captureProgressStdout(t, func() {
+		if err := progressCmd.RunE(progressCmd, []string{"mile1"}); err != nil {
+			t.Fatalf("progressCmd.RunE() error = %v", err)
+		}
+	})
+
+	var result progressResult
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+	}
+	if result.Root != "beans-mile1" {
+		t.Errorf("expected root=%q (resolved full ID), got %q", "beans-mile1", result.Root)
+	}
+}
+
+// TestProgressJSONOmitsRootWhenUnscoped verifies that an unscoped --json
+// run has no "root" key at all, proving the omitempty tag.
+func TestProgressJSONOmitsRootWhenUnscoped(t *testing.T) {
+	setupProgressTest(t)
+	resetProgressFlags(t)
+	progressJSON = true
+
+	task := &bean.Bean{ID: "beans-a1", Slug: bean.Slugify("A"), Title: "A", Status: "completed", Type: "task"}
+	if err := core.Create(task); err != nil {
+		t.Fatalf("core.Create error = %v", err)
+	}
+
+	out := captureProgressStdout(t, func() {
+		if err := progressCmd.RunE(progressCmd, nil); err != nil {
+			t.Fatalf("progressCmd.RunE() error = %v", err)
+		}
+	})
+
+	var m map[string]any
+	if err := json.Unmarshal(out, &m); err != nil {
+		t.Fatalf("decoding JSON output: %v; output = %s", err, out)
+	}
+	if _, ok := m["root"]; ok {
+		t.Errorf("expected no %q key in unscoped JSON output, got %s", "root", out)
+	}
+}
+
+// TestProgressScopedPlainTextNamesTheRoot verifies that a scoped plain-text
+// run prints a header line naming the root bean before the status lines.
+func TestProgressScopedPlainTextNamesTheRoot(t *testing.T) {
+	setupProgressTest(t)
+	resetProgressFlags(t)
+
+	milestone := &bean.Bean{ID: "beans-mile1", Slug: bean.Slugify("Milestone"), Title: "Milestone", Status: "todo", Type: "milestone"}
+	child := &bean.Bean{ID: "beans-task1", Slug: bean.Slugify("Child"), Title: "Child", Status: "completed", Type: "task", Parent: "beans-mile1"}
+	for _, b := range []*bean.Bean{milestone, child} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	out := captureProgressStdout(t, func() {
+		if err := progressCmd.RunE(progressCmd, []string{"beans-mile1"}); err != nil {
+			t.Fatalf("progressCmd.RunE() error = %v", err)
+		}
+	})
+
+	got := stripANSITest(string(out))
+	firstLine := strings.SplitN(got, "\n", 2)[0]
+	if !strings.Contains(firstLine, "beans-mile1") || !strings.Contains(firstLine, "Milestone") {
+		t.Errorf("expected first line to name the root bean, got %q", firstLine)
 	}
 }
 

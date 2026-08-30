@@ -33,11 +33,11 @@ beans milestones --all --view tree --tags
 
 ## `beans progress`
 
-`beans progress` shows counts by status across every configured status, plus a percent-complete figure computed as `completed / (total - scrapped)`, truncated toward zero. `--parent <id>` scopes the counts to a single bean's descendants (for example a milestone or epic) instead of the whole workspace. `--json` returns the per-status counts plus the derived `completed`, `total`, and `percent` fields; the plain-text form additionally renders a fixed-width bar under the counts.
+`beans progress` shows counts by status across every configured status, plus a percent-complete figure computed as `completed / (total - scrapped)`, truncated toward zero. An `<id>` argument scopes the counts to a single bean's descendants (for example a milestone or epic) instead of the whole workspace; the root bean's own status is not counted, since it is the container, not an item of work. `--json` returns the per-status counts plus the derived `completed`, `total`, and `percent` fields, and adds a `root` field (the resolved full ID) when scoped; the plain-text form additionally renders a fixed-width bar under the counts.
 
 ```
 beans progress
-beans progress --parent beans-xkih
+beans progress beans-xkih
 beans progress --json
 ```
 

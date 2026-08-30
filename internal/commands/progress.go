@@ -11,14 +11,13 @@ import (
 
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
+	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
+	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
 )
 
-var (
-	progressJSON   bool
-	progressParent string
-)
+var progressJSON bool
 
 // progressBarWidth is the fixed width, in characters, of the plain-text
 // progress bar rendered below the per-status counts.
@@ -29,6 +28,7 @@ const progressBarWidth = 20
 // carries no bar string — the bar is a presentation-only concern of the
 // plain-text renderer below.
 type progressResult struct {
+	Root      string         `json:"root,omitempty"`
 	Counts    map[string]int `json:"counts"`
 	Completed int            `json:"completed"`
 	Total     int            `json:"total"`
@@ -36,10 +36,12 @@ type progressResult struct {
 }
 
 var progressCmd = &cobra.Command{
-	Use:   "progress",
+	Use:   "progress [id]",
 	Short: "Show a summary of work status across all beans",
-	Long:  `Shows counts by status across every configured status, plus a percent-complete figure (completed / (total - scrapped)). Use --parent to scope the counts to a single bean's descendants (e.g. a milestone or epic) instead of the whole workspace.`,
-	Args:  cobra.NoArgs,
+	Long: `Shows counts by status across every configured status, plus a percent-complete figure (completed / (total - scrapped)).
+
+With an ID argument (for example a milestone or epic), the counts cover that bean's descendants — through any number of parent levels — instead of the whole workspace. The root bean's own status is not counted: it is the container, not an item of work.`,
+	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		resolver := &beangraph.CoreResolver{Core: core}
@@ -50,16 +52,17 @@ var progressCmd = &cobra.Command{
 		}
 
 		scope := allBeans
-		if progressParent != "" {
-			parent, err := resolver.Bean(ctx, progressParent)
+		var root *bean.Bean
+		if len(args) == 1 {
+			root, err = resolver.Bean(ctx, args[0])
 			if err != nil {
 				return cmdError(progressJSON, output.ErrNotFound, "failed to find bean: %v", err)
 			}
-			if parent == nil {
-				return cmdError(progressJSON, output.ErrNotFound, "bean not found: %s", progressParent)
+			if root == nil {
+				return cmdError(progressJSON, output.ErrNotFound, "bean not found: %s", args[0])
 			}
 			idx := buildChildrenIndex(allBeans)
-			scope = descendants(parent.ID, idx)
+			scope = descendants(root.ID, idx)
 		}
 
 		statusNames := cfg.StatusNames()
@@ -82,10 +85,17 @@ var progressCmd = &cobra.Command{
 		}
 
 		if progressJSON {
-			result := progressResult{Counts: counts, Completed: completed, Total: total, Percent: percent}
+			result := progressResult{Completed: completed, Total: total, Percent: percent, Counts: counts}
+			if root != nil {
+				result.Root = root.ID
+			}
 			enc := json.NewEncoder(os.Stdout)
 			enc.SetIndent("", "  ")
 			return enc.Encode(result)
+		}
+
+		if root != nil {
+			printProgressRootHeader(root, cfg)
 		}
 
 		for _, sc := range cfg.StatusList() {
@@ -104,6 +114,21 @@ var progressCmd = &cobra.Command{
 
 		return nil
 	},
+}
+
+// printProgressRootHeader names the scope so a reader of a scoped run
+// cannot mistake it for a workspace-wide figure. The style mirrors the
+// table's type tint: colour only when the type configures one, bold on
+// emphasis, so an unstyled type keeps the terminal's own text colour.
+func printProgressRootHeader(b *bean.Bean, cfg *config.Config) {
+	st := lipgloss.NewStyle()
+	if tc := cfg.GetType(b.Type); tc != nil {
+		st = st.Bold(tc.Emphasis)
+		if tc.Color != "" {
+			st = st.Foreground(ui.ResolveColor(tc.Color))
+		}
+	}
+	fmt.Printf("%s %s\n\n", st.Render(b.ID), st.Render(b.Title))
 }
 
 // progressStatusLabel renders a status name like "in-progress" as "In
@@ -135,6 +160,5 @@ func progressBarSegments(percent int) (filled, empty string) {
 
 func RegisterProgressCmd(root *cobra.Command) {
 	progressCmd.Flags().BoolVar(&progressJSON, "json", false, "Output as JSON")
-	progressCmd.Flags().StringVar(&progressParent, "parent", "", "Scope counts to this bean's descendants")
 	root.AddCommand(progressCmd)
 }

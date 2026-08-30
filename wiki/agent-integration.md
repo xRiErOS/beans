@@ -56,7 +56,7 @@ beans list --json --ready               # every ready bean, not just the top one
 beans list --json --is-blocked          # beans blocked directly or via a blocked ancestor
 beans show --json <id> [id...]          # full details, one or many IDs
 beans progress                          # status counts + percent-complete across the workspace
-beans progress --parent <id>            # same, scoped to one bean's descendants
+beans progress <id>                     # same, scoped to one bean's descendants
 beans milestones                        # milestones with descendant completion counts
 ```
 
