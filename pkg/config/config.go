@@ -48,11 +48,11 @@ var DefaultStatuses = []StatusConfig{
 // DefaultTypes defines the built-in type table. Config.Types can override
 // individual entries; see (*Config).TypeList.
 var DefaultTypes = []TypeConfig{
-	{Name: "milestone", Color: "mauve", Rank: 1, Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
-	{Name: "epic", Color: "blue", Rank: 2, Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
-	{Name: "feature", Color: "sapphire", Rank: 3, Description: "A user-facing capability or enhancement"},
-	{Name: "bug", Color: "maroon", Rank: LeafRank, Description: "Something that is broken and needs fixing"},
-	{Name: "task", Color: "", Rank: LeafRank, Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
+	{Name: "milestone", Color: "mauve", Rank: 1, Short: "M", Emphasis: true, Description: "A target release or checkpoint; group work that should ship together"},
+	{Name: "epic", Color: "blue", Rank: 2, Short: "E", Emphasis: true, Description: "A thematic container for related work; should have child beans, not be worked on directly"},
+	{Name: "feature", Color: "sapphire", Rank: 3, Short: "F", Description: "A user-facing capability or enhancement"},
+	{Name: "bug", Color: "maroon", Rank: LeafRank, Short: "B", Description: "Something that is broken and needs fixing"},
+	{Name: "task", Color: "", Rank: LeafRank, Short: "T", Description: "A concrete piece of work to complete (eg. a chore, or a sub-task for a feature)"},
 }
 
 // DefaultPriorities defines the built-in priority table. Config.Priorities
@@ -89,7 +89,10 @@ type TypeConfig struct {
 	// Roadmap decides whether this type gets its own section in `beans roadmap`
 	// and an entry in `beans milestones`. Nil means visible; only an explicit
 	// roadmap: false hides the type, and it hides its whole subtree with it.
-	Roadmap     *bool  `yaml:"roadmap,omitempty"`
+	Roadmap *bool `yaml:"roadmap,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means the first letter of the name, upper-cased.
+	Short       string `yaml:"short,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -130,6 +133,9 @@ type TypeOverride struct {
 	// and an entry in `beans milestones`. Nil means visible; only an explicit
 	// roadmap: false hides the type, and it hides its whole subtree with it.
 	Roadmap *bool `yaml:"roadmap,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means the first letter of the name, upper-cased.
+	Short string `yaml:"short,omitempty"`
 }
 
 // PriorityOverride is one entry of Config.Priorities: a priority the config
@@ -741,6 +747,9 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Roadmap != nil {
 			m.Content = append(m.Content, strNode("roadmap"), scalar(fmt.Sprintf("%t", *t.Roadmap), "!!bool"))
 		}
+		if t.Short != "" {
+			m.Content = append(m.Content, strNode("short"), strNode(t.Short))
+		}
 		if t.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
 		}
@@ -965,6 +974,22 @@ func (c *Config) RankOf(typeName string) int {
 	return LeafRank
 }
 
+// ShortOf returns the single-character code for a type: the configured one,
+// otherwise the upper-cased first letter, and "?" for an unknown type.
+func (c *Config) ShortOf(typeName string) string {
+	t := c.GetType(typeName)
+	if t == nil {
+		return "?"
+	}
+	if t.Short != "" {
+		return t.Short
+	}
+	if t.Name == "" {
+		return "?"
+	}
+	return strings.ToUpper(t.Name[:1])
+}
+
 // IsRoadmapType reports whether a type appears as its own container in the
 // aggregate views. Anything not explicitly switched off is visible.
 func (c *Config) IsRoadmapType(typeName string) bool {
@@ -1045,6 +1070,9 @@ func (c *Config) TypeList() []TypeConfig {
 			// colour-only override would silently hide the type.
 			if o.Roadmap != nil {
 				t.Roadmap = o.Roadmap
+			}
+			if o.Short != "" {
+				t.Short = o.Short
 			}
 			// An appended type starts from a zero TypeConfig, so an entry
 			// without rank: would sit at rank 0 and outrank every container.

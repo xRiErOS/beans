@@ -2411,3 +2411,65 @@ func TestSaveRoundTripsATypeRoadmapOverride(t *testing.T) {
 		t.Error("reloaded IsRoadmapType(\"bug\") = true, want false - the saved roadmap flag must survive")
 	}
 }
+
+// Task 7 of docs/topics/beans-type-profiles: the type column's single-letter
+// code moves from a hardcoded internal/ui switch onto per-type config.
+
+func TestShortOfPrefersTheConfiguredValue(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore", Short: "C"}}}
+	if got := c.ShortOf("chore"); got != "C" {
+		t.Errorf("ShortOf(\"chore\") = %q, want \"C\"", got)
+	}
+}
+
+func TestShortOfFallsBackToTheFirstLetter(t *testing.T) {
+	c := &Config{}
+	if got := c.ShortOf("milestone"); got != "M" {
+		t.Errorf("ShortOf(\"milestone\") = %q, want \"M\"", got)
+	}
+}
+
+// "milestone" carries an explicit Short in DefaultTypes, so the test above
+// passes through the configured branch without ever exercising the
+// first-letter fallback. A type with no configured short anywhere closes
+// that gap.
+func TestShortOfFallsBackForATypeWithNoConfiguredShort(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "chore"}}}
+	if got := c.ShortOf("chore"); got != "C" {
+		t.Errorf("ShortOf(\"chore\") = %q, want \"C\"", got)
+	}
+}
+
+func TestShortOfReturnsAQuestionMarkForAnUnknownType(t *testing.T) {
+	c := &Config{}
+	if got := c.ShortOf("unheard-of"); got != "?" {
+		t.Errorf("ShortOf(\"unheard-of\") = %q, want \"?\"", got)
+	}
+}
+
+// Save() builds the types: sequence node by node rather than by marshalling
+// the struct, so a yaml tag alone does not carry Short through a
+// write-and-read cycle. Without this test the omission is invisible.
+func TestSaveRoundTripsATypeShortOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	// "X" deliberately does not match "package"'s own first letter, so a
+	// Save() that silently drops Short would still pass by falling back to
+	// the first-letter default ("P") instead of failing loudly.
+	cfg.Types = []TypeOverride{{Name: "package", Short: "X"}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.ShortOf("package"); got != "X" {
+		t.Errorf("reloaded ShortOf(\"package\") = %q, want \"X\" - the saved short must survive", got)
+	}
+}
