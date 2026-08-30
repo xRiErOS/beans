@@ -360,8 +360,14 @@ func TestRebalanceIsANoopWithoutTags(t *testing.T) {
 	c := NewColumns(rows, 110, false, config.Default())
 	before := c.Title
 	c.Rebalance(rows)
-	if c.Title != before || c.Tags != 0 {
-		t.Errorf("rebalance touched a tagless layout: title %d->%d, tags %d", before, c.Title, c.Tags)
+	// Split rather than a compound ||: a mutation that only breaks one half
+	// (e.g. the guard fires but something downstream still stamps a tag
+	// width in) needs its own assertion to be provable.
+	if c.Title != before {
+		t.Errorf("rebalance moved the title in a tagless layout: %d -> %d", before, c.Title)
+	}
+	if c.Tags != 0 {
+		t.Errorf("rebalance gave a tagless layout a tag column: %d", c.Tags)
 	}
 }
 
@@ -401,5 +407,54 @@ func TestRebalanceNeverGrowsTheColumnTotal(t *testing.T) {
 
 	if c.Title+c.Tags > total {
 		t.Errorf("title+tags grew from %d to %d", total, c.Title+c.Tags)
+	}
+}
+
+// TestRebalanceNeverExceedsTheTerminal is TestColumnsNeverExceedTheTerminal's
+// sibling for Rebalance: it sums every column plus every gap — including the
+// reserved progress column, the exact term Task 7's flagship test left
+// unguarded — and checks the total against c.Width itself, after Rebalance
+// has run, across the same width sweep. TestRebalanceNeverGrowsTheColumnTotal
+// only proves Title+Tags conservation between the two columns Rebalance
+// touches; it says nothing about whether the row as a whole still fits the
+// terminal once ID, gaps and the progress column are counted back in. This
+// test closes that gap by assertion rather than by inference.
+//
+// Both rows carry short titles on purpose, so the title floor never claims
+// the whole budget the way a 200-cell title would — that leaves Title with
+// real spare across most of the sweep, and the second row's three long tags
+// need far more than the initial tag allocation, so Rebalance actually
+// transfers width from Title to Tags for nearly the whole sweep (checked
+// below), not just at one width.
+func TestRebalanceNeverExceedsTheTerminal(t *testing.T) {
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "beans-abcd", Title: "short milestone", Type: "milestone"},
+			Progress: &Progress{Done: 3, Total: 10}},
+		{Bean: &bean.Bean{ID: "beans-abcd", Title: "short task", Type: "task", Tags: []string{
+			"a-rather-long-tag-name", "second-tag-that-is-long", "third-tag-also-long",
+		}}},
+	}
+	wantProgress := progressBarWidth + 2 + DisplayWidth(fmt.Sprintf("%d/%d", 3, 10)) // 6 + 2 + 4 = 12
+
+	moved := false
+	for w := 60; w <= 200; w++ {
+		c := NewColumns(rows, w, true, config.Default())
+		tagsBefore := c.Tags
+		c.Rebalance(rows)
+		if c.Tags != tagsBefore {
+			moved = true
+		}
+
+		total := c.Indent + c.Type + c.Gap + c.ID + c.Gap + c.Title +
+			c.Gap + c.Status + c.Gap + c.Prio + c.Gap + wantProgress
+		if c.Tags > 0 {
+			total += c.Gap + c.Tags
+		}
+		if total > c.Width {
+			t.Errorf("width %d: after Rebalance, columns plus the reserved progress column sum to %d, want at most %d", w, total, c.Width)
+		}
+	}
+	if !moved {
+		t.Fatal("fixture never exercised Rebalance's transfer across the sweep — test proves nothing")
 	}
 }

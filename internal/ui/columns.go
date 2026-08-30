@@ -318,9 +318,10 @@ func (c *Columns) Rebalance(rows []Row) {
 		c.Title -= give
 		c.Tags += give
 	case c.Tags > neededTags:
-		if neededTags < 0 {
-			neededTags = 0
-		}
+		// Released, not handed to Title — this narrows the rendered row
+		// below the terminal width on purpose. Routing the surplus into
+		// Title instead would reintroduce the exact waste this task
+		// removes: a title column padded past what any title needs.
 		c.Tags = neededTags
 	}
 }
