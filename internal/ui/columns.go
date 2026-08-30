@@ -140,6 +140,18 @@ const tagsCrushWidth = 25
 // forces the title back up past what was actually available.
 const minRenderableTitle = 12
 
+// clampToMinRenderableTitle floors a title-column width at minRenderableTitle.
+// The table (NewColumns) and the tree/detail form (renderTree in render.go)
+// must apply the exact same floor to the exact same constant, or the two
+// forms overflow their terminal by different amounts at the same width —
+// this is the one place both call through instead of each computing it.
+func clampToMinRenderableTitle(w int) int {
+	if w < minRenderableTitle {
+		return minRenderableTitle
+	}
+	return w
+}
+
 // Columns holds the resolved widths for one rendering.
 //
 // Short and long forms are decided here and nowhere else. Cell renderers ask
@@ -252,14 +264,7 @@ func NewColumns(rows []Row, width int, showTags bool, cfg *config.Config) Column
 		c.Tags = 0
 		c.Title = budget()
 	}
-	if c.Title < minRenderableTitle {
-		// Below this, the title column cannot show even a truncation
-		// ellipsis meaningfully. It is a last-resort floor, not a purchase
-		// criterion like minTitleWidth: it can still be violated upward by a
-		// pathologically wide ID, which is the one overflow this layout
-		// accepts rather than guards against.
-		c.Title = minRenderableTitle
-	}
+	c.Title = clampToMinRenderableTitle(c.Title)
 	return c
 }
 
