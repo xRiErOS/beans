@@ -1080,8 +1080,10 @@ func RegisterRoadmapCmd(root *cobra.Command) {
 	roadmapCmd.Flags().StringVar(&roadmapLinkPrefix, "link-prefix", "", "URL prefix for links")
 	roadmapCmd.Flags().IntVar(&roadmapDepth, "depth", 0, "Limit output to n levels below the roadmap root (default: no limit)")
 	roadmapCmd.Flags().BoolVar(&roadmapTags, "tags", false, "Render each item's tags")
-	roadmapCmd.Flags().StringVar(&roadmapView, "view", "tree", `Layout: "tree" or "table"`)
+	roadmapCmd.Flags().StringVar(&roadmapView, "view", "tree",
+		"Arrangement: table (flat, sortable) or tree (nested)")
 	roadmapCmd.Flags().StringVar(&roadmapFormat, "format", "", `Output format: "tty" or "markdown" (default: detect)`)
-	roadmapCmd.Flags().IntVar(&roadmapWidthFlag, "max-width", 0, "Cap rendering width in columns (0: no cap)")
+	roadmapCmd.Flags().IntVar(&roadmapWidthFlag, "max-width", 0,
+		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
 	root.AddCommand(roadmapCmd)
 }
