@@ -21,10 +21,16 @@ export const beanLinks: Action<HTMLElement> = (node) => {
     const target = (e.target as HTMLElement).closest<HTMLElement>('[data-bean-id]');
     if (!target || !node.contains(target)) return;
 
+    // Prevent the default before the store lookup, not after: a reference whose
+    // bean is not in the store (archived, deleted, another store, a false
+    // positive of the beans-xxxx matcher) must be inert. Letting the browser
+    // follow `?bean=<id>` there pushes a history entry for a bean that is
+    // neither selected nor existent.
+    e.preventDefault();
+
     const linkedBean = beansStore.get(target.dataset.beanId!);
     if (!linkedBean) return;
 
-    e.preventDefault();
     ui.selectBean(linkedBean);
   }
 

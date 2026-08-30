@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { pointerClick } from '$lib/actions/pointerClick';
   import type { Bean } from '$lib/beans.svelte';
   import { beansStore } from '$lib/beans.svelte';
   import { backlogDrag } from '$lib/backlogDrag.svelte';
@@ -62,7 +61,7 @@
     ondragstart={(e) => backlogDrag.startDrag(e, bean)}
     ondragend={() => backlogDrag.endDrag()}
     ondragover={(e) => backlogDrag.hoverCard(e, parentId, index, bean.id, sectionStatus)}
-    use:pointerClick={handleClick}
+    onclick={handleClick}
     role="presentation"
   >
     <BeanCard
