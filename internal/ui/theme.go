@@ -67,5 +67,20 @@ func ThemeByName(name string) (Theme, bool) {
 	return t, ok
 }
 
+// IsValidTheme reports whether a name selects a bundled flavour. An empty
+// name is valid and means "not configured": DefaultTheme applies.
+//
+// SetTheme deliberately ignores an unknown name so a typo degrades to the
+// default instead of stripping colour from every command. That tolerance
+// makes the typo invisible, which is why `beans check` validates the name
+// through this predicate.
+func IsValidTheme(name string) bool {
+	if name == "" {
+		return true
+	}
+	_, ok := themes[name]
+	return ok
+}
+
 // DefaultTheme is Mocha, the flavour the CLI ships with.
 func DefaultTheme() Theme { return themes["mocha"] }

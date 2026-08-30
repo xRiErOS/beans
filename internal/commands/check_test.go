@@ -48,6 +48,9 @@ func TestCheckHelperProcess(t *testing.T) {
 	if c := os.Getenv("BEANS_CHECK_BAD_TYPE_COLOR"); c != "" {
 		testCfg.Types = []config.TypeOverride{{Name: "bug", Color: c}}
 	}
+	if th := os.Getenv("BEANS_CHECK_BAD_THEME"); th != "" {
+		testCfg.Display.Theme = th
+	}
 	testCore := beancore.New(beansDir, testCfg)
 	if err := testCore.Load(); err != nil {
 		os.Stderr.WriteString("loading core: " + err.Error() + "\n")
@@ -78,6 +81,7 @@ func runCheckInTestStore(t *testing.T) string {
 		"BEANS_CHECK_THEME="+ui.ActiveTheme().Name,
 		"BEANS_CHECK_BAD_STATUS_COLOR="+os.Getenv("BEANS_CHECK_BAD_STATUS_COLOR"),
 		"BEANS_CHECK_BAD_TYPE_COLOR="+os.Getenv("BEANS_CHECK_BAD_TYPE_COLOR"),
+		"BEANS_CHECK_BAD_THEME="+os.Getenv("BEANS_CHECK_BAD_THEME"),
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -190,5 +194,21 @@ func TestCheckValidatesConfiguredColoursNotOnlyDefaults(t *testing.T) {
 	}
 	if !strings.Contains(out, "invalid color 'chartreuse' for type 'bug'") {
 		t.Errorf("check did not report the user's invalid type colour:\n%s", out)
+	}
+}
+
+// TestCheckReportsAnUnknownTheme covers the one place a display.theme typo
+// can surface. ui.SetTheme keeps the current palette on an unknown name by
+// design, so `display: {theme: moccha}` renders in mocha and says nothing --
+// the user never learns their configuration was ignored.
+//
+// Mutation: drop the IsValidTheme branch in check.go and this goes red.
+func TestCheckReportsAnUnknownTheme(t *testing.T) {
+	t.Setenv("BEANS_CHECK_BAD_THEME", "moccha")
+
+	out := stripANSITest(runCheckInTestStore(t))
+
+	if !strings.Contains(out, "unknown display.theme 'moccha'") {
+		t.Errorf("check did not report the unknown theme:\n%s", out)
 	}
 }

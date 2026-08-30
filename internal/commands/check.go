@@ -103,6 +103,15 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
+		// 2b. Check the configured theme names a bundled flavour. The
+		// renderer deliberately falls back to the default on an unknown
+		// name rather than stripping colour (see ui.SetTheme), so this is
+		// the only place a typo in display.theme becomes visible.
+		if cfg != nil && !ui.IsValidTheme(cfg.GetTheme()) {
+			configErrors = append(configErrors,
+				fmt.Sprintf("unknown display.theme '%s': expected latte, frappe, macchiato or mocha", cfg.GetTheme()))
+		}
+
 		// 3. Check all status colours are valid. This must iterate the
 		// MERGED list, not config.DefaultStatuses: the defaults are
 		// compile-time constants this repository writes itself, so
