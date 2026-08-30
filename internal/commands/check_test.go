@@ -16,6 +16,7 @@ func TestUnknownTypeBeansFindsBeansTheConfigDoesNotCover(t *testing.T) {
 		{ID: "a1", Type: "task"},
 		{ID: "a2", Type: "chore"},
 		{ID: "a3", Type: "bug"},
+		{ID: "a4", Type: ""},
 	}
 
 	got := unknownTypeBeans(beans)
