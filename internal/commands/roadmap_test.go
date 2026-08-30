@@ -1772,3 +1772,61 @@ func TestRoadmapMarkdownUnscheduledHeadingSaysUnscheduled(t *testing.T) {
 		t.Errorf("orphan section heading must not hardcode the classic-profile word, got %q", got)
 	}
 }
+
+// TestRoadmapMarkdownBlockSeparation pins the exact blank-line structure of
+// the rendered Markdown: every heading/body/item block is separated from
+// its neighbours by exactly one blank line, and the document ends in
+// exactly one trailing newline. All other Markdown assertions in this file
+// use strings.Contains/HasPrefix and would silently pass through a
+// whitespace regression (the missing-blank-line-before-"#### Feature:" and
+// missing-blank-line-before-"## Unscheduled" defects this test guards
+// against were both invisible to those assertions).
+func TestRoadmapMarkdownBlockSeparation(t *testing.T) {
+	prev := cfg
+	cfg = config.Default()
+	defer func() { cfg = prev }()
+
+	beans := []*bean.Bean{
+		{ID: "t-m1", Type: "milestone", Status: "todo", Title: "Milestone One", Body: "M body"},
+		{ID: "t-e1", Type: "epic", Status: "todo", Title: "Epic One", Body: "E body", Parent: "t-m1"},
+		{ID: "t-l1", Type: "task", Status: "todo", Title: "Direct leaf", Parent: "t-e1"},
+		{ID: "t-f1", Type: "feature", Status: "todo", Title: "Feature One", Body: "F body", Parent: "t-e1"},
+		{ID: "t-l2", Type: "task", Status: "todo", Title: "Nested leaf", Parent: "t-f1"},
+		{ID: "t-of", Type: "feature", Status: "todo", Title: "Orphan Feature", Parent: ""},
+		{ID: "t-l3", Type: "task", Status: "todo", Title: "Orphan nested leaf", Parent: "t-of"},
+	}
+	data := buildRoadmap(beans, false, nil, nil)
+	got := renderRoadmapMarkdown(data, false, "", false)
+
+	const taskBadge = "![task](https://img.shields.io/badge/task-gray?style=flat-square)"
+	want := "# Roadmap\n" +
+		"\n" +
+		"## Milestone: Milestone One (t-m1)\n" +
+		"\n" +
+		"> M body\n" +
+		"\n" +
+		"### Epic: Epic One (t-e1)\n" +
+		"\n" +
+		"> E body\n" +
+		"\n" +
+		"- " + taskBadge + " Direct leaf (t-l1)\n" +
+		"\n" +
+		"#### Feature: Feature One (t-f1)\n" +
+		"\n" +
+		"> F body\n" +
+		"\n" +
+		"- " + taskBadge + " Nested leaf (t-l2)\n" +
+		"\n" +
+		"## Unscheduled\n" +
+		"\n" +
+		"#### Feature: Orphan Feature (t-of)\n" +
+		"\n" +
+		"- " + taskBadge + " Orphan nested leaf (t-l3)\n"
+
+	if got != want {
+		t.Errorf("roadmap markdown block separation mismatch:\ngot:  %q\nwant: %q", got, want)
+	}
+	if strings.Contains(got, "\n\n\n") {
+		t.Errorf("expected no run of 2+ blank lines, got %q", got)
+	}
+}

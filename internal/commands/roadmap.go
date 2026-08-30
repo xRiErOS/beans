@@ -949,7 +949,9 @@ func renderRoadmapMarkdown(data *roadmapData, links bool, linkPrefix string, sho
 	if err := tmpl.Execute(&sb, data); err != nil {
 		panic(err)
 	}
-	return sb.String()
+	// The template's trailing text emits a final newline after the last
+	// block; normalise so the document always ends in exactly one.
+	return strings.TrimRight(sb.String(), "\n") + "\n"
 }
 
 // renderBeanRef renders a bean ID, optionally as a markdown link.

@@ -2,79 +2,57 @@
 - {{typeBadge .}} {{.Title}} {{beanRef .}}{{tagLine . "  "}}
 {{end -}}
 
-{{- define "featureGroup" -}}
+{{- define "featureGroup"}}
 #### {{typeLabel .Feature.Type}}: {{.Feature.Title}} {{beanRef .Feature}}{{tagLine .Feature ""}}
 {{with firstParagraph .Feature.Body}}
 > {{.}}
-{{end}}
-
-{{range .Items -}}
-{{template "beanLine" .}}
+{{end -}}
+{{if .Items}}
+{{range .Items}}{{template "beanLine" .}}{{end}}
 {{- end}}
 {{- end -}}
 
-{{- define "epicGroup" -}}
+{{- define "epicGroup"}}
 ### {{typeLabel .Epic.Type}}: {{.Epic.Title}} {{beanRef .Epic}}{{tagLine .Epic ""}}
 {{with firstParagraph .Epic.Body}}
 > {{.}}
-{{end}}
-
-{{range .Items -}}
-{{template "beanLine" .}}
+{{end -}}
+{{if .Items}}
+{{range .Items}}{{template "beanLine" .}}{{end}}
 {{- end}}
-{{- range .Features -}}
-{{template "featureGroup" .}}
-{{- end}}
+{{- range .Features}}{{template "featureGroup" .}}{{end}}
 {{- end -}}
 
 # Roadmap
-{{- if .Root}}
-{{- if .Root.Epic}}
-{{template "epicGroup" .Root.Epic}}
-{{- end}}
-{{- if .Root.Feature}}
-{{template "featureGroup" .Root.Feature}}
-{{- end}}
+{{if .Root}}
+{{- with .Root.Epic}}{{template "epicGroup" .}}{{end}}
+{{- with .Root.Feature}}{{template "featureGroup" .}}{{end}}
 {{- else}}
-{{range .Milestones}}
+{{- range .Milestones}}
 ## {{typeLabel .Milestone.Type}}: {{.Milestone.Title}} {{beanRef .Milestone}}{{tagLine .Milestone ""}}
 {{with firstParagraph .Milestone.Body}}
 > {{.}}
-{{end}}
-{{range .Epics -}}
-{{template "epicGroup" .}}
-{{- end}}
-{{- range .Features -}}
-{{template "featureGroup" .}}
-{{- end}}
+{{end -}}
+{{- range .Epics}}{{template "epicGroup" .}}{{end}}
+{{- range .Features}}{{template "featureGroup" .}}{{end}}
 {{- if .Other}}
 {{- if or (len .Epics) (len .Features)}}
 ### Miscellaneous
 {{end}}
-
-{{range .Other -}}
-{{template "beanLine" .}}
-{{- end}}
+{{range .Other}}{{template "beanLine" .}}{{end}}
 {{- end}}
 {{- end}}
 {{- if .Unscheduled}}
 {{- if len $.Milestones}}
 ## Unscheduled
 {{end}}
-{{- range .Unscheduled.Epics -}}
-{{template "epicGroup" .}}
-{{- end}}
-{{- range .Unscheduled.Features -}}
-{{template "featureGroup" .}}
-{{- end}}
+{{- range .Unscheduled.Epics}}{{template "epicGroup" .}}{{end}}
+{{- range .Unscheduled.Features}}{{template "featureGroup" .}}{{end}}
 {{- if .Unscheduled.Other}}
 {{- if or (len .Unscheduled.Epics) (len .Unscheduled.Features)}}
 ### Miscellaneous
 {{end}}
-
-{{range .Unscheduled.Other -}}
-{{template "beanLine" .}}
-{{- end}}
+{{range .Unscheduled.Other}}{{template "beanLine" .}}{{end}}
 {{- end}}
 {{- end}}
 {{- end}}
