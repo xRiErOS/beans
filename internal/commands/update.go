@@ -155,7 +155,7 @@ func buildUpdateInput(cmd *cobra.Command, existingTags []string, currentBody str
 
 	if cmd.Flags().Changed("status") {
 		if !cfg.IsValidStatus(updateStatus) {
-			return input, nil, fmt.Errorf("invalid status: %s (must be %s)", updateStatus, cfg.StatusList())
+			return input, nil, fmt.Errorf("invalid status: %s (must be %s)", updateStatus, strings.Join(cfg.StatusNames(), ", "))
 		}
 		input.Status = &updateStatus
 		changes = append(changes, "status")
@@ -163,7 +163,7 @@ func buildUpdateInput(cmd *cobra.Command, existingTags []string, currentBody str
 
 	if cmd.Flags().Changed("type") {
 		if !cfg.IsValidType(updateType) {
-			return input, nil, fmt.Errorf("invalid type: %s (must be %s)", updateType, cfg.TypeList())
+			return input, nil, fmt.Errorf("invalid type: %s (must be %s)", updateType, strings.Join(cfg.TypeNames(), ", "))
 		}
 		input.Type = &updateType
 		changes = append(changes, "type")
@@ -171,7 +171,7 @@ func buildUpdateInput(cmd *cobra.Command, existingTags []string, currentBody str
 
 	if cmd.Flags().Changed("priority") {
 		if !cfg.IsValidPriority(updatePriority) {
-			return input, nil, fmt.Errorf("invalid priority: %s (must be %s)", updatePriority, cfg.PriorityList())
+			return input, nil, fmt.Errorf("invalid priority: %s (must be %s)", updatePriority, strings.Join(cfg.PriorityNames(), ", "))
 		}
 		input.Priority = &updatePriority
 		changes = append(changes, "priority")

@@ -6,12 +6,12 @@ import (
 	"os"
 	"strings"
 
-	"github.com/charmbracelet/glamour"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hmans/beans/internal/output"
 	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beangraph"
+	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
@@ -148,95 +148,100 @@ func showOutputAll(beans []*bean.Bean, isTTY bool) (string, error) {
 
 // styledBeanOutput builds the styled representation of a single bean.
 func styledBeanOutput(b *bean.Bean) (string, error) {
-	statusCfg := cfg.GetStatus(b.Status)
-	statusColor := "gray"
-	if statusCfg != nil {
-		statusColor = statusCfg.Color
-	}
-	isArchive := cfg.IsArchiveStatus(b.Status)
+	return renderBeanDetail(b, cfg, resolveWidth(0, false, cfg)), nil
+}
 
-	var header strings.Builder
-	header.WriteString(ui.ID.Render(b.ID))
-	header.WriteString(" ")
-	header.WriteString(ui.RenderStatusWithColor(b.Status, statusColor, isArchive))
-	if implicitStatus, implicitStatusFrom := core.ImplicitStatus(b.ID); implicitStatus != "" {
-		header.WriteString(" ")
-		header.WriteString(ui.Muted.Render("↑" + implicitStatus + " (from " + implicitStatusFrom + ")"))
+// renderBeanDetail lays out one bean for the terminal: the attribute header
+// reads the same order vertically that the beans table reads horizontally --
+// type, id, then title, then status and priority -- so type, id and title
+// carry the type's colour and weight and the header reads as one unit.
+//
+// The body goes through ui.RenderMarkdown (Task 16) instead of glamour: that
+// renderer emits no trailing padding and no painted backgrounds, which is
+// exactly what glamour got wrong.
+func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
+	var sb strings.Builder
+
+	tint := ""
+	bold := false
+	if tc := cfg.GetType(b.Type); tc != nil {
+		tint, bold = tc.Color, tc.Emphasis
+	}
+	head := lipgloss.NewStyle().Bold(bold)
+	if tint != "" {
+		head = head.Foreground(ui.ResolveColor(tint))
 	}
 
-	// Display type
+	first := head.Render(b.ID)
 	if b.Type != "" {
-		typeCfg := cfg.GetType(b.Type)
-		typeColor := "gray"
-		if typeCfg != nil {
-			typeColor = typeCfg.Color
-		}
-		header.WriteString(" ")
-		header.WriteString(ui.RenderTypeWithColor(b.Type, typeColor))
+		// An unconditional separator would leave a stray two-space lead
+		// before the id when a bean has no type.
+		first = head.Render(b.Type) + "  " + first
 	}
+	sb.WriteString(first + "\n")
+	sb.WriteString(head.Render(b.Title) + "\n")
+
+	var attrs []string
+
+	// Status and priority render whenever a value is present, falling back
+	// to the legacy "gray" alias when the config has no matching entry --
+	// the raw value is exactly what a reader needs to see in that case, not
+	// less of it. "normal" priority is not filtered here: hiding it is a
+	// table-only density decision (Task 10's prioCell), not a detail-view
+	// one -- a detail view shows one bean and has no density to buy.
+	statusColor, statusBold := "gray", true
+	if sc := cfg.GetStatus(b.Status); sc != nil {
+		statusColor, statusBold = sc.Color, !sc.Archive
+	}
+	attrs = append(attrs, lipgloss.NewStyle().Foreground(ui.ResolveColor(statusColor)).
+		Bold(statusBold).Render(b.Status))
 
 	if b.Priority != "" {
-		priorityCfg := cfg.GetPriority(b.Priority)
 		priorityColor := "gray"
-		if priorityCfg != nil {
-			priorityColor = priorityCfg.Color
+		if pc := cfg.GetPriority(b.Priority); pc != nil {
+			priorityColor = pc.Color
 		}
-		header.WriteString(" ")
-		header.WriteString(ui.RenderPriorityWithColor(b.Priority, priorityColor))
+		attrs = append(attrs, lipgloss.NewStyle().Foreground(ui.ResolveColor(priorityColor)).
+			Render(b.Priority))
 	}
-	if len(b.Tags) > 0 {
-		header.WriteString("  ")
-		header.WriteString(ui.Muted.Render(strings.Join(b.Tags, ", ")))
+	if implicitStatus, implicitStatusFrom := core.ImplicitStatus(b.ID); implicitStatus != "" {
+		attrs = append(attrs, ui.Muted.Render("↑"+implicitStatus+" (from "+implicitStatusFrom+")"))
 	}
+	if len(attrs) > 0 {
+		sb.WriteString(strings.Join(attrs, "  ") + "\n")
+	}
+
+	if rel := formatRelationships(b); rel != "" {
+		sb.WriteString(rel + "\n")
+	}
+
+	// created/updated: presentation-only metadata the old header carried as
+	// muted text. Dropping glamour is the plan's only authorised behaviour
+	// change; this stays, just moved under the reordered attribute header.
+	var stamps []string
 	if b.CreatedAt != nil {
-		header.WriteString("  ")
-		header.WriteString(ui.Muted.Render("created " + b.CreatedAt.Format("2006-01-02 15:04 UTC")))
+		stamps = append(stamps, "created "+b.CreatedAt.Format("2006-01-02 15:04 UTC"))
 	}
 	if b.UpdatedAt != nil {
-		header.WriteString("  ")
-		header.WriteString(ui.Muted.Render("updated " + b.UpdatedAt.Format("2006-01-02 15:04 UTC")))
+		stamps = append(stamps, "updated "+b.UpdatedAt.Format("2006-01-02 15:04 UTC"))
 	}
-	header.WriteString("\n")
-	header.WriteString(ui.Title.Render(b.Title))
-
-	// Display relationships
-	if b.Parent != "" || len(b.Blocking) > 0 {
-		header.WriteString("\n")
-		header.WriteString(ui.Muted.Render(strings.Repeat("─", 50)))
-		header.WriteString("\n")
-		header.WriteString(formatRelationships(b))
+	if len(stamps) > 0 {
+		sb.WriteString(ui.Muted.Render(strings.Join(stamps, "  ")) + "\n")
 	}
 
-	header.WriteString("\n")
-	header.WriteString(ui.Muted.Render(strings.Repeat("─", 50)))
+	sb.WriteString(ui.TreeLine.Render(strings.Repeat("─", width)) + "\n\n")
 
-	headerBox := lipgloss.NewStyle().
-		MarginBottom(1).
-		Render(header.String())
-
-	var out strings.Builder
-	out.WriteString(headerBox)
-	out.WriteString("\n")
-
-	// Render the body with Glamour
-	if b.Body != "" {
-		renderer, err := glamour.NewTermRenderer(
-			glamour.WithAutoStyle(),
-			glamour.WithWordWrap(80),
-		)
-		if err != nil {
-			return "", fmt.Errorf("failed to create renderer: %w", err)
+	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
+		sb.WriteString(body + "\n")
+	}
+	if len(b.Tags) > 0 {
+		parts := make([]string, len(b.Tags))
+		for i, t := range b.Tags {
+			parts[i] = "#" + t
 		}
-
-		rendered, err := renderer.Render(b.Body)
-		if err != nil {
-			return "", fmt.Errorf("failed to render markdown: %w", err)
-		}
-
-		out.WriteString(rendered)
+		sb.WriteString("\n  " + ui.Muted.Render(strings.Join(parts, " ")) + "\n")
 	}
-
-	return out.String(), nil
+	return sb.String()
 }
 
 // formatRelationships formats parent and blocks for display.

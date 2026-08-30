@@ -7,7 +7,10 @@ import (
 	"os"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
+
 	"github.com/hmans/beans/internal/output"
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/beangraph"
 	"github.com/spf13/cobra"
 )
@@ -85,10 +88,19 @@ var progressCmd = &cobra.Command{
 			return enc.Encode(result)
 		}
 
-		for _, s := range statusNames {
-			fmt.Printf("%s: %d\n", progressStatusLabel(s), counts[s])
+		for _, sc := range cfg.StatusList() {
+			// Measure and pad the plain label first, then colour it — never
+			// the other way around, or the padding would count escape bytes
+			// as visible width.
+			label := progressStatusLabel(sc.Name)
+			style := lipgloss.NewStyle().Foreground(ui.ResolveColor(sc.Color)).Bold(!sc.Archive)
+			fmt.Printf("%s: %d\n", style.Render(label), counts[sc.Name])
 		}
-		fmt.Println(progressBar(percent) + fmt.Sprintf(" %d%% complete", percent))
+
+		filled, empty := progressBarSegments(percent)
+		bar := lipgloss.NewStyle().Foreground(ui.ResolveColor("green")).Render(filled) +
+			lipgloss.NewStyle().Foreground(ui.ResolveColor("surface2")).Render(empty)
+		fmt.Printf("%s %d%% complete\n", bar, percent)
 
 		return nil
 	},
@@ -107,16 +119,18 @@ func progressStatusLabel(status string) string {
 	return strings.Join(words, " ")
 }
 
-// progressBar renders a fixed-width unicode block bar scaled by percent.
-func progressBar(percent int) string {
-	filled := percent * progressBarWidth / 100
-	if filled > progressBarWidth {
-		filled = progressBarWidth
+// progressBarSegments returns the filled and empty plain-text runs of the
+// bar separately, so a caller can colour each run independently without
+// measuring against text that already carries colour escapes.
+func progressBarSegments(percent int) (filled, empty string) {
+	n := percent * progressBarWidth / 100
+	if n > progressBarWidth {
+		n = progressBarWidth
 	}
-	if filled < 0 {
-		filled = 0
+	if n < 0 {
+		n = 0
 	}
-	return strings.Repeat("━", filled) + strings.Repeat("░", progressBarWidth-filled)
+	return strings.Repeat("━", n), strings.Repeat("░", progressBarWidth-n)
 }
 
 func RegisterProgressCmd(root *cobra.Command) {

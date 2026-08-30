@@ -1,6 +1,9 @@
 package ui
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestRenderBeanRow_NarrowWidth(t *testing.T) {
 	// Test that RenderBeanRow doesn't panic with very small MaxTitleWidth values
@@ -109,6 +112,102 @@ func TestShortType(t *testing.T) {
 	}
 }
 
+// Task 3: colour names now resolve against the active Catppuccin theme
+// instead of a hand-rolled hex palette.
+
+func TestResolveColorUsesTheActiveTheme(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+
+	SetTheme("mocha")
+	if got := string(ResolveColor("mauve")); got != "#cba6f7" {
+		t.Errorf(`mocha mauve = %q, want "#cba6f7"`, got)
+	}
+
+	SetTheme("latte")
+	if got := string(ResolveColor("mauve")); got != "#8839ef" {
+		t.Errorf(`latte mauve = %q, want "#8839ef"`, got)
+	}
+}
+
+func TestResolveColorPassesHexThrough(t *testing.T) {
+	if got := string(ResolveColor("#ff0000")); got != "#ff0000" {
+		t.Errorf(`ResolveColor("#ff0000") = %q, want passthrough`, got)
+	}
+}
+
+func TestSetThemeIgnoresUnknownNames(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+	SetTheme("nonesuch")
+	if got := ActiveTheme().Name; got != "mocha" {
+		t.Errorf(`ActiveTheme() = %q after an unknown name, want "mocha"`, got)
+	}
+}
+
+func TestUnknownToneFallsBackToSubtext0(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+	// An unknown tone must stay legible rather than vanish into the background.
+	if got := string(ResolveColor("chartreuse")); got != "#a6adc8" {
+		t.Errorf(`unknown tone = %q, want mocha subtext0 "#a6adc8"`, got)
+	}
+}
+
+func TestSetThemeRefreshesDerivedStyles(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+	before := ColorPrimary
+	SetTheme("latte")
+	if ColorPrimary == before {
+		t.Error("ColorPrimary did not follow the theme switch")
+	}
+}
+
+// Fix round 1: NamedColors used to be the set of colour names a user was
+// allowed to write in .beans.yml. green/yellow/red/blue kept working after
+// the Catppuccin switch because they happen to already be tone names; these
+// four did not, and needed an explicit alias so an existing "color: purple"
+// (or the literal "gray" several commands still pass as a sentinel) keeps
+// resolving instead of silently degrading.
+
+func TestLegacyColorAliasesResolveToTheirCatppuccinTone(t *testing.T) {
+	t.Cleanup(func() { SetTheme("mocha") })
+	SetTheme("mocha")
+
+	aliases := map[string]string{
+		"gray":   "overlay1",
+		"grey":   "overlay1",
+		"purple": "mauve",
+		"cyan":   "teal",
+	}
+	for alias, tone := range aliases {
+		want := ResolveColor(tone)
+		if got := ResolveColor(alias); got != want {
+			t.Errorf("ResolveColor(%q) = %q, want %q (alias for tone %q)", alias, got, want, tone)
+		}
+		upper := strings.ToUpper(alias)
+		if got := ResolveColor(upper); got != want {
+			t.Errorf("ResolveColor(%q) = %q, want %q (alias for tone %q)", upper, got, want, tone)
+		}
+	}
+}
+
+func TestLegacyColorAliasesAreValid(t *testing.T) {
+	for _, alias := range []string{"gray", "grey", "purple", "cyan", "GRAY", "Purple", "CYAN"} {
+		if !IsValidColor(alias) {
+			t.Errorf("IsValidColor(%q) = false, want true: it is a legacy alias", alias)
+		}
+	}
+}
+
+func TestUnknownColorNameIsNeitherAliasNorValid(t *testing.T) {
+	// The alias table must not become a catch-all: a genuine typo still
+	// falls through to the unknown-tone fallback and reports invalid.
+	if IsValidColor("chartreuse") {
+		t.Error(`IsValidColor("chartreuse") = true, want false`)
+	}
+}
+
 func TestShortStatus(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -129,5 +228,63 @@ func TestShortStatus(t *testing.T) {
 				t.Errorf("ShortStatus(%q) = %q, want %q", tt.input, result, tt.expected)
 			}
 		})
+	}
+}
+
+func TestRenderBeanRowSurvivesForTheTUI(t *testing.T) {
+	// The TUI renders through this. It must keep working, and it must follow
+	// the theme without being rewritten.
+	row := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
+		StatusColor: "green", TypeColor: "blue", MaxTitleWidth: 40,
+	})
+	if row == "" {
+		t.Fatal("RenderBeanRow returned nothing")
+	}
+}
+
+func TestRenderBeanRowFollowsTheTheme(t *testing.T) {
+	// Force a real colour profile: under `go test` there is no tty, so
+	// lipgloss strips all colour and mocha/latte would render identically
+	// regardless of whether the code follows the theme at all (see
+	// withTrueColor in markdown_test.go).
+	withTrueColor(t)
+	prev := ActiveTheme().Name
+	t.Cleanup(func() { SetTheme(prev) })
+
+	SetTheme("mocha")
+	mocha := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
+		StatusColor: "green", TypeColor: "blue", MaxTitleWidth: 40,
+	})
+
+	SetTheme("latte")
+	latte := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
+		StatusColor: "green", TypeColor: "blue", MaxTitleWidth: 40,
+	})
+
+	if mocha == latte {
+		t.Error("RenderBeanRow did not follow the theme switch")
+	}
+}
+
+func TestCalculateResponsiveColumnsStillExists(t *testing.T) {
+	if got := CalculateResponsiveColumns(140, true); got.ID == 0 {
+		t.Error("CalculateResponsiveColumns must stay for the TUI")
+	}
+}
+
+func TestCalculateResponsiveColumnsIgnoresTheme(t *testing.T) {
+	// Widths are not a colour concern: a theme switch must not change
+	// which columns get shown or how wide they are.
+	prev := ActiveTheme().Name
+	t.Cleanup(func() { SetTheme(prev) })
+
+	SetTheme("mocha")
+	mocha := CalculateResponsiveColumns(140, true)
+
+	SetTheme("latte")
+	latte := CalculateResponsiveColumns(140, true)
+
+	if mocha != latte {
+		t.Errorf("CalculateResponsiveColumns followed the theme: mocha=%+v latte=%+v", mocha, latte)
 	}
 }

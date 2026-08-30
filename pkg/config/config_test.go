@@ -80,10 +80,15 @@ func TestIsValidStatus(t *testing.T) {
 func TestStatusList(t *testing.T) {
 	cfg := Default()
 	got := cfg.StatusList()
-	want := "in-progress, todo, draft, completed, scrapped"
+	want := []string{"in-progress", "todo", "draft", "completed", "scrapped"}
 
-	if got != want {
-		t.Errorf("StatusList() = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("StatusList() has %d entries, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("StatusList()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
@@ -439,10 +444,15 @@ func TestIsValidType(t *testing.T) {
 func TestTypeList(t *testing.T) {
 	cfg := Default()
 	got := cfg.TypeList()
-	want := "milestone, epic, bug, feature, task"
+	want := []string{"milestone", "epic", "feature", "bug", "task"}
 
-	if got != want {
-		t.Errorf("TypeList() = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("TypeList() has %d entries, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("TypeList()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
@@ -457,8 +467,8 @@ func TestGetType(t *testing.T) {
 		if typ.Name != "bug" {
 			t.Errorf("Name = %q, want \"bug\"", typ.Name)
 		}
-		if typ.Color != "red" {
-			t.Errorf("Color = %q, want \"red\"", typ.Color)
+		if typ.Color != "maroon" {
+			t.Errorf("Color = %q, want \"maroon\"", typ.Color)
 		}
 	})
 
@@ -551,13 +561,12 @@ func TestTypeDescriptions(t *testing.T) {
 		}
 	})
 
-	t.Run("types in config file are ignored", func(t *testing.T) {
-		// Even if a config file has custom types, they should be ignored
-		// and hardcoded types should be used instead
+	t.Run("types in config file extend the defaults", func(t *testing.T) {
+		// A type the config file names but the defaults do not know is
+		// appended, not ignored (Task 2b: types became overridable).
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, ConfigFileName)
 
-		// Config with custom types (should be ignored)
 		configYAML := `beans:
   prefix: "test-"
   id_length: 4
@@ -568,7 +577,7 @@ statuses:
 types:
   - name: custom-type
     color: pink
-    description: "This should be ignored"
+    description: "A configured type"
 `
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
 			t.Fatalf("WriteFile error = %v", err)
@@ -579,9 +588,9 @@ types:
 			t.Fatalf("Load() error = %v", err)
 		}
 
-		// Custom type should not be valid
-		if loaded.IsValidType("custom-type") {
-			t.Error("IsValidType(\"custom-type\") = true, want false (custom types should be ignored)")
+		// The configured type is now valid.
+		if !loaded.IsValidType("custom-type") {
+			t.Error("IsValidType(\"custom-type\") = false, want true (configured types are appended)")
 		}
 
 		// Hardcoded types should still work
@@ -615,20 +624,19 @@ func TestStatusDescriptions(t *testing.T) {
 		}
 	})
 
-	t.Run("statuses in config file are ignored", func(t *testing.T) {
-		// Even if a config file has custom statuses, they should be ignored
-		// and hardcoded statuses should be used instead
+	t.Run("statuses in config file extend the defaults", func(t *testing.T) {
+		// A status the config file names but the defaults do not know is
+		// appended, not ignored (Task 2b: statuses became overridable).
 		tmpDir := t.TempDir()
 		configPath := filepath.Join(tmpDir, ConfigFileName)
 
-		// Config with custom statuses (should be ignored)
 		configYAML := `beans:
   prefix: "test-"
   id_length: 4
 statuses:
   - name: custom-status
     color: pink
-    description: "This should be ignored"
+    description: "A configured status"
 `
 		if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
 			t.Fatalf("WriteFile error = %v", err)
@@ -639,9 +647,9 @@ statuses:
 			t.Fatalf("Load() error = %v", err)
 		}
 
-		// Custom status should not be valid
-		if loaded.IsValidStatus("custom-status") {
-			t.Error("IsValidStatus(\"custom-status\") = true, want false (custom statuses should be ignored)")
+		// The configured status is now valid.
+		if !loaded.IsValidStatus("custom-status") {
+			t.Error("IsValidStatus(\"custom-status\") = false, want true (configured statuses are appended)")
 		}
 
 		// Hardcoded statuses should still work
@@ -823,10 +831,15 @@ func TestIsValidPriority(t *testing.T) {
 func TestPriorityList(t *testing.T) {
 	cfg := Default()
 	got := cfg.PriorityList()
-	want := "critical, high, normal, low, deferred"
+	want := []string{"critical", "high", "normal", "low", "deferred"}
 
-	if got != want {
-		t.Errorf("PriorityList() = %q, want %q", got, want)
+	if len(got) != len(want) {
+		t.Fatalf("PriorityList() has %d entries, want %d", len(got), len(want))
+	}
+	for i, name := range want {
+		if got[i].Name != name {
+			t.Errorf("PriorityList()[%d].Name = %q, want %q", i, got[i].Name, name)
+		}
 	}
 }
 
@@ -1875,4 +1888,358 @@ func TestConfigFile(t *testing.T) {
 			t.Errorf("ConfigFile() = %q, want empty", got)
 		}
 	})
+}
+
+func TestGetThemeDefaultsToMocha(t *testing.T) {
+	if got := (&Config{}).GetTheme(); got != "mocha" {
+		t.Errorf(`GetTheme() = %q, want "mocha"`, got)
+	}
+}
+
+func TestGetThemeHonoursTheConfiguredValue(t *testing.T) {
+	c := &Config{Display: DisplayConfig{Theme: "latte"}}
+	if got := c.GetTheme(); got != "latte" {
+		t.Errorf(`GetTheme() = %q, want "latte"`, got)
+	}
+}
+
+func TestGetMaxWidthDefaultsTo110(t *testing.T) {
+	if got := (&Config{}).GetMaxWidth(); got != 110 {
+		t.Errorf("GetMaxWidth() = %d, want 110", got)
+	}
+}
+
+func TestGetMaxWidthHonoursTheConfiguredValue(t *testing.T) {
+	c := &Config{Display: DisplayConfig{MaxWidth: 140}}
+	if got := c.GetMaxWidth(); got != 140 {
+		t.Errorf("GetMaxWidth() = %d, want 140", got)
+	}
+}
+
+func TestGetMaxWidthMinusOneMeansUncapped(t *testing.T) {
+	c := &Config{Display: DisplayConfig{MaxWidth: -1}}
+	if got := c.GetMaxWidth(); got != -1 {
+		t.Errorf("GetMaxWidth() = %d, want -1", got)
+	}
+}
+
+// Task 2b: statuses, types and priorities become overridable from
+// Config.Statuses / Config.Types / Config.Priorities, merged entry by entry
+// against the built-in defaults.
+
+func TestTypeListFallsBackToTheDefaults(t *testing.T) {
+	c := Default()
+	if len(c.TypeList()) != len(DefaultTypes) {
+		t.Errorf("TypeList() has %d entries, want the %d defaults",
+			len(c.TypeList()), len(DefaultTypes))
+	}
+}
+
+func TestConfigOverridesASingleColour(t *testing.T) {
+	c := Default()
+	c.Types = []TypeOverride{{Name: "bug", Color: "#ff0000"}}
+
+	got := c.GetType("bug")
+	if got == nil || got.Color != "#ff0000" {
+		t.Fatalf("GetType(\"bug\").Color = %v, want the override", got)
+	}
+	// Everything not named keeps its default.
+	if other := c.GetType("epic"); other == nil || other.Color != "blue" {
+		t.Errorf("GetType(\"epic\").Color = %v, want the default \"blue\"", other)
+	}
+	if len(c.TypeList()) != len(DefaultTypes) {
+		t.Errorf("an override changed the list length to %d", len(c.TypeList()))
+	}
+}
+
+func TestAnOverrideKeepsUnsetFields(t *testing.T) {
+	c := Default()
+	c.Types = []TypeOverride{{Name: "epic", Color: "#00ff00"}}
+	got := c.GetType("epic")
+	if got == nil {
+		t.Fatal("GetType(\"epic\") = nil, want the merged entry")
+	}
+	// Overriding only the colour must not blank out fields the override
+	// left unset, such as the description.
+	if got.Description == "" {
+		t.Error("overriding only the colour dropped the description")
+	}
+}
+
+func TestAnUnknownNameIsAppended(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusOverride{{Name: "blocked", Color: "red"}}
+	if got := c.GetStatus("blocked"); got == nil {
+		t.Error("a status the defaults do not know should be appended")
+	}
+	if len(c.StatusList()) != len(DefaultStatuses)+1 {
+		t.Errorf("StatusList() has %d entries, want defaults plus one", len(c.StatusList()))
+	}
+}
+
+func TestStatusNamesFollowTheMergedList(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusOverride{{Name: "blocked", Color: "red"}}
+	found := false
+	for _, n := range c.StatusNames() {
+		if n == "blocked" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("StatusNames() does not reflect the merged list")
+	}
+}
+
+func TestPriorityOverride(t *testing.T) {
+	c := Default()
+	c.Priorities = []PriorityOverride{{Name: "critical", Color: "#ff00ff"}}
+	if got := c.GetPriority("critical"); got == nil || got.Color != "#ff00ff" {
+		t.Errorf("GetPriority(\"critical\").Color = %v, want the override", got)
+	}
+}
+
+func TestGettersToleratePlainDefaults(t *testing.T) {
+	c := &Config{}
+	if got := c.GetType("task"); got == nil {
+		t.Error("a bare Config must still resolve the built-in types")
+	}
+}
+
+func TestSaveRoundTripsTypeStatusAndPriorityOverrides(t *testing.T) {
+	// Save() is called by more than `init` (e.g. `beans rename`). Without
+	// serializing these fields, a Save() on an already-loaded config would
+	// silently erase whatever the user configured.
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "bug", Color: "#ff00ff"}}
+	cfg.Statuses = []StatusOverride{{Name: "blocked", Color: "red", Archive: boolPtr(true)}}
+	cfg.Priorities = []PriorityOverride{{Name: "critical", Color: "#ff0000"}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetType("bug"); got == nil || got.Color != "#ff00ff" {
+		t.Errorf("reloaded GetType(\"bug\").Color = %v, want the saved override", got)
+	}
+	if got := reloaded.GetStatus("blocked"); got == nil || !got.Archive {
+		t.Errorf("reloaded GetStatus(\"blocked\") = %v, want the saved override", got)
+	}
+	if got := reloaded.GetPriority("critical"); got == nil || got.Color != "#ff0000" {
+		t.Errorf("reloaded GetPriority(\"critical\").Color = %v, want the saved override", got)
+	}
+}
+
+// Fix round 1, Commit 1: a colour-only override must not silently flip
+// Archive back to false (the field the previous, unconditional-assignment
+// merge got wrong for "completed"). Archive is a pointer precisely so these
+// two directions - "not mentioned" vs. "explicitly set" - are distinguishable.
+
+func TestRecolouringAStatusPreservesItsArchiveFlag(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusOverride{{Name: "completed", Color: "#a6e3a1"}}
+
+	got := c.GetStatus("completed")
+	if got == nil {
+		t.Fatal("GetStatus(\"completed\") = nil, want the merged entry")
+	}
+	if got.Color != "#a6e3a1" {
+		t.Errorf("GetStatus(\"completed\").Color = %q, want the override", got.Color)
+	}
+	if !c.IsArchiveStatus("completed") {
+		t.Error("IsArchiveStatus(\"completed\") = false, want true: a colour-only override must not touch Archive")
+	}
+}
+
+func TestAnExplicitArchiveOverrideIsHonoured(t *testing.T) {
+	c := Default()
+	c.Statuses = []StatusOverride{{Name: "completed", Archive: boolPtr(false)}}
+
+	if c.IsArchiveStatus("completed") {
+		t.Error("IsArchiveStatus(\"completed\") = true, want false: an explicit archive: false must be honoured")
+	}
+}
+
+// Fix round 1, Commit 2: before Task 2b, GetStatus/GetType/GetPriority/
+// StatusNames/TypeNames read only the package-level Default* slices and
+// never dereferenced their receiver, so they tolerated a nil *Config. Routing
+// them through StatusList/TypeList/PriorityList (which read c.Statuses etc.)
+// would panic on nil without an explicit guard - this is latent (no known
+// call site passes a nil Config today), but it is a capability regression on
+// a shared API, so the guard and the covering test are added independent of
+// any live path.
+
+func TestGettersToleratePlainDefaultsOnANilConfig(t *testing.T) {
+	var c *Config
+
+	if got := c.GetStatus("todo"); got == nil {
+		t.Error("GetStatus(\"todo\") on a nil *Config = nil, want the built-in default")
+	}
+	if got := c.GetType("task"); got == nil {
+		t.Error("GetType(\"task\") on a nil *Config = nil, want the built-in default")
+	}
+	if got := c.GetPriority("normal"); got == nil {
+		t.Error("GetPriority(\"normal\") on a nil *Config = nil, want the built-in default")
+	}
+	if names := c.StatusNames(); len(names) != len(DefaultStatuses) {
+		t.Errorf("StatusNames() on a nil *Config has %d entries, want the %d defaults", len(names), len(DefaultStatuses))
+	}
+	if names := c.TypeNames(); len(names) != len(DefaultTypes) {
+		t.Errorf("TypeNames() on a nil *Config has %d entries, want the %d defaults", len(names), len(DefaultTypes))
+	}
+}
+
+// Fix round 1, Commit 3: the same data-loss bug as Statuses/Types/Priorities,
+// one struct over. toYAMLNode() did not know about DisplayConfig either, so
+// Save() (e.g. via `beans rename`) silently dropped a configured theme/
+// max_width from .beans.yml.
+
+func TestSaveRoundTripsDisplaySettings(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Display = DisplayConfig{Theme: "latte", MaxWidth: 140}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetTheme(); got != "latte" {
+		t.Errorf("reloaded GetTheme() = %q, want the saved \"latte\"", got)
+	}
+	if got := reloaded.GetMaxWidth(); got != 140 {
+		t.Errorf("reloaded GetMaxWidth() = %d, want the saved 140", got)
+	}
+}
+
+func TestSaveRoundTripsMaxWidthMinusOne(t *testing.T) {
+	// -1 is a meaningful, non-zero override (disables the cap) and must not
+	// be confused with "unset" the way omitempty would treat a plain 0.
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Display = DisplayConfig{MaxWidth: -1}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetMaxWidth(); got != -1 {
+		t.Errorf("reloaded GetMaxWidth() = %d, want the saved -1", got)
+	}
+}
+
+// Task 3: the built-in tables now name Catppuccin tones instead of hand-rolled
+// colour words, so the mapping from status/type/priority to hue lives entirely
+// in this config and is resolved elsewhere (internal/ui) against the active
+// theme.
+
+func TestTypeDefaultsCarryCatppuccinTones(t *testing.T) {
+	want := map[string]string{
+		"milestone": "mauve", "epic": "blue", "feature": "sapphire",
+		"bug": "maroon", "task": "",
+	}
+	for _, tc := range DefaultTypes {
+		if w, ok := want[tc.Name]; ok && tc.Color != w {
+			t.Errorf("type %q colour = %q, want %q", tc.Name, tc.Color, w)
+		}
+	}
+}
+
+func TestOnlyContainersAreEmphasised(t *testing.T) {
+	want := map[string]bool{
+		"milestone": true, "epic": true,
+		"feature": false, "bug": false, "task": false,
+	}
+	for _, tc := range DefaultTypes {
+		if w, ok := want[tc.Name]; ok && tc.Emphasis != w {
+			t.Errorf("type %q emphasis = %v, want %v", tc.Name, tc.Emphasis, w)
+		}
+	}
+}
+
+func TestStatusDefaultsFormAMaturityRamp(t *testing.T) {
+	want := map[string]string{
+		"draft": "overlay2", "todo": "green", "in-progress": "peach",
+		"completed": "overlay1", "scrapped": "surface2",
+	}
+	for _, sc := range DefaultStatuses {
+		if w, ok := want[sc.Name]; ok && sc.Color != w {
+			t.Errorf("status %q colour = %q, want %q", sc.Name, sc.Color, w)
+		}
+	}
+}
+
+// Task 2b shipped, and had to fix, exactly this bug for StatusOverride.Archive:
+// an unconditional assignment in the apply closure means a colour-only
+// override silently clears a field the user never mentioned. TypeOverride.Emphasis
+// needs the same pointer-guarded treatment.
+
+func TestRecolouringATypePreservesItsEmphasisFlag(t *testing.T) {
+	c := Default()
+	c.Types = []TypeOverride{{Name: "milestone", Color: "#cba6f7"}}
+
+	got := c.GetType("milestone")
+	if got == nil {
+		t.Fatal(`GetType("milestone") = nil, want the merged entry`)
+	}
+	if got.Color != "#cba6f7" {
+		t.Errorf(`GetType("milestone").Color = %q, want the override`, got.Color)
+	}
+	if !got.Emphasis {
+		t.Error(`GetType("milestone").Emphasis = false, want true: a colour-only override must not touch Emphasis`)
+	}
+}
+
+func TestAnExplicitEmphasisOverrideIsHonoured(t *testing.T) {
+	c := Default()
+	c.Types = []TypeOverride{{Name: "milestone", Emphasis: boolPtr(false)}}
+
+	if c.GetType("milestone").Emphasis {
+		t.Error(`GetType("milestone").Emphasis = true, want false: an explicit emphasis: false must be honoured`)
+	}
+}
+
+func TestSaveRoundTripsTypeEmphasisOverride(t *testing.T) {
+	// Save() is called by more than `init` (e.g. `beans rename`). Without
+	// serializing Emphasis, a Save() on an already-loaded config would
+	// silently erase whatever the user configured.
+	tmpDir := t.TempDir()
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "feature", Emphasis: boolPtr(true)}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := reloaded.GetType("feature"); got == nil || !got.Emphasis {
+		t.Errorf("reloaded GetType(\"feature\").Emphasis = %v, want the saved override", got)
+	}
 }

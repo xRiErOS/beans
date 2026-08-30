@@ -14,8 +14,11 @@ import (
 )
 
 var (
-	milestonesJSON bool
-	milestonesAll  bool
+	milestonesJSON     bool
+	milestonesAll      bool
+	milestonesView     string
+	milestonesMaxWidth int
+	milestonesTags     bool
 )
 
 // milestoneEntry pairs a milestone bean with its descendant progress
@@ -72,14 +75,24 @@ var milestonesCmd = &cobra.Command{
 			return nil
 		}
 
-		for _, e := range entries {
-			fmt.Printf("%s %s %s\n",
-				ui.ID.Render(e.Bean.ID),
-				e.Bean.Title,
-				ui.Muted.Render(fmt.Sprintf("(%d/%d completed)", e.Completed, e.Total)),
-			)
+		form, ok := ui.ParseForm(milestonesView)
+		if !ok {
+			return cmdError(milestonesJSON, output.ErrValidation,
+				"unknown --view %q: expected table or tree", milestonesView)
 		}
 
+		// Every row carries a Progress, even at 0/0 — that is what buys the
+		// PROGRESS column from the shared engine without a separate opt-in.
+		rows := make([]ui.Row, 0, len(entries))
+		for _, e := range entries {
+			rows = append(rows, ui.Row{
+				Bean:     e.Bean,
+				Progress: &ui.Progress{Done: e.Completed, Total: e.Total},
+			})
+		}
+
+		width := resolveWidth(milestonesMaxWidth, cmd.Flags().Changed("max-width"), cfg)
+		fmt.Print(ui.Render(rows, form, "Milestones", width, milestonesTags, cfg))
 		return nil
 	},
 }
@@ -87,5 +100,10 @@ var milestonesCmd = &cobra.Command{
 func RegisterMilestonesCmd(root *cobra.Command) {
 	milestonesCmd.Flags().BoolVar(&milestonesJSON, "json", false, "Output as JSON")
 	milestonesCmd.Flags().BoolVar(&milestonesAll, "all", false, "Include completed and scrapped milestones")
+	milestonesCmd.Flags().StringVar(&milestonesView, "view", "table",
+		"Arrangement: table (flat, sortable) or tree (nested)")
+	milestonesCmd.Flags().IntVar(&milestonesMaxWidth, "max-width", 0,
+		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
+	milestonesCmd.Flags().BoolVar(&milestonesTags, "tags", false, "Render each milestone's tags")
 	root.AddCommand(milestonesCmd)
 }

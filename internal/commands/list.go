@@ -3,7 +3,6 @@ package commands
 import (
 	"context"
 	"fmt"
-	"os"
 	"sort"
 
 	"github.com/hmans/beans/internal/output"
@@ -13,7 +12,6 @@ import (
 	"github.com/hmans/beans/pkg/beangraph/model"
 	"github.com/hmans/beans/pkg/config"
 	"github.com/spf13/cobra"
-	"golang.org/x/term"
 )
 
 var (
@@ -40,6 +38,9 @@ var (
 	listDesc        bool
 	listFull        bool
 	listWhere       []string
+	listView        string
+	listMaxWidth    int
+	listTags        bool
 )
 
 var listCmd = &cobra.Command{
@@ -163,8 +164,8 @@ Search Syntax (--search/-S):
 			return nil
 		}
 
-		// Default: tree view
-		// We need all beans to find ancestors for context
+		// Both forms need every bean: the tree form to resolve ancestors for
+		// context, the table form to compute implicit statuses.
 		allBeans, err := resolver.Beans(context.Background(), nil)
 		if err != nil {
 			return fmt.Errorf("querying all beans for tree: %w", err)
@@ -191,31 +192,31 @@ Search Syntax (--search/-S):
 			return nil
 		}
 
-		// Calculate max ID width from all beans in tree
-		maxIDWidth := 2
-		for _, b := range allBeans {
-			if len(b.ID) > maxIDWidth {
-				maxIDWidth = len(b.ID)
-			}
-		}
-		maxIDWidth += 2
-
-		// Check if any beans have tags
-		hasTags := false
-		for _, b := range beans {
-			if len(b.Tags) > 0 {
-				hasTags = true
-				break
-			}
+		form, ok := ui.ParseForm(listView)
+		if !ok {
+			return cmdError(listJSON, output.ErrValidation,
+				"unknown --view %q: expected table or tree", listView)
 		}
 
-		// Detect terminal width (default to 80 if not a terminal)
-		termWidth := 80
-		if w, _, err := term.GetSize(int(os.Stdout.Fd())); err == nil && w > 0 {
-			termWidth = w
-		}
+		width := resolveWidth(listMaxWidth, cmd.Flags().Changed("max-width"), cfg)
 
-		fmt.Print(ui.RenderTree(tree, cfg, maxIDWidth, hasTags, termWidth))
+		// The row source differs by form, not just by what Render does with
+		// it afterwards: BuildTree deliberately widens `tree` beyond `beans`
+		// with unmatched ancestors for context (ui.TreeNode.Matched), which
+		// is correct for --view tree but wrong for --view table — a filtered
+		// table promising comparable peers must not grow rows the filter
+		// rejected. RowsFromFlatItems(FlattenTree(tree)) would carry that
+		// leak through even though Render's table path re-flattens depth to
+		// 0, because flattening depth does not drop the extra beans. FlatRows
+		// on the already-filtered `beans` avoids both the leak and computing
+		// tree depth Render would then discard.
+		var rows []ui.Row
+		if form == ui.FormTree {
+			rows = ui.RowsFromFlatItems(ui.FlattenTree(tree))
+		} else {
+			rows = ui.FlatRows(beans)
+		}
+		fmt.Print(ui.Render(rows, form, "Beans", width, listTags, cfg))
 		return nil
 	},
 }
@@ -415,29 +416,42 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
+// RegisterListCmd adds the list command to root. Flag registration is
+// idempotent (guarded by a Lookup check) because listCmd is a package-level
+// singleton and tests that want a real cobra.Execute() (so --view's parsing
+// and cmd.Flags().Changed("max-width") behave as they do for the CLI) need
+// to register it into a throwaway root without panicking on a second flag
+// definition — the same pattern RegisterOrderCmd uses.
 func RegisterListCmd(root *cobra.Command) {
-	listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
-	listCmd.Flags().StringVarP(&listSearch, "search", "S", "", "Full-text search in title and body")
-	listCmd.Flags().StringArrayVarP(&listStatus, "status", "s", nil, "Filter by status (can be repeated)")
-	listCmd.Flags().StringArrayVar(&listNoStatus, "no-status", nil, "Exclude by status (can be repeated)")
-	listCmd.Flags().StringArrayVarP(&listType, "type", "t", nil, "Filter by type (can be repeated)")
-	listCmd.Flags().StringArrayVar(&listNoType, "no-type", nil, "Exclude by type (can be repeated)")
-	listCmd.Flags().StringArrayVarP(&listPriority, "priority", "p", nil, "Filter by priority (can be repeated)")
-	listCmd.Flags().StringArrayVar(&listNoPriority, "no-priority", nil, "Exclude by priority (can be repeated)")
-	listCmd.Flags().StringArrayVar(&listTag, "tag", nil, "Filter by tag (can be repeated, OR logic)")
-	listCmd.Flags().StringArrayVar(&listNoTag, "no-tag", nil, "Exclude beans with tag (can be repeated)")
-	listCmd.Flags().BoolVar(&listHasParent, "has-parent", false, "Filter beans with a parent")
-	listCmd.Flags().BoolVar(&listNoParent, "no-parent", false, "Filter beans without a parent")
-	listCmd.Flags().StringVar(&listParentID, "parent", "", "Filter by parent ID")
-	listCmd.Flags().BoolVar(&listHasBlocking, "has-blocking", false, "Filter beans that are blocking others")
-	listCmd.Flags().BoolVar(&listNoBlocking, "no-blocking", false, "Filter beans that aren't blocking others")
-	listCmd.Flags().BoolVar(&listIsBlocked, "is-blocked", false, "Filter beans that are blocked by others")
-	listCmd.Flags().BoolVar(&listUnblocked, "unblocked", false, "Filter beans with no unresolved blocker")
-	listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft)")
-	listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
-	listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent) (default: status, priority, type, title)")
-	listCmd.Flags().BoolVar(&listDesc, "desc", false, "Reverse the sort order")
-	listCmd.Flags().BoolVar(&listFull, "full", false, "Include bean body in JSON output")
-	listCmd.Flags().StringArrayVar(&listWhere, "where", nil, "Filter by extra front matter key=value (can be repeated, AND logic)")
+	if listCmd.Flags().Lookup("json") == nil {
+		listCmd.Flags().BoolVar(&listJSON, "json", false, "Output as JSON")
+		listCmd.Flags().StringVarP(&listSearch, "search", "S", "", "Full-text search in title and body")
+		listCmd.Flags().StringArrayVarP(&listStatus, "status", "s", nil, "Filter by status (can be repeated)")
+		listCmd.Flags().StringArrayVar(&listNoStatus, "no-status", nil, "Exclude by status (can be repeated)")
+		listCmd.Flags().StringArrayVarP(&listType, "type", "t", nil, "Filter by type (can be repeated)")
+		listCmd.Flags().StringArrayVar(&listNoType, "no-type", nil, "Exclude by type (can be repeated)")
+		listCmd.Flags().StringArrayVarP(&listPriority, "priority", "p", nil, "Filter by priority (can be repeated)")
+		listCmd.Flags().StringArrayVar(&listNoPriority, "no-priority", nil, "Exclude by priority (can be repeated)")
+		listCmd.Flags().StringArrayVar(&listTag, "tag", nil, "Filter by tag (can be repeated, OR logic)")
+		listCmd.Flags().StringArrayVar(&listNoTag, "no-tag", nil, "Exclude beans with tag (can be repeated)")
+		listCmd.Flags().BoolVar(&listHasParent, "has-parent", false, "Filter beans with a parent")
+		listCmd.Flags().BoolVar(&listNoParent, "no-parent", false, "Filter beans without a parent")
+		listCmd.Flags().StringVar(&listParentID, "parent", "", "Filter by parent ID")
+		listCmd.Flags().BoolVar(&listHasBlocking, "has-blocking", false, "Filter beans that are blocking others")
+		listCmd.Flags().BoolVar(&listNoBlocking, "no-blocking", false, "Filter beans that aren't blocking others")
+		listCmd.Flags().BoolVar(&listIsBlocked, "is-blocked", false, "Filter beans that are blocked by others")
+		listCmd.Flags().BoolVar(&listUnblocked, "unblocked", false, "Filter beans with no unresolved blocker")
+		listCmd.Flags().BoolVar(&listReady, "ready", false, "Filter beans available to start (not blocked, excludes in-progress/completed/scrapped/draft)")
+		listCmd.Flags().BoolVarP(&listQuiet, "quiet", "q", false, "Only output IDs (one per line)")
+		listCmd.Flags().StringVar(&listSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent) (default: status, priority, type, title)")
+		listCmd.Flags().BoolVar(&listDesc, "desc", false, "Reverse the sort order")
+		listCmd.Flags().BoolVar(&listFull, "full", false, "Include bean body in JSON output")
+		listCmd.Flags().StringArrayVar(&listWhere, "where", nil, "Filter by extra front matter key=value (can be repeated, AND logic)")
+		listCmd.Flags().StringVar(&listView, "view", "table",
+			"Arrangement: table (flat, sortable) or tree (nested)")
+		listCmd.Flags().IntVar(&listMaxWidth, "max-width", 0,
+			"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
+		listCmd.Flags().BoolVar(&listTags, "tags", false, "Render each bean's tags")
+	}
 	root.AddCommand(listCmd)
 }

@@ -75,9 +75,13 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
-		// 3. Check all status colors are valid (hardcoded statuses)
+		// 3. Check all status colors are valid (hardcoded statuses). An
+		// empty Color is not an invalid one -- it means "no explicit
+		// colour, fall back to the muted default" (see ui.ResolveColor),
+		// the same meaning it carries in a StatusOverride. Only a non-empty
+		// value gets validated against the theme's tone names.
 		for _, s := range config.DefaultStatuses {
-			if !ui.IsValidColor(s.Color) {
+			if s.Color != "" && !ui.IsValidColor(s.Color) {
 				configErrors = append(configErrors, fmt.Sprintf("invalid color '%s' for status '%s'", s.Color, s.Name))
 			}
 		}
@@ -93,9 +97,12 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
-		// 4. Check all type colors are valid (hardcoded types)
+		// 4. Check all type colors are valid (hardcoded types). Same
+		// reasoning as the status loop above: "task" deliberately carries
+		// an empty Color in the ranked type scale (task 3), and an empty
+		// colour is "uncoloured", not "invalid".
 		for _, t := range config.DefaultTypes {
-			if !ui.IsValidColor(t.Color) {
+			if t.Color != "" && !ui.IsValidColor(t.Color) {
 				configErrors = append(configErrors, fmt.Sprintf("invalid color '%s' for type '%s'", t.Color, t.Name))
 			}
 		}

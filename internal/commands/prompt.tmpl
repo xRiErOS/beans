@@ -223,6 +223,36 @@ beans create --json "Title" -t task --order V
 - Placing a bean relative to (`--after`/`--before`) a sibling that has no order value yet fails -- place that sibling first (e.g. with `--last`).
 - A move writes exactly one file: the bean being placed, never its neighbours.
 
+## Display Configuration
+
+`.beans.yml` can carry a `display:` section that controls terminal rendering across every command:
+
+```yaml
+display:
+  theme: mocha      # latte | frappe | macchiato | mocha -- default: mocha
+  max_width: 110    # unset (or 0) yields 110; -1 disables the cap
+```
+
+`theme` picks one of the four bundled Catppuccin flavours and applies to all rendered output (badges, tree lines, IDs) for the whole process. `max_width` caps how wide `list`, `milestones`, `roadmap` and `show` render on a terminal; it has no effect on `--json` output or on piped output.
+
+## Output Flags
+
+Terminal output is arranged in one of two forms, and which one you get is the caller's choice, not a property of the command:
+
+| Flag | Commands | Values | Default |
+|------|----------|--------|---------|
+| `--view` | `list`, `milestones`, `roadmap` | `table` (flat, has a header, sortable) or `tree` (nested, no header) | `table` for `list` and `milestones`, `tree` for `roadmap` |
+| `--max-width` | `list`, `milestones`, `roadmap` | columns; `0` disables the cap | unset -- falls back to `display.max_width`, else 110 |
+| `--format` | `roadmap` only | `tty` or `markdown` | unset -- detected from whether stdout is a terminal |
+| `--tags` | `list`, `milestones`, `roadmap` | boolean | off |
+| `--depth` | `roadmap` only | levels below the roadmap root; `0` means no limit | `0` |
+
+`table` drops the hierarchy rather than hiding it, because a tree you can re-sort would be lying about what its indentation means. Use `--parent` to narrow the scope, or `--view tree` when you need to see what belongs to what.
+
+Width resolution, in order: an explicit `--max-width` wins over `display.max_width`, which wins over the built-in 110. Whatever that yields is then narrowed to the detected terminal width, and finally floored at 80 columns -- below that no layout stays readable, so a very narrow terminal gets an 80-column render that overflows rather than an unreadable one that fits. `--max-width 0` and `display.max_width: -1` both mean "no cap": use the terminal's own width, whatever it is.
+
+`--format` matters because `beans roadmap` in a pipe is an artefact generator: it writes GitHub-flavoured Markdown with badge images and links, which is the right output for a file and the wrong output for a terminal. Detection handles the normal case; pass `--format` explicitly when you are generating a file from an interactive shell, or want to see the terminal rendering while piping.
+
 ## Failure Output
 
 Every command exits 1 on failure and describes it in exactly one place — which

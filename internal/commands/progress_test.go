@@ -6,9 +6,14 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
+
+	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/beancore"
 	"github.com/hmans/beans/pkg/config"
@@ -304,6 +309,77 @@ func seedProgressCounts(t *testing.T, counts map[string]int) {
 			if err := core.Create(b); err != nil {
 				t.Fatalf("core.Create error = %v", err)
 			}
+		}
+	}
+}
+
+// withTrueColor forces lipgloss's default renderer to TrueColor for the
+// duration of the test and restores whatever profile was in force before.
+// lipgloss.SetColorProfile exists "mostly for testing purposes" per its own
+// doc comment: without it, output captured under `go test` (no controlling
+// tty) renders with no ANSI codes at all, which would make colour-bearing
+// assertions vacuously true regardless of whether the code under test
+// actually applies any colour.
+func withTrueColor(t *testing.T) {
+	t.Helper()
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+// stripANSITest removes CSI colour/style escape sequences, leaving the text
+// a plain-text assertion can match against regardless of the active theme
+// or colour profile.
+func stripANSITest(s string) string {
+	return ansiEscapeTest.ReplaceAllString(s, "")
+}
+
+var ansiEscapeTest = regexp.MustCompile("\x1b\\[[0-9;]*m")
+
+// runProgressInTestStore sets up a throwaway store with one bean in each
+// configured status and returns the plain-text `beans progress` output.
+func runProgressInTestStore(t *testing.T) string {
+	t.Helper()
+	setupProgressTest(t)
+	resetProgressFlags(t)
+
+	for _, sc := range cfg.StatusList() {
+		id := fmt.Sprintf("beans-%s1", strings.ReplaceAll(sc.Name, "-", ""))
+		title := sc.Name
+		b := &bean.Bean{ID: id, Slug: bean.Slugify(title), Title: title, Status: sc.Name, Type: "task"}
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+
+	return string(captureProgressStdout(t, func() {
+		if err := progressCmd.RunE(progressCmd, nil); err != nil {
+			t.Fatalf("progressCmd.RunE() error = %v", err)
+		}
+	}))
+}
+
+// TestProgressUsesTheConfiguredStatusColours verifies status lines are
+// coloured through ui.ResolveColor against the active theme, not a
+// hardcoded palette. Mocha's green for "todo" must appear.
+func TestProgressUsesTheConfiguredStatusColours(t *testing.T) {
+	withTrueColor(t)
+	t.Cleanup(func() { ui.SetTheme("mocha") })
+	ui.SetTheme("mocha")
+
+	out := runProgressInTestStore(t)
+	if !strings.Contains(out, "166;227;161") {
+		t.Errorf("progress does not draw todo in the theme's green:\n%q", out)
+	}
+}
+
+// TestProgressLabelsEveryConfiguredStatus verifies every configured status
+// still gets a labelled line, independent of the colouring added on top.
+func TestProgressLabelsEveryConfiguredStatus(t *testing.T) {
+	out := stripANSITest(runProgressInTestStore(t))
+	for _, want := range []string{"Todo", "Draft", "Completed", "Scrapped", "In Progress"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("progress is missing the %q line:\n%s", want, out)
 		}
 	}
 }
