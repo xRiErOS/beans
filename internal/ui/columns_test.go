@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/config"
 )
@@ -456,5 +457,149 @@ func TestRebalanceNeverExceedsTheTerminal(t *testing.T) {
 	}
 	if !moved {
 		t.Fatal("fixture never exercised Rebalance's transfer across the sweep — test proves nothing")
+	}
+}
+
+// stripANSI is already defined in markdown_test.go (same package); reused
+// here rather than redeclared.
+
+func TestHeaderNamesTheShortForms(t *testing.T) {
+	c := NewColumns(testRows("x"), 80, true, config.Default())
+	got := stripANSI(c.Header())
+	for _, want := range []string{"T", "ID", "TITLE", "S", "P", "TAGS"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("header %q is missing %q", got, want)
+		}
+	}
+}
+
+func TestHeaderNamesTheLongForms(t *testing.T) {
+	c := NewColumns(testRows("x"), 160, true, config.Default())
+	got := stripANSI(c.Header())
+	for _, want := range []string{"TYPE", "STATUS", "PRIORITY"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("header %q is missing %q", got, want)
+		}
+	}
+}
+
+func TestHeaderMatchesTheColumnWidths(t *testing.T) {
+	c := NewColumns(testRows("x"), 110, true, config.Default())
+	if w := DisplayWidth(stripANSI(c.Header())); w > c.Width {
+		t.Errorf("header is %d cells, terminal is %d", w, c.Width)
+	}
+}
+
+// TestHeaderHasNoTrailingWhitespace guards the TrimRight call in Header(): the
+// last cell (TAGS, here) is padded to its full column width like any other,
+// so without the trim the header would end in a run of spaces that is
+// invisible in a diff but glaring next to a flat raster in a terminal.
+func TestHeaderHasNoTrailingWhitespace(t *testing.T) {
+	c := NewColumns(testRows("x"), 80, true, config.Default())
+	plain := stripANSI(c.Header())
+	if plain != strings.TrimRight(plain, " ") {
+		t.Errorf("header has trailing whitespace: %q", plain)
+	}
+}
+
+// TestHeaderExactLayoutWithMultibyteID pins the header to an exact string
+// built entirely from literals, not from any field read back off c — a
+// mutation that reorders columns, drops the gap, or forgets the trailing
+// trim changes the rendered header without changing the sum NewColumns
+// already guarantees, which is exactly the failure mode that made an
+// earlier task's overflow test unable to go red.
+//
+// The ID is "beans-über": 11 bytes, but 10 display cells because ü is a
+// single-width rune. Using it here — rather than an ASCII ID of the same
+// visual width — means a header built on len() instead of DisplayWidth
+// would compute idWidth as 11, shift every column after it, and no longer
+// match the literal below.
+func TestHeaderExactLayoutWithMultibyteID(t *testing.T) {
+	rows := []Row{{Bean: &bean.Bean{
+		ID: "beans-über", Title: "x", Type: "task", Status: "todo", Priority: "normal",
+	}}}
+	c := NewColumns(rows, 80, true, config.Default())
+	got := stripANSI(c.Header())
+
+	// Hand-derived from the documented algorithm at width 80, showTags true:
+	// Type=1, ID=10 (DisplayWidth of "beans-über"), Status=1, Prio=1 all stay
+	// short (the first upgrade already costs more than the 80-cell budget
+	// allows past minTitleWidth); Tags=18 because width < 120; Title is what
+	// remains of the budget once the fixed columns and five 2-space gaps are
+	// subtracted. The trailing padding TrimRight removes from the last
+	// (TAGS) cell is why the literal ends at "TAGS", not "TAGS" plus spaces.
+	want := "T" + "  " +
+		"ID" + strings.Repeat(" ", 8) + "  " +
+		"TITLE" + strings.Repeat(" ", 34) + "  " +
+		"S" + "  " +
+		"P" + "  " +
+		"TAGS"
+
+	if got != want {
+		t.Errorf("Header() =\n%q\nwant\n%q", got, want)
+	}
+}
+
+func TestLegendIsEmptyWhenNothingIsShortened(t *testing.T) {
+	c := NewColumns(testRows("x"), 200, false, config.Default())
+	if !c.LongType || !c.LongStatus || !c.LongPrio {
+		t.Skip("200 columns did not buy every long form; adjust the fixture")
+	}
+	if got := c.Legend(config.Default()); len(got) != 0 {
+		t.Errorf("Legend = %#v, want empty when nothing is short", got)
+	}
+}
+
+func TestLegendNamesEveryShortenedAxis(t *testing.T) {
+	c := NewColumns(testRows(strings.Repeat("x", 200)), 80, true, config.Default())
+	lines := c.Legend(config.Default())
+	joined := stripANSI(strings.Join(lines, "\n"))
+
+	for _, want := range []string{"type", "status", "priority"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("legend is missing the %s axis:\n%s", want, joined)
+		}
+	}
+	for _, want := range []string{"milestone", "draft", "critical"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("legend does not name %q:\n%s", want, joined)
+		}
+	}
+}
+
+func TestLegendOmitsAxesThatAreAlreadyLong(t *testing.T) {
+	c := NewColumns(testRows(strings.Repeat("x", 200)), 120, true, config.Default())
+	if !c.LongStatus {
+		t.Skip("120 columns did not buy the long status; adjust the fixture")
+	}
+	joined := stripANSI(strings.Join(c.Legend(config.Default()), "\n"))
+	if strings.Contains(joined, "in-progress") {
+		t.Errorf("legend explains the status axis though it is written out:\n%s", joined)
+	}
+}
+
+// TestLegendUsesTheCellsColours guards against a vacuous colour assertion:
+// under `go test` there is no tty, so lipgloss suppresses ANSI entirely and
+// a plain "contains this escape sequence" check would pass whether or not
+// the code colours anything. withTrueColor (declared in markdown_test.go)
+// forces real colour output for the duration of this test, so the exact
+// styled substrings below only appear if Legend actually applies the same
+// foreground/bold styling the table cells use for that axis.
+func TestLegendUsesTheCellsColours(t *testing.T) {
+	withTrueColor(t)
+	c := NewColumns(testRows(strings.Repeat("x", 200)), 80, true, config.Default())
+	joined := strings.Join(c.Legend(config.Default()), "\n")
+
+	// milestone: bold mauve, per DefaultTypes' Color/Emphasis.
+	wantMilestone := lipgloss.NewStyle().Foreground(ResolveColor("mauve")).Bold(true).Render("M")
+	if !strings.Contains(joined, wantMilestone) {
+		t.Errorf("legend does not render the milestone type in its cell colour (bold mauve):\n%q", joined)
+	}
+
+	// critical: bold red, per DefaultPriorities' Color and the critical/high
+	// bold rule.
+	wantCritical := lipgloss.NewStyle().Foreground(ResolveColor("red")).Bold(true).Render("‼")
+	if !strings.Contains(joined, wantCritical) {
+		t.Errorf("legend does not render the critical priority in its cell colour (bold red):\n%q", joined)
 	}
 }

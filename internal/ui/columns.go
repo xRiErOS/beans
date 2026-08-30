@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/hmans/beans/pkg/bean"
 	"github.com/hmans/beans/pkg/config"
 )
@@ -364,4 +365,83 @@ func (c Columns) PrioText(b *bean.Bean) string {
 		return b.Priority
 	}
 	return GetPrioritySymbol(b.Priority)
+}
+
+// Header labels the columns. Short columns get short labels, so the header
+// never promises a form the cells do not deliver. Padding is computed on the
+// plain label text and only the finished, padded line is coloured — colouring
+// each cell first would let its ANSI escapes count toward PadRight's width.
+func (c Columns) Header() string {
+	cells := []string{
+		PadRight(headerLabel(c.LongType, "TYPE", "T"), c.Indent+c.Type),
+		PadRight("ID", c.ID),
+		PadRight("TITLE", c.Title),
+		PadRight(headerLabel(c.LongStatus, "STATUS", "S"), c.Status),
+		PadRight(headerLabel(c.LongPrio, "PRIORITY", "P"), c.Prio),
+	}
+	if c.ProgressWidth > 0 {
+		cells = append(cells, PadRight("PROGRESS", c.ProgressWidth))
+	}
+	if c.Tags > 0 {
+		cells = append(cells, PadRight("TAGS", c.Tags))
+	}
+	gap := strings.Repeat(" ", c.Gap)
+	// TrimRight, not just Join: the last cell pads to its full width like any
+	// other, and a header ending in spaces is invisible in a file but
+	// glaring next to a flat raster in a terminal.
+	return Muted.Render(strings.TrimRight(strings.Join(cells, gap), " "))
+}
+
+// headerLabel picks the header word to match the form NewColumns decided on
+// for this axis — the long word when it bought the long form, the same
+// single-letter code the cells fall back to otherwise.
+func headerLabel(long bool, wide, narrow string) string {
+	if long {
+		return wide
+	}
+	return narrow
+}
+
+// Legend names every abbreviation still on screen, in the same colours the
+// cells use. An axis written out in full explains itself and is left out —
+// no abbreviation, no legend entry for it.
+func (c Columns) Legend(cfg *config.Config) []string {
+	var lines []string
+
+	if !c.LongType {
+		var parts []string
+		for _, tc := range cfg.TypeList() {
+			style := lipgloss.NewStyle().Foreground(ResolveColor(tc.Color)).Bold(tc.Emphasis)
+			parts = append(parts, style.Render(ShortType(tc.Name))+Muted.Render(" "+tc.Name))
+		}
+		lines = append(lines, Muted.Render(PadRight("type", 9))+strings.Join(parts, Muted.Render(" · ")))
+	}
+
+	if !c.LongStatus {
+		var parts []string
+		for _, sc := range cfg.StatusList() {
+			style := lipgloss.NewStyle().Foreground(ResolveColor(sc.Color)).Bold(!sc.Archive)
+			parts = append(parts, style.Render(ShortStatus(sc.Name))+Muted.Render(" "+sc.Name))
+		}
+		lines = append(lines, Muted.Render(PadRight("status", 9))+strings.Join(parts, Muted.Render(" · ")))
+	}
+
+	if !c.LongPrio {
+		var parts []string
+		for _, pc := range cfg.PriorityList() {
+			sym := GetPrioritySymbol(pc.Name)
+			if sym == "" {
+				continue // normal has no symbol and needs no explanation
+			}
+			style := lipgloss.NewStyle().Foreground(ResolveColor(pc.Color)).
+				Bold(pc.Name == "critical" || pc.Name == "high")
+			parts = append(parts, style.Render(sym)+Muted.Render(" "+pc.Name))
+		}
+		lines = append(lines, Muted.Render(PadRight("priority", 9))+strings.Join(parts, Muted.Render(" · ")))
+	}
+
+	if len(lines) == 0 {
+		return nil
+	}
+	return append([]string{""}, lines...) // blank line sets the legend off from the table
 }
