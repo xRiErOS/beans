@@ -230,3 +230,59 @@ func TestShortStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderBeanRowSurvivesForTheTUI(t *testing.T) {
+	// The TUI renders through this. It must keep working, and it must follow
+	// the theme without being rewritten.
+	row := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
+		StatusColor: "green", TypeColor: "blue", MaxTitleWidth: 40,
+	})
+	if row == "" {
+		t.Fatal("RenderBeanRow returned nothing")
+	}
+}
+
+func TestRenderBeanRowFollowsTheTheme(t *testing.T) {
+	// Force a real colour profile: under `go test` there is no tty, so
+	// lipgloss strips all colour and mocha/latte would render identically
+	// regardless of whether the code follows the theme at all (see
+	// withTrueColor in markdown_test.go).
+	withTrueColor(t)
+	t.Cleanup(func() { SetTheme("mocha") })
+
+	SetTheme("mocha")
+	mocha := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
+		StatusColor: "green", TypeColor: "blue", MaxTitleWidth: 40,
+	})
+
+	SetTheme("latte")
+	latte := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
+		StatusColor: "green", TypeColor: "blue", MaxTitleWidth: 40,
+	})
+
+	if mocha == latte {
+		t.Error("RenderBeanRow did not follow the theme switch")
+	}
+}
+
+func TestCalculateResponsiveColumnsStillExists(t *testing.T) {
+	if got := CalculateResponsiveColumns(140, true); got.ID == 0 {
+		t.Error("CalculateResponsiveColumns must stay for the TUI")
+	}
+}
+
+func TestCalculateResponsiveColumnsIgnoresTheme(t *testing.T) {
+	// Widths are not a colour concern: a theme switch must not change
+	// which columns get shown or how wide they are.
+	t.Cleanup(func() { SetTheme("mocha") })
+
+	SetTheme("mocha")
+	mocha := CalculateResponsiveColumns(140, true)
+
+	SetTheme("latte")
+	latte := CalculateResponsiveColumns(140, true)
+
+	if mocha != latte {
+		t.Errorf("CalculateResponsiveColumns followed the theme: mocha=%+v latte=%+v", mocha, latte)
+	}
+}
