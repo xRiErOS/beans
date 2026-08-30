@@ -347,12 +347,20 @@ func TestRebalanceDoesNothingWhenATitleClaimsTheWidth(t *testing.T) {
 	}
 }
 
-func TestRebalanceGivesNoMoreThanTheTagsNeed(t *testing.T) {
+// TestRebalanceGivesNoMoreThanTheTagsNeedOrTheHeaderLabel guards both bounds
+// of the shrink branch: tags never grow past what a single "#ab" tag needs
+// by content alone, but never shrink below "TAGS" — its own header label —
+// either, or the header word would overflow the column it labels
+// (beans-kdkp).
+func TestRebalanceGivesNoMoreThanTheTagsNeedOrTheHeaderLabel(t *testing.T) {
 	rows := rowsWithTags("x", []string{"ab"})
 	c := NewColumns(rows, 110, true, config.Default())
 	c.Rebalance(rows)
-	if c.Tags > 3 {
-		t.Errorf("tags grew to %d for a single #ab, want at most 3", c.Tags)
+	if c.Tags > 4 {
+		t.Errorf("tags grew to %d for a single #ab, want at most 4 (the TAGS header floor)", c.Tags)
+	}
+	if c.Tags < len(headerTagsLabel) {
+		t.Errorf("tags shrank to %d, narrower than its own %q header label", c.Tags, headerTagsLabel)
 	}
 }
 
@@ -697,5 +705,29 @@ func TestLegendUsesTheCellsColours(t *testing.T) {
 	wantCritical := lipgloss.NewStyle().Foreground(ResolveColor("red")).Bold(true).Render("‼")
 	if !strings.Contains(joined, wantCritical) {
 		t.Errorf("legend does not render the critical priority in its cell colour (bold red):\n%q", joined)
+	}
+
+	// task: no configured colour, so styleFor renders it with the terminal's
+	// own text colour and no bold — not some colour ResolveColor("") happens
+	// to resolve to. A legend entry styled any other way would name "task"
+	// with a swatch the actual cell never shows (beans-5451).
+	wantTask := lipgloss.NewStyle().Render("T")
+	if !strings.Contains(joined, wantTask) {
+		t.Errorf("legend does not render the task type unstyled, matching the cell (beans-5451):\n%q", joined)
+	}
+	wrongTask := lipgloss.NewStyle().Foreground(ResolveColor("")).Render("T")
+	if wrongTask != wantTask && strings.Contains(joined, wrongTask) {
+		t.Errorf("legend renders the task type in ResolveColor(\"\")'s colour instead of unstyled:\n%q", joined)
+	}
+}
+
+// TestWrapLegendLineEmitsNothingForNoEntries guards the unconditional
+// trailing flush this replaces: with an empty entry list the loop never
+// runs, so entriesOnLine stays 0 and the old code still flushed once,
+// emitting a line carrying only the axis label and no entries (beans-rxyz).
+func TestWrapLegendLineEmitsNothingForNoEntries(t *testing.T) {
+	lines := wrapLegendLine("priority", nil, nil, 80)
+	if len(lines) != 0 {
+		t.Errorf("wrapLegendLine(nil, nil) = %#v, want no lines", lines)
 	}
 }

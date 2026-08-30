@@ -48,6 +48,70 @@ func SetTypeShorts(shorts map[string]string) {
 	}
 }
 
+// statusShorts is the process-wide single-character table for statuses, set
+// once at startup from the config (see SetStatusShorts). Same reasoning as
+// typeShorts: rendering has no other channel to carry it, and internal/ui
+// must not depend on pkg/config.
+var statusShorts = defaultStatusShorts()
+
+// defaultStatusShorts returns a fresh copy of the built-in status table.
+// SetStatusShorts(nil) resets to this, which is also what lets a test
+// restore the table instead of leaking an empty one into every test that
+// runs after.
+func defaultStatusShorts() map[string]string {
+	return map[string]string{
+		"draft":       "D",
+		"todo":        "T",
+		"in-progress": "I",
+		"completed":   "C",
+		"scrapped":    "S",
+	}
+}
+
+// SetStatusShorts replaces the single-character table. Passing nil resets it
+// to the built-in defaults.
+func SetStatusShorts(shorts map[string]string) {
+	if shorts == nil {
+		statusShorts = defaultStatusShorts()
+		return
+	}
+	statusShorts = make(map[string]string, len(shorts))
+	for name, short := range shorts {
+		statusShorts[name] = short
+	}
+}
+
+// prioritySymbols is the process-wide symbol table for priorities, set once
+// at startup from the config (see SetPrioritySymbols). Same reasoning as
+// typeShorts.
+var prioritySymbols = defaultPrioritySymbols()
+
+// defaultPrioritySymbols returns a fresh copy of the built-in priority
+// symbol table. SetPrioritySymbols(nil) resets to this. "normal" is
+// deliberately absent: it has no symbol and needs no explanation, the same
+// as an unconfigured priority.
+func defaultPrioritySymbols() map[string]string {
+	return map[string]string{
+		"critical": "‼",
+		"high":     "!",
+		"low":      "↓",
+		"deferred": "→",
+	}
+}
+
+// SetPrioritySymbols replaces the priority symbol table. Passing nil resets
+// it to the built-in defaults.
+func SetPrioritySymbols(symbols map[string]string) {
+	if symbols == nil {
+		prioritySymbols = defaultPrioritySymbols()
+		return
+	}
+	prioritySymbols = make(map[string]string, len(symbols))
+	for name, symbol := range symbols {
+		prioritySymbols[name] = symbol
+	}
+}
+
 // fullTypeColumnWidth is the width the long-form type column claims. It
 // follows the longest configured type name instead of a literal.
 var fullTypeColumnWidth = 10
@@ -406,39 +470,21 @@ func ShortType(t string) string {
 	return "?"
 }
 
-// ShortStatus returns a single-character code for the bean status.
+// ShortStatus returns a single-character code for the bean status, from the
+// process-wide table (see SetStatusShorts). Falls back to "?" for a status
+// the table doesn't carry — same convention as ShortType.
 func ShortStatus(s string) string {
-	switch s {
-	case "draft":
-		return "D"
-	case "todo":
-		return "T"
-	case "in-progress":
-		return "I"
-	case "completed":
-		return "C"
-	case "scrapped":
-		return "S"
-	default:
-		return "?"
+	if v, ok := statusShorts[s]; ok {
+		return v
 	}
+	return "?"
 }
 
-// GetPrioritySymbol returns the raw symbol for a priority without styling.
-// Returns empty string for normal/empty priority.
+// GetPrioritySymbol returns the raw symbol for a priority without styling,
+// from the process-wide table (see SetPrioritySymbols). Returns empty
+// string for normal/empty priority or a priority the table doesn't carry.
 func GetPrioritySymbol(priority string) string {
-	switch priority {
-	case "critical":
-		return "‼"
-	case "high":
-		return "!"
-	case "low":
-		return "↓"
-	case "deferred":
-		return "→"
-	default:
-		return ""
-	}
+	return prioritySymbols[priority]
 }
 
 // RenderPrioritySymbol returns a compact symbol for priority (used in TUI).

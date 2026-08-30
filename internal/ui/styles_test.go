@@ -274,6 +274,57 @@ func TestShortStatus(t *testing.T) {
 	}
 }
 
+// TestShortStatusReadsTheConfiguredTable mirrors
+// TestShortTypeReadsTheConfiguredTable: a status added through config must
+// render its configured code, not fall back to "?" forever (beans-krej).
+func TestShortStatusReadsTheConfiguredTable(t *testing.T) {
+	SetStatusShorts(map[string]string{"draft": "D", "blocked": "B"})
+	defer SetStatusShorts(nil)
+
+	if got := ShortStatus("blocked"); got != "B" {
+		t.Errorf("ShortStatus(\"blocked\") = %q, want \"B\"", got)
+	}
+	if got := ShortStatus("draft"); got != "D" {
+		t.Errorf("ShortStatus(\"draft\") = %q, want \"D\"", got)
+	}
+}
+
+func TestShortStatusFallsBackToAQuestionMark(t *testing.T) {
+	SetStatusShorts(map[string]string{"todo": "T"})
+	defer SetStatusShorts(nil)
+
+	if got := ShortStatus("unheard-of"); got != "?" {
+		t.Errorf("ShortStatus(\"unheard-of\") = %q, want \"?\"", got)
+	}
+}
+
+// TestGetPrioritySymbolReadsTheConfiguredTable: a priority added through
+// config must render its configured symbol instead of being dropped from
+// the legend (beans-krej).
+func TestGetPrioritySymbolReadsTheConfiguredTable(t *testing.T) {
+	SetPrioritySymbols(map[string]string{"critical": "‼", "urgent": "★"})
+	defer SetPrioritySymbols(nil)
+
+	if got := GetPrioritySymbol("urgent"); got != "★" {
+		t.Errorf("GetPrioritySymbol(\"urgent\") = %q, want \"★\"", got)
+	}
+	if got := GetPrioritySymbol("critical"); got != "‼" {
+		t.Errorf("GetPrioritySymbol(\"critical\") = %q, want \"‼\"", got)
+	}
+}
+
+func TestGetPrioritySymbolFallsBackToEmpty(t *testing.T) {
+	SetPrioritySymbols(map[string]string{"critical": "‼"})
+	defer SetPrioritySymbols(nil)
+
+	if got := GetPrioritySymbol("normal"); got != "" {
+		t.Errorf("GetPrioritySymbol(\"normal\") = %q, want empty", got)
+	}
+	if got := GetPrioritySymbol("unheard-of"); got != "" {
+		t.Errorf("GetPrioritySymbol(\"unheard-of\") = %q, want empty", got)
+	}
+}
+
 func TestRenderBeanRowSurvivesForTheTUI(t *testing.T) {
 	// The TUI renders through this. It must keep working, and it must follow
 	// the theme without being rewritten.

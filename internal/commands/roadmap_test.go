@@ -11,26 +11,11 @@ import (
 	"github.com/hmans/beans/pkg/config"
 )
 
-// mockConfig implements the StatusNames interface for testing.
-type mockConfig struct {
-	statuses []string
-	archive  map[string]bool
-}
-
-func (m *mockConfig) StatusNames() []string {
-	return m.statuses
-}
-
-func (m *mockConfig) IsArchiveStatus(s string) bool {
-	return m.archive[s]
-}
-
 func TestBuildRoadmap(t *testing.T) {
 	// Save and restore global cfg
 	oldCfg := cfg
 	defer func() { cfg = oldCfg }()
 
-	// Statuses are now hardcoded
 	cfg = config.Default()
 
 	now := time.Now()
@@ -245,7 +230,6 @@ func TestStatusFiltering(t *testing.T) {
 	oldCfg := cfg
 	defer func() { cfg = oldCfg }()
 
-	// Statuses are now hardcoded
 	cfg = config.Default()
 
 	now := time.Now()

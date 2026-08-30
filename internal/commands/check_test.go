@@ -19,16 +19,12 @@ import (
 // TestCheckHelperProcess is not a real test: it is the in-process side of
 // the subprocess trick runCheckInTestStore uses to exercise checkCmd safely.
 //
-// checkCmd.RunE ends with `if totalIssues > 0 { os.Exit(1) }`, and it always
-// finds at least one issue today: config.DefaultTypes still carries an
-// empty Color for "task", and the Catppuccin-only ui.IsValidColor (task 3)
-// rejects an empty colour as invalid. task-3-report.md flags this exact gap
-// as the surface Task 20 was meant to close, but this batch scopes Task 20
-// to a test only (no check.go edit), so the underlying bug stands. Given
-// that, calling checkCmd.RunE in-process would os.Exit the whole `go test`
-// binary -- taking every other test in this package down with it. Running
-// it as a subprocess keeps the os.Exit call harmless: only the subprocess
-// exits, and the parent test just reads what it printed first.
+// checkCmd.RunE ends with `if totalIssues > 0 { os.Exit(1) }`, and a config
+// or bean-content issue in the store under test can legitimately trigger
+// that exit. Calling checkCmd.RunE in-process would os.Exit the whole
+// `go test` binary -- taking every other test in this package down with
+// it. Running it as a subprocess keeps the os.Exit call harmless: only the
+// subprocess exits, and the parent test just reads what it printed first.
 func TestCheckHelperProcess(t *testing.T) {
 	if os.Getenv("BEANS_CHECK_HELPER") != "1" {
 		t.Skip("only runs as a subprocess of runCheckInTestStore")
@@ -89,8 +85,8 @@ func runCheckInTestStore(t *testing.T) string {
 			t.Fatalf("running check subprocess: %v\noutput:\n%s", err, out)
 		}
 		// An *exec.ExitError just means checkCmd.RunE found issues and
-		// exited 1, which -- given the standing bug above -- is the normal
-		// case, not a test failure.
+		// exited 1, which is expected whenever the test deliberately feeds
+		// it a bad colour/theme override; it is not a test failure.
 	}
 	return string(out)
 }

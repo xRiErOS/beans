@@ -10,7 +10,7 @@ import (
 
 const (
 	widthFloor   = 80
-	widthDefault = 110
+	widthDefault = config.DefaultMaxWidth
 )
 
 // resolveWidth decides the rendering width: the flag wins, then the config,
