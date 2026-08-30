@@ -172,19 +172,37 @@ func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 		head = head.Foreground(ui.ResolveColor(tint))
 	}
 
-	sb.WriteString(head.Render(b.Type) + "  " + head.Render(b.ID) + "\n")
+	first := head.Render(b.ID)
+	if b.Type != "" {
+		// An unconditional separator would leave a stray two-space lead
+		// before the id when a bean has no type.
+		first = head.Render(b.Type) + "  " + first
+	}
+	sb.WriteString(first + "\n")
 	sb.WriteString(head.Render(b.Title) + "\n")
 
 	var attrs []string
+
+	// Status and priority render whenever a value is present, falling back
+	// to the legacy "gray" alias when the config has no matching entry --
+	// the raw value is exactly what a reader needs to see in that case, not
+	// less of it. "normal" priority is not filtered here: hiding it is a
+	// table-only density decision (Task 10's prioCell), not a detail-view
+	// one -- a detail view shows one bean and has no density to buy.
+	statusColor, statusBold := "gray", true
 	if sc := cfg.GetStatus(b.Status); sc != nil {
-		attrs = append(attrs, lipgloss.NewStyle().Foreground(ui.ResolveColor(sc.Color)).
-			Bold(!sc.Archive).Render(b.Status))
+		statusColor, statusBold = sc.Color, !sc.Archive
 	}
-	if b.Priority != "" && b.Priority != "normal" {
+	attrs = append(attrs, lipgloss.NewStyle().Foreground(ui.ResolveColor(statusColor)).
+		Bold(statusBold).Render(b.Status))
+
+	if b.Priority != "" {
+		priorityColor := "gray"
 		if pc := cfg.GetPriority(b.Priority); pc != nil {
-			attrs = append(attrs, lipgloss.NewStyle().Foreground(ui.ResolveColor(pc.Color)).
-				Render(b.Priority))
+			priorityColor = pc.Color
 		}
+		attrs = append(attrs, lipgloss.NewStyle().Foreground(ui.ResolveColor(priorityColor)).
+			Render(b.Priority))
 	}
 	if implicitStatus, implicitStatusFrom := core.ImplicitStatus(b.ID); implicitStatus != "" {
 		attrs = append(attrs, ui.Muted.Render("↑"+implicitStatus+" (from "+implicitStatusFrom+")"))

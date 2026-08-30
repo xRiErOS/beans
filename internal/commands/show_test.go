@@ -348,3 +348,46 @@ func TestShowHeaderCarriesCreatedAndUpdatedTimestamps(t *testing.T) {
 		}
 	}
 }
+
+// TestShowDetailShowsNormalPriority guards against a second unauthorised
+// behaviour change: hiding a "normal" priority in the detail view. Hiding it
+// is correct in the table (Task 10's prioCell), where it removes a repeated
+// word from every row and buys density; a detail view shows exactly one
+// bean, has no density to buy, and previously showed the badge for it. The
+// title and body deliberately avoid the word "normal" so the only possible
+// source of the substring is the priority attribute itself.
+func TestShowDetailShowsNormalPriority(t *testing.T) {
+	setupShowTest(t)
+	b := showTestBean("beans-detail3", "Detail priority bean", "body text")
+	b.Priority = "normal"
+
+	out, err := showOutput(b, true)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	plain := stripANSITest(out)
+	if !strings.Contains(plain, "normal") {
+		t.Errorf("detail view hides the normal priority:\n%s", plain)
+	}
+}
+
+// TestShowDetailShowsUnknownStatus guards against the attribute vanishing
+// entirely when the config has no matching entry -- the one case where a
+// reader most needs to see the raw value, not less of it. The old code fell
+// back to the "gray" legacy colour alias in that case; the new code must
+// keep rendering the value even though its colour resolution has nothing to
+// key off.
+func TestShowDetailShowsUnknownStatus(t *testing.T) {
+	setupShowTest(t)
+	b := showTestBean("beans-detail5", "Bean with an odd status", "body text")
+	b.Status = "wibble"
+
+	out, err := showOutput(b, true)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	plain := stripANSITest(out)
+	if !strings.Contains(plain, "wibble") {
+		t.Errorf("detail view hides an unconfigured status:\n%s", plain)
+	}
+}
