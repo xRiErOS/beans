@@ -388,6 +388,56 @@ func TestLoadRequireFieldsOn(t *testing.T) {
 			t.Errorf("GetCommitField() = %q, want \"commit\"", got)
 		}
 	})
+
+	t.Run("unknown status error is deterministic across many keys", func(t *testing.T) {
+		// validateRequireFieldsOn used to range over the map directly, so
+		// which of several bad keys got reported first varied run to run
+		// with Go's randomised map iteration. Sorting the keys first pins
+		// it to the first bad status in lexical order.
+		body := "beans:\n  require_fields_on:\n" +
+			"    zzz-bogus:\n      - commit\n" +
+			"    aaa-bogus:\n      - commit\n" +
+			"    mmm-bogus:\n      - commit\n"
+		for range 20 {
+			_, err := Load(write(t, body))
+			if err == nil {
+				t.Fatal("expected error for unknown status, got nil")
+			}
+			if !strings.Contains(err.Error(), `"aaa-bogus"`) {
+				t.Fatalf("expected the lexically first bad status \"aaa-bogus\" to be reported, got %q", err.Error())
+			}
+		}
+	})
+
+	t.Run("save preserves a key StatusList does not carry", func(t *testing.T) {
+		// A Config built directly (not through Load, which validates every
+		// key) can carry a require_fields_on entry for a status name
+		// StatusList() doesn't know about. Save() used to iterate
+		// StatusList() to get deterministic key order, which silently
+		// dropped any such key instead of just writing it out.
+		tmpDir := t.TempDir()
+		cfg := &Config{
+			Beans: BeansConfig{
+				Path:            ".beans",
+				Prefix:          "test-",
+				IDLength:        4,
+				RequireFieldsOn: map[string][]string{"not-a-real-status": {"commit"}},
+			},
+		}
+		cfg.SetConfigDir(tmpDir)
+
+		if err := cfg.Save(tmpDir); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(tmpDir, ConfigFileName))
+		if err != nil {
+			t.Fatalf("ReadFile error = %v", err)
+		}
+		if !strings.Contains(string(data), "not-a-real-status") {
+			t.Errorf("saved config does not contain %q:\n%s", "not-a-real-status", data)
+		}
+	})
 }
 
 func TestStatusesAreHardcoded(t *testing.T) {

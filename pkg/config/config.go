@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -460,7 +461,13 @@ func ValidateAnchor(anchor string) error {
 // manages as a schema field. Misconfiguration must not silently degrade into
 // no policy at all.
 func (c *Config) validateRequireFieldsOn() error {
-	for status, fields := range c.Beans.RequireFieldsOn {
+	statuses := make([]string, 0, len(c.Beans.RequireFieldsOn))
+	for status := range c.Beans.RequireFieldsOn {
+		statuses = append(statuses, status)
+	}
+	sort.Strings(statuses)
+	for _, status := range statuses {
+		fields := c.Beans.RequireFieldsOn[status]
 		if !c.IsValidStatus(status) {
 			return fmt.Errorf("unknown status %q in beans.require_fields_on (valid: %s)", status, strings.Join(c.StatusNames(), ", "))
 		}
@@ -662,8 +669,18 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		key := strNode("require_fields_on")
 		key.HeadComment = "Front matter keys that must be set when a bean enters a status"
 		mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		for _, s := range c.StatusList() { // deterministic key order
-			fields := c.Beans.RequireFieldsOn[s.Name]
+		// Iterate the map's own keys, sorted for deterministic output -
+		// looping over StatusList() instead would silently drop any status
+		// name RequireFieldsOn carries that StatusList() doesn't (e.g. a
+		// config built directly rather than through Load, which is the only
+		// place that validates every key names a known status).
+		statuses := make([]string, 0, len(c.Beans.RequireFieldsOn))
+		for s := range c.Beans.RequireFieldsOn {
+			statuses = append(statuses, s)
+		}
+		sort.Strings(statuses)
+		for _, s := range statuses {
+			fields := c.Beans.RequireFieldsOn[s]
 			if len(fields) == 0 {
 				continue
 			}
@@ -671,7 +688,7 @@ func (c *Config) toYAMLNode() *yaml.Node {
 			for _, f := range fields {
 				seq.Content = append(seq.Content, strNode(f))
 			}
-			mapping.Content = append(mapping.Content, strNode(s.Name), seq)
+			mapping.Content = append(mapping.Content, strNode(s), seq)
 		}
 		beansMapping.Content = append(beansMapping.Content, key, mapping)
 	}
