@@ -2350,3 +2350,64 @@ func TestSaveRoundTripsATypeRankOverride(t *testing.T) {
 		t.Errorf("reloaded RankOf(\"package\") = %d, want 2 - the saved rank must survive", got)
 	}
 }
+
+// Plan task 3 of docs/topics/beans-type-profiles: a type can opt out of the
+// aggregate views (roadmap, milestones) without losing its rank or colour.
+
+func TestEveryBuiltInTypeIsVisibleByDefault(t *testing.T) {
+	c := &Config{}
+	for _, name := range c.TypeNames() {
+		if !c.IsRoadmapType(name) {
+			t.Errorf("IsRoadmapType(%q) = false, want true — built-in types stay visible", name)
+		}
+	}
+}
+
+func TestRoadmapFalseHidesAType(t *testing.T) {
+	visible := false
+	rank := 1
+	c := &Config{Types: []TypeOverride{{Name: "bucket", Rank: &rank, Roadmap: &visible}}}
+	if c.IsRoadmapType("bucket") {
+		t.Error("a type with roadmap: false must not count as a roadmap type")
+	}
+}
+
+func TestAppendedTypeIsVisibleWithoutTheKey(t *testing.T) {
+	rank := 1
+	c := &Config{Types: []TypeOverride{{Name: "release", Rank: &rank}}}
+	if !c.IsRoadmapType("release") {
+		t.Error("an appended type without roadmap: must default to visible")
+	}
+}
+
+func TestColourOnlyOverrideKeepsVisibility(t *testing.T) {
+	c := &Config{Types: []TypeOverride{{Name: "milestone", Color: "red"}}}
+	if !c.IsRoadmapType("milestone") {
+		t.Error("a colour override must not hide a type")
+	}
+}
+
+// Save() builds the types: sequence node by node rather than by marshalling
+// the struct, so a yaml tag alone does not carry Roadmap through a
+// write-and-read cycle. Without this test the omission is invisible.
+func TestSaveRoundTripsATypeRoadmapOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	visible := false
+
+	cfg := DefaultWithPrefix("test-")
+	cfg.SetConfigDir(tmpDir)
+	cfg.Types = []TypeOverride{{Name: "bug", Roadmap: &visible}}
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if reloaded.IsRoadmapType("bug") {
+		t.Error("reloaded IsRoadmapType(\"bug\") = true, want false - the saved roadmap flag must survive")
+	}
+}

@@ -85,7 +85,11 @@ type TypeConfig struct {
 	// Emphasis renders this type bold across type word, id and title. It is
 	// what carries the hierarchy where hue alone cannot: Catppuccin tones are
 	// uniformly pastel, so a container would otherwise lose against a leaf.
-	Emphasis    bool   `yaml:"emphasis,omitempty"`
+	Emphasis bool `yaml:"emphasis,omitempty"`
+	// Roadmap decides whether this type gets its own section in `beans roadmap`
+	// and an entry in `beans milestones`. Nil means visible; only an explicit
+	// roadmap: false hides the type, and it hides its whole subtree with it.
+	Roadmap     *bool  `yaml:"roadmap,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -122,6 +126,10 @@ type TypeOverride struct {
 	Rank        *int   `yaml:"rank,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Emphasis    *bool  `yaml:"emphasis,omitempty"`
+	// Roadmap decides whether this type gets its own section in `beans roadmap`
+	// and an entry in `beans milestones`. Nil means visible; only an explicit
+	// roadmap: false hides the type, and it hides its whole subtree with it.
+	Roadmap *bool `yaml:"roadmap,omitempty"`
 }
 
 // PriorityOverride is one entry of Config.Priorities: a priority the config
@@ -730,6 +738,9 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Emphasis != nil {
 			m.Content = append(m.Content, strNode("emphasis"), scalar(fmt.Sprintf("%t", *t.Emphasis), "!!bool"))
 		}
+		if t.Roadmap != nil {
+			m.Content = append(m.Content, strNode("roadmap"), scalar(fmt.Sprintf("%t", *t.Roadmap), "!!bool"))
+		}
 		if t.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
 		}
@@ -954,6 +965,15 @@ func (c *Config) RankOf(typeName string) int {
 	return LeafRank
 }
 
+// IsRoadmapType reports whether a type appears as its own container in the
+// aggregate views. Anything not explicitly switched off is visible.
+func (c *Config) IsRoadmapType(typeName string) bool {
+	if t := c.GetType(typeName); t != nil && t.Roadmap != nil {
+		return *t.Roadmap
+	}
+	return true
+}
+
 // TypesAtRank returns the names of every type on the given rank, in the order
 // the merged list carries them.
 func (c *Config) TypesAtRank(rank int) []string {
@@ -1019,6 +1039,12 @@ func (c *Config) TypeList() []TypeConfig {
 			// type like "milestone" back to non-emphasised by accident.
 			if o.Emphasis != nil {
 				t.Emphasis = *o.Emphasis
+			}
+			// Roadmap is a pointer for the same reason: an omitted key must
+			// stay distinct from an explicit "roadmap: false", or a
+			// colour-only override would silently hide the type.
+			if o.Roadmap != nil {
+				t.Roadmap = o.Roadmap
 			}
 			// An appended type starts from a zero TypeConfig, so an entry
 			// without rank: would sit at rank 0 and outrank every container.
