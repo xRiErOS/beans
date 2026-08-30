@@ -140,6 +140,12 @@ const tagsCrushWidth = 25
 // forces the title back up past what was actually available.
 const minRenderableTitle = 12
 
+// headerTagsLabel is the TAGS column's header word — see Header. Rebalance
+// floors the tags column at this label's width so a shrink can never leave
+// the column narrower than its own header, which is why Header and
+// Rebalance both read this constant instead of each carrying "TAGS".
+const headerTagsLabel = "TAGS"
+
 // clampToMinRenderableTitle floors a title-column width at minRenderableTitle.
 // The table (NewColumns) and the tree/detail form (renderTree in render.go)
 // must apply the exact same floor to the exact same constant, or the two
@@ -328,7 +334,15 @@ func (c *Columns) Rebalance(rows []Row) {
 		// below the terminal width on purpose. Routing the surplus into
 		// Title instead would reintroduce the exact waste this task
 		// removes: a title column padded past what any title needs.
+		//
+		// Floored at headerTagsLabel's width, not just neededTags: Header()
+		// is computed after Rebalance runs, so if this shrink were left
+		// free to go below "TAGS"'s own width the column would end up
+		// narrower than the word it is titled with.
 		c.Tags = neededTags
+		if tagsFloor := DisplayWidth(headerTagsLabel); c.Tags < tagsFloor {
+			c.Tags = tagsFloor
+		}
 	}
 }
 
@@ -388,7 +402,7 @@ func (c Columns) Header() string {
 		cells = append(cells, PadRight("PROGRESS", c.ProgressWidth))
 	}
 	if c.Tags > 0 {
-		cells = append(cells, PadRight("TAGS", c.Tags))
+		cells = append(cells, PadRight(headerTagsLabel, c.Tags))
 	}
 	gap := strings.Repeat(" ", c.Gap)
 	// TrimRight, not just Join: the last cell pads to its full width like any

@@ -347,12 +347,20 @@ func TestRebalanceDoesNothingWhenATitleClaimsTheWidth(t *testing.T) {
 	}
 }
 
-func TestRebalanceGivesNoMoreThanTheTagsNeed(t *testing.T) {
+// TestRebalanceGivesNoMoreThanTheTagsNeedOrTheHeaderLabel guards both bounds
+// of the shrink branch: tags never grow past what a single "#ab" tag needs
+// by content alone, but never shrink below "TAGS" — its own header label —
+// either, or the header word would overflow the column it labels
+// (beans-kdkp).
+func TestRebalanceGivesNoMoreThanTheTagsNeedOrTheHeaderLabel(t *testing.T) {
 	rows := rowsWithTags("x", []string{"ab"})
 	c := NewColumns(rows, 110, true, config.Default())
 	c.Rebalance(rows)
-	if c.Tags > 3 {
-		t.Errorf("tags grew to %d for a single #ab, want at most 3", c.Tags)
+	if c.Tags > 4 {
+		t.Errorf("tags grew to %d for a single #ab, want at most 4 (the TAGS header floor)", c.Tags)
+	}
+	if c.Tags < len(headerTagsLabel) {
+		t.Errorf("tags shrank to %d, narrower than its own %q header label", c.Tags, headerTagsLabel)
 	}
 }
 
