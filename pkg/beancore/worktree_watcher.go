@@ -279,7 +279,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 
 				events = append(events, BeanEvent{
 					Type:   EventUpdated,
-					Bean:   mainBean,
+					Bean:   mainBean.Clone(),
 					BeanID: id,
 				})
 			} else if _, existed := c.beans[id]; existed {
@@ -332,7 +332,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 					}
 					events = append(events, BeanEvent{
 						Type:   EventUpdated,
-						Bean:   mainBean,
+						Bean:   mainBean.Clone(),
 						BeanID: newBean.ID,
 					})
 				}
@@ -355,13 +355,13 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 		if existed {
 			events = append(events, BeanEvent{
 				Type:   EventUpdated,
-				Bean:   newBean,
+				Bean:   newBean.Clone(),
 				BeanID: newBean.ID,
 			})
 		} else {
 			events = append(events, BeanEvent{
 				Type:   EventCreated,
-				Bean:   newBean,
+				Bean:   newBean.Clone(),
 				BeanID: newBean.ID,
 			})
 		}

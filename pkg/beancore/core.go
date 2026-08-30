@@ -1050,11 +1050,14 @@ func (c *Core) Archive(id string) error {
 	targetBean.Path = newRelPath
 	c.setBeanLocked(targetID, targetBean)
 	c.mainPaths[targetID] = newRelPath
+	// Copy while the write lock is still held: fanOut runs unlocked, so a
+	// copy taken there would race the writers it exists to protect.
+	eventBean := targetBean.Clone()
 	c.mu.Unlock()
 
 	c.fanOut([]BeanEvent{{
 		Type:   EventUpdated,
-		Bean:   targetBean,
+		Bean:   eventBean,
 		BeanID: targetID,
 	}})
 
