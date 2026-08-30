@@ -4,7 +4,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"github.com/hmans/beans/internal/ui"
 	"github.com/hmans/beans/pkg/bean"
@@ -863,23 +862,6 @@ func TestRoadmapMarkdownByteIdentical(t *testing.T) {
 	}
 }
 
-// Mutation guard for the "fallback bei unbestimmbarer Breite" line (D08):
-// roadmapOutput must run cols through roadmapClampWidth, not use it raw. A
-// cols=0 caller (no terminal detected) must land on the 80-column floor, not
-// a 0-width render.
-func TestRoadmapOutputZeroColsFallsBackTo80(t *testing.T) {
-	data := roadmapOutputFixture()
-	got := roadmapOutput(data, true, roadmapFormatAuto, 0, true, "", false, ui.FormTree, config.Default())
-
-	lines := strings.SplitN(got, "\n", 3)
-	if len(lines) < 2 {
-		t.Fatalf("expected at least 2 lines, got %d: %q", len(lines), got)
-	}
-	sepWidth := utf8.RuneCountInString(lines[1])
-	if sepWidth != 80 {
-		t.Errorf("separator width = %d, want 80 (roadmapClampWidth(0) floor, D08)", sepWidth)
-	}
-}
 
 func TestBuildScopedRoadmapMilestoneRoot(t *testing.T) {
 	oldCfg := cfg

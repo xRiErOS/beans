@@ -192,9 +192,11 @@ const (
 // the shared layout engine (ui.Render) in the requested form, everything else
 // (pipe, redirect, non-terminal) gets renderRoadmapMarkdown unchanged --
 // byte-identical to calling renderRoadmapMarkdown directly (Q07/D02). cols is
-// clamped via roadmapClampWidth regardless of what the caller passed in; a
-// caller that could not determine a terminal width passes 0, which lands on
-// the 80-column floor (D08). format overrides the isTTY-derived choice when
+// passed through to ui.Render as-is -- resolveWidth (roadmap.go's RunE) is
+// the one place the width is decided (floor 80, cap from --max-width/config/
+// terminal, or uncapped for --max-width 0); a second clamp here would make
+// roadmap silently disagree with every other command about what --max-width
+// means (beans-dbph). format overrides the isTTY-derived choice when
 // it is not roadmapFormatAuto, so a caller can force either branch (e.g. for
 // tests, or a user explicitly asking for --format markdown/tty).
 func roadmapOutput(data *roadmapData, isTTY bool, format roadmapFormatOverride, cols int, links bool, linkPrefix string, showTags bool, form ui.Form, cfg *config.Config) string {
@@ -206,7 +208,7 @@ func roadmapOutput(data *roadmapData, isTTY bool, format roadmapFormatOverride, 
 		renderTTY = false
 	}
 	if renderTTY {
-		return ui.Render(roadmapRows(data), form, "Roadmap", roadmapClampWidth(cols), showTags, cfg)
+		return ui.Render(roadmapRows(data), form, "Roadmap", cols, showTags, cfg)
 	}
 	return renderRoadmapMarkdown(data, links, linkPrefix, showTags)
 }

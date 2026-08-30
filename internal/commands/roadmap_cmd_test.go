@@ -329,15 +329,21 @@ func TestRoadmapCmdMilestoneGroupingSurvivesTableFlattening(t *testing.T) {
 	}
 }
 
-// TestRoadmapOutputNoLineExceedsWidthNarrow sweeps cols across and below
-// roadmapMinWidth (80), not just comfortably above it -- a sweep that only
-// tries wide values can pass without ever exercising roadmapClampWidth's
-// floor, or NewColumns' short-form/tag-dropping decisions, which is exactly
-// the kind of guard-never-fired false pass this plan has already had to
-// remove once (see the task report). The fixture nests three levels deep
-// (milestone -> epic -> feature -> task) with long titles and tags so the
-// column budget is actually under pressure at these widths.
-func TestRoadmapOutputNoLineExceedsWidthNarrow(t *testing.T) {
+// TestRoadmapOutputNoLineExceedsWidth sweeps cols across the range
+// resolveWidth can actually produce -- at and around its 80-column floor,
+// and well above the old 110-column default cap -- rather than only trying
+// comfortably-wide values, which is exactly the kind of guard-never-fired
+// false pass this plan has already had to remove once (see the task
+// report). It stops at 79 rather than sweeping further below 80: cols under
+// resolveWidth's floor are not a case roadmapOutput itself is responsible
+// for any more (see TestRoadmapOutputMaxWidthAboveDefaultCapIsHonoured --
+// roadmapOutput is a pure pass-through, resolveWidth is the one place the
+// width is decided), and pathologically narrow widths are the one case
+// ui.Render documents itself as accepting overflow on (minRenderableTitle),
+// which is ui's own contract to test, not roadmap.go's wiring. The fixture
+// nests three levels deep (milestone -> epic -> feature -> task) with long
+// titles and tags so the column budget is actually under pressure here.
+func TestRoadmapOutputNoLineExceedsWidth(t *testing.T) {
 	now := time.Now()
 	m := &bean.Bean{ID: "beans-m1", Type: "milestone", Title: "A moderately long milestone title", Status: "todo", CreatedAt: &now, Tags: []string{"backend", "urgent"}, Path: "m1.md"}
 	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "A moderately long epic title", Status: "todo", Tags: []string{"auth"}, Path: "e1.md"}
@@ -354,28 +360,54 @@ func TestRoadmapOutputNoLineExceedsWidthNarrow(t *testing.T) {
 		},
 	}
 
-	cols := []int{1, 10, 40, 79, 80, 81, 95, 109, 110, 111, 200}
+	cols := []int{79, 80, 81, 95, 109, 110, 111, 150, 200, 500}
 	for _, form := range []ui.Form{ui.FormTree, ui.FormTable} {
 		for _, c := range cols {
 			got := roadmapOutput(data, true, roadmapFormatTTY, c, true, "", true, form, config.Default())
-			clamped := roadmapClampWidth(c)
 			lines := strings.Split(got, "\n")
 			for _, line := range lines {
-				if w := ui.DisplayWidth(line); w > clamped {
-					t.Errorf("form=%v cols=%d (clamped=%d): line exceeds width (%d): %q", form, c, clamped, w, line)
+				if w := ui.DisplayWidth(line); w > c {
+					t.Errorf("form=%v cols=%d: line exceeds width (%d): %q", form, c, w, line)
 				}
 			}
-			// The divider (second line, both forms) is exactly `width` dashes
-			// -- pinning it to `clamped` proves roadmapOutput actually clamps
-			// the raw cols before rendering, not just that nothing overflows
-			// (a render that ignored clamping and used a narrower raw width
-			// throughout would still pass the no-overflow check above).
+			// The divider (second line, both forms) is exactly `width`
+			// dashes -- pinning it to the raw `c` (not a clamped value)
+			// proves roadmapOutput passes cols straight through to
+			// ui.Render rather than re-capping what resolveWidth already
+			// decided.
 			if len(lines) < 2 {
 				t.Fatalf("form=%v cols=%d: expected at least 2 lines, got %d", form, c, len(lines))
 			}
-			if w := ui.DisplayWidth(lines[1]); w != clamped {
-				t.Errorf("form=%v cols=%d: divider width = %d, want %d (roadmapClampWidth(%d))", form, c, w, clamped, c)
+			if w := ui.DisplayWidth(lines[1]); w != c {
+				t.Errorf("form=%v cols=%d: divider width = %d, want %d", form, c, w, c)
 			}
 		}
+	}
+}
+
+// TestRoadmapOutputMaxWidthAboveDefaultCapIsHonoured guards the removal of
+// roadmapOutput's own clamp (beans-dbph Step B follow-up): resolveWidth is
+// the one place the render width is decided -- it floors at 80 but has no
+// upper cap, so --max-width can push a caller past the 110-column default
+// (roadmapMaxWidth). Before this fix roadmapOutput ran cols through
+// roadmapClampWidth on top of resolveWidth's own decision, silently
+// re-capping roadmap at 110 while every other width-aware command (list,
+// show, ...) honoured --max-width up to whatever the user asked for -- two
+// commands given the same flag, quietly disagreeing.
+func TestRoadmapOutputMaxWidthAboveDefaultCapIsHonoured(t *testing.T) {
+	data := roadmapOutputFixture()
+
+	// 200 > roadmapMaxWidth (110): this is exactly the case resolveWidth's
+	// own doc comment describes -- a caller explicitly asking for more than
+	// the default cap via --max-width, which resolveWidth grants unless a
+	// narrower terminal is detected (none is, under go test).
+	got := roadmapOutput(data, true, roadmapFormatTTY, 200, true, "", false, ui.FormTree, config.Default())
+
+	lines := strings.SplitN(got, "\n", 3)
+	if len(lines) < 2 {
+		t.Fatalf("expected at least 2 lines, got %d: %q", len(lines), got)
+	}
+	if w := ui.DisplayWidth(lines[1]); w != 200 {
+		t.Errorf("divider width = %d, want 200 -- roadmap must not silently re-cap what resolveWidth already decided", w)
 	}
 }
