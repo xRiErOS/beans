@@ -248,7 +248,8 @@ func TestRenderBeanRowFollowsTheTheme(t *testing.T) {
 	// regardless of whether the code follows the theme at all (see
 	// withTrueColor in markdown_test.go).
 	withTrueColor(t)
-	t.Cleanup(func() { SetTheme("mocha") })
+	prev := ActiveTheme().Name
+	t.Cleanup(func() { SetTheme(prev) })
 
 	SetTheme("mocha")
 	mocha := RenderBeanRow("beans-abcd", "todo", "task", "A title", BeanRowConfig{
@@ -274,7 +275,8 @@ func TestCalculateResponsiveColumnsStillExists(t *testing.T) {
 func TestCalculateResponsiveColumnsIgnoresTheme(t *testing.T) {
 	// Widths are not a colour concern: a theme switch must not change
 	// which columns get shown or how wide they are.
-	t.Cleanup(func() { SetTheme("mocha") })
+	prev := ActiveTheme().Name
+	t.Cleanup(func() { SetTheme(prev) })
 
 	SetTheme("mocha")
 	mocha := CalculateResponsiveColumns(140, true)
