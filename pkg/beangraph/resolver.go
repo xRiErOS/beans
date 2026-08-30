@@ -17,24 +17,6 @@ type CoreResolver struct {
 	Core *beancore.Core
 }
 
-// ETagMismatchError is returned when an ETag validation fails.
-// This allows callers to distinguish concurrency conflicts from other errors.
-type ETagMismatchError struct {
-	Provided string
-	Current  string
-}
-
-func (e *ETagMismatchError) Error() string {
-	return fmt.Sprintf("etag mismatch: provided %s, current is %s", e.Provided, e.Current)
-}
-
-// ETagRequiredError is returned when require_if_match is enabled and no ETag is provided.
-type ETagRequiredError struct{}
-
-func (e *ETagRequiredError) Error() string {
-	return "if-match etag is required (set require_if_match: false in config to disable)"
-}
-
 // validateETag checks if the provided ifMatch etag matches the bean's current etag.
 // Returns an error if validation fails or if require_if_match is enabled and no etag provided.
 func (r *CoreResolver) validateETag(b *bean.Bean, ifMatch *string) error {
@@ -43,14 +25,14 @@ func (r *CoreResolver) validateETag(b *bean.Bean, ifMatch *string) error {
 
 	// If require_if_match is enabled and no etag provided, reject
 	if requireIfMatch && (ifMatch == nil || *ifMatch == "") {
-		return &ETagRequiredError{}
+		return &beancore.ETagRequiredError{}
 	}
 
 	// If ifMatch provided, validate it
 	if ifMatch != nil && *ifMatch != "" {
 		currentETag := b.ETag()
 		if currentETag != *ifMatch {
-			return &ETagMismatchError{Provided: *ifMatch, Current: currentETag}
+			return &beancore.ETagMismatchError{Provided: *ifMatch, Current: currentETag}
 		}
 	}
 

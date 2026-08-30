@@ -24,6 +24,10 @@ const (
 	EventUpdated
 	// EventDeleted indicates a bean was deleted.
 	EventDeleted
+	// EventResync tells a subscriber that events were dropped because its
+	// channel was full, and that it has to reload the full state instead of
+	// trusting the increments it has seen so far.
+	EventResync
 )
 
 // String returns a human-readable representation of the event type.
@@ -35,6 +39,8 @@ func (e EventType) String() string {
 		return "updated"
 	case EventDeleted:
 		return "deleted"
+	case EventResync:
+		return "resync"
 	default:
 		return "unknown"
 	}
@@ -51,6 +57,10 @@ type BeanEvent struct {
 type subscription struct {
 	ch chan []BeanEvent
 	id uint64
+	// needsResync is set when a fan-out had to drop this subscriber's events.
+	// The next fan-out that finds room leads with an EventResync so the
+	// subscriber knows its incremental state is no longer trustworthy.
+	needsResync atomic.Bool
 }
 
 // Subscribe creates a new subscription to bean change events.
@@ -80,7 +90,10 @@ func (c *Core) Subscribe() (<-chan []BeanEvent, func()) {
 }
 
 // fanOut sends events to all subscribers (non-blocking).
-// Slow subscribers will have events dropped rather than blocking others.
+// A subscriber whose channel is full has its events dropped rather than
+// blocking the others, and is marked for resync: the next fan-out that finds
+// room leads with an EventResync, so a client that missed events reloads its
+// state instead of drifting on top of an incomplete history.
 func (c *Core) fanOut(events []BeanEvent) {
 	if len(events) == 0 {
 		return
@@ -90,12 +103,37 @@ func (c *Core) fanOut(events []BeanEvent) {
 	defer c.subMu.RUnlock()
 
 	for _, sub := range c.subscribers {
+		if sub.needsResync.Load() {
+			select {
+			case sub.ch <- []BeanEvent{{Type: EventResync}}:
+				sub.needsResync.Store(false)
+			default:
+				// Still full — keep the mark and skip this batch, which the
+				// subscriber will recover from the resync snapshot anyway.
+				continue
+			}
+		}
+
 		select {
 		case sub.ch <- events:
 			// Sent successfully
 		default:
-			// Subscriber is slow, drop events
-			c.logWarn("subscriber %d: event channel full, dropping %d events", sub.id, len(events))
+			// Subscriber is slow: drop this batch and get a resync marker into
+			// its buffer, evicting one queued batch to make room. Waiting for
+			// the next fan-out would strand a client that fell behind on the
+			// last burst of a busy period, and the evicted batch costs nothing
+			// — the client replaces its state from the snapshot anyway.
+			sub.needsResync.Store(true)
+			select {
+			case <-sub.ch:
+			default:
+			}
+			select {
+			case sub.ch <- []BeanEvent{{Type: EventResync}}:
+				sub.needsResync.Store(false)
+			default:
+			}
+			c.logWarn("subscriber %d: event channel full, dropped %d events, resync sent", sub.id, len(events))
 		}
 	}
 }
@@ -284,7 +322,8 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 			if _, exists := c.beans[id]; exists {
 				// Only delete if it was in our map and file is actually gone
 				if !c.fileExists(path) {
-					delete(c.beans, id)
+					c.removeBeanLocked(id)
+					delete(c.mainPaths, id)
 
 					// Update search index
 					if c.searchIndex != nil {
@@ -316,7 +355,8 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 			}
 
 			_, existed := c.beans[newBean.ID]
-			c.beans[newBean.ID] = newBean
+			c.setBeanLocked(newBean.ID, newBean)
+			c.mainPaths[newBean.ID] = newBean.Path
 			delete(c.dirty, newBean.ID) // Disk is now up-to-date
 
 			// Update search index

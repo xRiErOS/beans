@@ -2,6 +2,7 @@ package beancore
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/hmans/beans/pkg/bean"
@@ -50,39 +51,57 @@ func (r *LinkCheckResult) TotalIssues() int {
 }
 
 // FindIncomingLinks returns all beans that link TO the given bean ID.
+// It answers from a reverse index built once per mutation, so a caller walking
+// many beans (children, blocked-by and blocking resolvers do exactly that)
+// no longer scans the whole store per bean.
 func (c *Core) FindIncomingLinks(targetID string) []IncomingLink {
 	c.mu.RLock()
-	defer c.mu.RUnlock()
+	if c.incomingValid {
+		links := append([]IncomingLink(nil), c.incoming[targetID]...)
+		c.mu.RUnlock()
+		return links
+	}
+	c.mu.RUnlock()
 
-	var result []IncomingLink
-	for _, b := range c.beans {
-		// Check parent link
-		if b.Parent == targetID {
-			result = append(result, IncomingLink{
-				FromBean: b,
-				LinkType: "parent",
-			})
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.rebuildIncomingLocked()
+	return append([]IncomingLink(nil), c.incoming[targetID]...)
+}
+
+// rebuildIncomingLocked recomputes the reverse link index from beans.
+// Must be called with c.mu held for writing.
+func (c *Core) rebuildIncomingLocked() {
+	if c.incomingValid {
+		return
+	}
+
+	index := make(map[string][]IncomingLink, len(c.beans))
+
+	// Sorted so the answer does not change between runs — map iteration alone
+	// would reorder the links of a target on every rebuild.
+	ids := make([]string, 0, len(c.beans))
+	for id := range c.beans {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+
+	for _, id := range ids {
+		b := c.beans[id]
+		if b.Parent != "" {
+			index[b.Parent] = append(index[b.Parent], IncomingLink{FromBean: b, LinkType: "parent"})
 		}
-		// Check blocking links
 		for _, blocked := range b.Blocking {
-			if blocked == targetID {
-				result = append(result, IncomingLink{
-					FromBean: b,
-					LinkType: "blocking",
-				})
-			}
+			index[blocked] = append(index[blocked], IncomingLink{FromBean: b, LinkType: "blocking"})
 		}
-		// Check blocked_by links (inverse: if A has blocked_by B, then B links to A)
+		// Inverse: if A has blocked_by B, then B links to A
 		for _, blocker := range b.BlockedBy {
-			if blocker == targetID {
-				result = append(result, IncomingLink{
-					FromBean: b,
-					LinkType: "blocked_by",
-				})
-			}
+			index[blocker] = append(index[blocker], IncomingLink{FromBean: b, LinkType: "blocked_by"})
 		}
 	}
-	return result
+
+	c.incoming = index
+	c.incomingValid = true
 }
 
 // DetectCycle checks if adding a link from fromID to toID would create a cycle.
@@ -358,6 +377,7 @@ func (c *Core) RemoveLinksTo(targetID string) (int, error) {
 		}
 
 		if changed {
+			c.invalidateIncomingLocked()
 			if err := c.saveToDisk(b); err != nil {
 				return removed, err
 			}
@@ -432,6 +452,7 @@ func (c *Core) FixBrokenLinks() (int, error) {
 		}
 
 		if changed {
+			c.invalidateIncomingLocked()
 			if err := c.saveToDisk(b); err != nil {
 				return fixed, err
 			}

@@ -120,7 +120,7 @@ func (c *Core) loadWorktreeBeansInitial(wt *worktreeWatcher) {
 			}
 		}
 
-		c.beans[newBean.ID] = newBean
+		c.setBeanLocked(newBean.ID, newBean)
 		c.dirty[newBean.ID] = true
 		c.worktreeLinks[newBean.ID] = wt.worktreePath
 
@@ -269,7 +269,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 					continue
 				}
 				// Bean exists in main — revert to that version
-				c.beans[id] = mainBean
+				c.setBeanLocked(id, mainBean)
 				delete(c.dirty, id)
 				delete(c.worktreeLinks, id)
 
@@ -284,7 +284,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 				})
 			} else if _, existed := c.beans[id]; existed {
 				// Bean was worktree-only — remove from runtime
-				delete(c.beans, id)
+				c.removeBeanLocked(id)
 				delete(c.dirty, id)
 				delete(c.worktreeLinks, id)
 
@@ -324,7 +324,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 			if mainErr == nil && mainBean.ETag() == newBean.ETag() {
 				// Worktree version matches main — clear any stale link
 				if _, wasLinked := c.worktreeLinks[newBean.ID]; wasLinked {
-					c.beans[newBean.ID] = mainBean
+					c.setBeanLocked(newBean.ID, mainBean)
 					delete(c.dirty, newBean.ID)
 					delete(c.worktreeLinks, newBean.ID)
 					if c.searchIndex != nil {
@@ -341,7 +341,7 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 		}
 
 		_, existed := c.beans[newBean.ID]
-		c.beans[newBean.ID] = newBean
+		c.setBeanLocked(newBean.ID, newBean)
 		c.dirty[newBean.ID] = true // Mark as dirty — came from worktree, not persisted to main
 		c.worktreeLinks[newBean.ID] = wt.worktreePath
 
@@ -379,24 +379,24 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 	}
 }
 
-// findMainBeanFile searches the main .beans/ directory for a file matching the
-// given bean ID. Returns the full path or empty string if not found.
+// findMainBeanFile returns the full path of the main store's file for the given
+// bean ID, or an empty string if the main store does not hold it. The answer
+// comes from the in-memory mainPaths index — a worktree overlay leaves that
+// index alone, so this stays correct while a worktree version is active, and it
+// covers beans in subdirectories, which a flat directory scan missed.
 // Must be called with c.mu held.
 func (c *Core) findMainBeanFile(id string) string {
-	entries, err := os.ReadDir(c.root)
-	if err != nil {
+	relPath, ok := c.mainPaths[id]
+	if !ok {
 		return ""
 	}
-	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
-			continue
-		}
-		fileID, _ := bean.ParseFilename(entry.Name())
-		if fileID == id {
-			return filepath.Join(c.root, entry.Name())
-		}
+	path := filepath.Join(c.root, relPath)
+	if _, err := os.Stat(path); err != nil {
+		// The index outlived the file (deleted outside the watcher's view).
+		delete(c.mainPaths, id)
+		return ""
 	}
-	return ""
+	return path
 }
 
 // loadBeanFrom reads and parses a bean file, calculating its relative path from the given root.

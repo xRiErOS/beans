@@ -128,6 +128,10 @@ type Subscription {
   When includeInitial is true, all existing beans are emitted as a single
   INITIAL_SNAPSHOT event containing the full list, followed by real-time
   changes. This eliminates race conditions between loading and subscribing.
+
+  A client that cannot keep up also receives an INITIAL_SNAPSHOT: when the
+  server has to drop events for a slow subscriber, it sends the full state
+  again rather than letting the client build on an incomplete history.
   """
   beanChanged(includeInitial: Boolean = false): BeanChangeEvent!
 

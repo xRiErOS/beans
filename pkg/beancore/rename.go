@@ -104,9 +104,14 @@ func (c *Core) applyRenameSlug(plan *RenamePlan) error {
 	if err := os.Rename(oldAbs, newAbs); err != nil {
 		return fmt.Errorf("renaming slug file: %w", err)
 	}
+	// A slug rename touches no link field, so the incoming index stays valid.
+	// The mainPaths entry belongs inside the guard: registering a path for an
+	// ID the store does not have would make findMainBeanFile answer for an
+	// unknown bean.
 	if b, ok := c.beans[ch.OldID]; ok {
 		b.Path = ch.NewPath
 		_, b.Slug = bean.ParseFilename(filepath.Base(newAbs))
+		c.mainPaths[ch.OldID] = ch.NewPath
 	}
 	return nil
 }

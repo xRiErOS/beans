@@ -65,6 +65,19 @@ type Core struct {
 	dirty          map[string]bool       // IDs of beans modified in runtime but not yet persisted to disk
 	worktreeLinks  map[string]string     // bean ID -> worktree path (beans linked to a worktree)
 
+	// incoming is the reverse link index: target bean ID -> the links pointing
+	// at it. Derived state, rebuilt lazily from beans — every mutation of beans
+	// has to clear incomingValid, so go through setBeanLocked and
+	// removeBeanLocked, or call invalidateIncomingLocked for in-place edits.
+	incoming      map[string][]IncomingLink
+	incomingValid bool
+
+	// mainPaths maps a bean ID to its file path relative to root, for beans
+	// backed by a file in the main store. A worktree overlay replaces the entry
+	// in beans but never touches this map, so it still answers "which file in
+	// the main store holds this bean" while a worktree version is active.
+	mainPaths map[string]string
+
 	// Search index (optional, lazy-initialized)
 	searchIndex *search.Index
 
@@ -92,6 +105,7 @@ func New(root string, cfg *config.Config) *Core {
 		beans:         make(map[string]*bean.Bean),
 		dirty:         make(map[string]bool),
 		worktreeLinks: make(map[string]string),
+		mainPaths:     make(map[string]string),
 		subscribers: make(map[uint64]*subscription),
 		warnWriter:  os.Stderr,
 	}
@@ -115,6 +129,27 @@ func (c *Core) logWarn(format string, args ...any) {
 	if c.warnWriter != nil {
 		fmt.Fprintf(c.warnWriter, "warning: "+format+"\n", args...)
 	}
+}
+
+// setBeanLocked stores b under id and invalidates the derived indexes.
+// Must be called with c.mu held for writing.
+func (c *Core) setBeanLocked(id string, b *bean.Bean) {
+	c.beans[id] = b
+	c.incomingValid = false
+}
+
+// removeBeanLocked drops the bean under id and invalidates the derived indexes.
+// Must be called with c.mu held for writing.
+func (c *Core) removeBeanLocked(id string) {
+	delete(c.beans, id)
+	c.incomingValid = false
+}
+
+// invalidateIncomingLocked marks the reverse link index stale. Needed wherever
+// bean link fields are edited in place, without a store write.
+// Must be called with c.mu held for writing.
+func (c *Core) invalidateIncomingLocked() {
+	c.incomingValid = false
 }
 
 // Root returns the absolute path to the .beans directory.
@@ -244,6 +279,8 @@ func (c *Core) loadFromDisk() error {
 	// Clear existing beans and dirty state
 	c.beans = make(map[string]*bean.Bean)
 	c.dirty = make(map[string]bool)
+	c.mainPaths = make(map[string]string)
+	c.invalidateIncomingLocked()
 	err := filepath.WalkDir(c.root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -268,7 +305,8 @@ func (c *Core) loadFromDisk() error {
 			return fmt.Errorf("loading %s: %w", path, loadErr)
 		}
 
-		c.beans[b.ID] = b
+		c.setBeanLocked(b.ID, b)
+		c.mainPaths[b.ID] = b.Path
 		return nil
 	})
 	if err != nil {
@@ -647,6 +685,12 @@ func (c *Core) statusOnDisk(relPath, worktreePath string) (status string, ok boo
 	if err != nil {
 		return "", false
 	}
+	return statusOfContent(data)
+}
+
+// statusOfContent parses the status out of a bean file's bytes.
+// ok is false when the content is unparseable.
+func statusOfContent(data []byte) (status string, ok bool) {
 	b, err := bean.Parse(bytes.NewReader(data))
 	if err != nil {
 		return "", false
@@ -714,7 +758,7 @@ func (c *Core) Create(b *bean.Bean, opts ...UpdateOption) error {
 	}
 
 	// Add to in-memory map
-	c.beans[b.ID] = b
+	c.setBeanLocked(b.ID, b)
 
 	// Update search index if active (best-effort, don't fail create)
 	if c.searchIndex != nil {
@@ -751,25 +795,43 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 		return &ETagRequiredError{}
 	}
 
-	if ifMatch != nil && *ifMatch != "" {
-		// Calculate etag from the on-disk version by reading the stored bean's path
-		// This is necessary because the in-memory bean may have already been modified
-		// (Go uses pointers, so modifying the bean passed to Update also modifies c.beans[id])
-		var currentETag string
-		if storedBean.Path != "" && !c.dirty[b.ID] {
-			// Read current file from disk to calculate etag
-			diskPath := filepath.Join(c.root, storedBean.Path)
-			content, err := os.ReadFile(diskPath)
-			if err != nil {
-				// If file doesn't exist yet, fall back to stored bean's etag
-				currentETag = storedBean.ETag()
-			} else {
-				// Calculate etag from on-disk content -- same definition bean.ETag uses.
-				currentETag = bean.ETagOf(content)
-			}
-		} else {
-			// No path yet or bean is dirty (not on disk), use in-memory etag
-			currentETag = storedBean.ETag()
+	// Auto-route to linked worktree if no explicit path given
+	wtPath := o.worktreePath
+	if wtPath == "" {
+		wtPath = c.worktreeLinks[b.ID]
+	}
+
+	// The main-store file backs both checks below: the etag If-Match is
+	// validated against, and the previous status the field policy is measured
+	// from. On the common path — a write to main — both want the same bytes, so
+	// read them once. Read them here rather than before taking the lock: a read
+	// outside the lock leaves a window in which another writer replaces the
+	// file, which would turn a stale If-Match into a silent accept — the exact
+	// lost update the etag exists to prevent.
+	//
+	// The If-Match etag always comes from the main store, worktree write or
+	// not; the status policy measures against whichever file is being written,
+	// so under a worktree path it keeps reading the worktree copy below.
+	var mainContent []byte
+	var haveMainContent bool
+	readsMainFile := storedBean.Path != "" && !c.dirty[b.ID]
+	wantsETagFromDisk := ifMatch != nil && *ifMatch != ""
+	wantsStatusFromDisk := wtPath == "" && len(c.requiredFieldsFor(b.Status)) > 0
+	if readsMainFile && (wantsETagFromDisk || wantsStatusFromDisk) {
+		if content, err := os.ReadFile(filepath.Join(c.root, storedBean.Path)); err == nil {
+			mainContent, haveMainContent = content, true
+		}
+	}
+
+	if wantsETagFromDisk {
+		// The etag has to come from the file, not from the in-memory bean: Go
+		// passes the bean by pointer, so the caller's edits already landed in
+		// c.beans[id] and its etag describes the new state, not the one being
+		// replaced.
+		currentETag := storedBean.ETag()
+		if haveMainContent {
+			// Same definition bean.ETag uses.
+			currentETag = bean.ETagOf(mainContent)
 		}
 
 		if currentETag != *ifMatch {
@@ -780,16 +842,16 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 		}
 	}
 
-	// Auto-route to linked worktree if no explicit path given
-	wtPath := o.worktreePath
-	if wtPath == "" {
-		wtPath = c.worktreeLinks[b.ID]
-	}
-
 	applyExtraOptions(b, o.extraSet, o.extraUnset)
 
 	if fields := c.requiredFieldsFor(b.Status); len(fields) > 0 {
-		prev, ok := c.statusOnDisk(storedBean.Path, wtPath)
+		var prev string
+		var ok bool
+		if haveMainContent && wtPath == "" {
+			prev, ok = statusOfContent(mainContent)
+		} else {
+			prev, ok = c.statusOnDisk(storedBean.Path, wtPath)
+		}
 		if !ok || prev != b.Status {
 			if missing := MissingRequiredFields(b, fields); len(missing) > 0 {
 				return &PolicyViolationError{BeanID: b.ID, Status: b.Status, Missing: missing}
@@ -820,7 +882,7 @@ func (c *Core) Update(b *bean.Bean, ifMatch *string, opts ...UpdateOption) error
 	}
 
 	// Update in-memory map
-	c.beans[b.ID] = b
+	c.setBeanLocked(b.ID, b)
 
 	// Update search index if active (best-effort, don't fail update)
 	if c.searchIndex != nil {
@@ -860,6 +922,7 @@ func (c *Core) saveToDisk(b *bean.Bean) error {
 		return fmt.Errorf("writing file: %w", err)
 	}
 	b.SetContentETag(content)
+	c.mainPaths[b.ID] = b.Path
 
 	return nil
 }
@@ -920,7 +983,8 @@ func (c *Core) Delete(id string) error {
 	}
 
 	// Remove from in-memory map
-	delete(c.beans, targetID)
+	c.removeBeanLocked(targetID)
+	delete(c.mainPaths, targetID)
 
 	// Update search index if active (best-effort, don't fail delete)
 	if c.searchIndex != nil {
@@ -969,7 +1033,8 @@ func (c *Core) Archive(id string) error {
 
 	// Update bean's path in store and notify subscribers
 	targetBean.Path = newRelPath
-	c.beans[targetID] = targetBean
+	c.setBeanLocked(targetID, targetBean)
+	c.mainPaths[targetID] = newRelPath
 	c.mu.Unlock()
 
 	c.fanOut([]BeanEvent{{
@@ -1009,7 +1074,8 @@ func (c *Core) Unarchive(id string) error {
 
 	// Update bean's path
 	targetBean.Path = newRelPath
-	c.beans[targetID] = targetBean
+	c.setBeanLocked(targetID, targetBean)
+	c.mainPaths[targetID] = newRelPath
 
 	return nil
 }
@@ -1122,7 +1188,8 @@ func (c *Core) LoadAndUnarchive(id string) (*bean.Bean, error) {
 
 	// Update bean's path
 	b.Path = newRelPath
-	c.beans[targetID] = b
+	c.mainPaths[targetID] = newRelPath
+	c.setBeanLocked(targetID, b)
 
 	return b, nil
 }
