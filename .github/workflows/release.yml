@@ -8,9 +8,6 @@ on:
 
 permissions:
   contents: write
-  # packages: write
-  # issues: write
-  # id-token: write
 
 jobs:
   goreleaser:
@@ -20,13 +17,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Install mise
-        shell: bash
-        run: |
-          if [ ! -f "$HOME/.local/bin/mise" ]; then
-            curl https://mise.run | sh
-          fi
-          echo "$HOME/.local/bin" >> $GITHUB_PATH
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -41,22 +31,26 @@ jobs:
           node-version: "24"
           cache: "pnpm"
           cache-dependency-path: "frontend/pnpm-lock.yaml"
-      - name: Install dependencies
-        run: mise deps
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
       - name: Build frontend
-        run: mise build:frontend
-      # More assembly might be required: Docker logins, GPG, etc.
-      # It all depends on your needs.
+        working-directory: frontend
+        run: pnpm build
+      - name: Embed frontend assets
+        run: |
+          rm -rf internal/web/dist
+          mkdir -p internal/web/dist
+          cp -r frontend/build/* internal/web/dist/
+          touch internal/web/dist/.gitkeep
+      - name: Download Go modules
+        run: go mod download
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
-          # either 'goreleaser' (default) or 'goreleaser-pro'
           distribution: goreleaser
-          # 'latest', 'nightly', or a semver
           version: "~> v2"
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-          # Your GoReleaser Pro key, if you are using the 'goreleaser-pro' distribution
-          # GORELEASER_KEY: ${{ secrets.GORELEASER_KEY }}
