@@ -399,19 +399,34 @@ func markSubtree(id string, children map[string][]*bean.Bean, seen map[string]bo
 // markSubtree walks every descendant regardless of its own type, so a
 // visible-typed epic under a hidden milestone is hidden too.
 func hiddenSubtrees(allBeans []*bean.Bean, children map[string][]*bean.Bean) map[string]bool {
-	return hiddenSubtreesExcept(allBeans, children, "")
-}
-
-// hiddenSubtreesExcept is hiddenSubtrees but never seeds hiding from the
-// bean whose ID is exempt, even if that bean's own type opted out. Used by
-// buildScopedRoadmap: a direct-by-ID lookup exempts only the named root
-// itself -- exempt's own children are not swept into hiding merely because
-// exempt opted out, but a hidden container nested anywhere beneath exempt
-// still seeds normally and takes its own subtree with it.
-func hiddenSubtreesExcept(allBeans []*bean.Bean, children map[string][]*bean.Bean, exempt string) map[string]bool {
 	hidden := make(map[string]bool)
 	for _, b := range allBeans {
-		if b.ID == exempt {
+		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
+			markSubtree(b.ID, children, hidden)
+		}
+	}
+	return hidden
+}
+
+// hiddenSubtreesWithinScope is hiddenSubtrees restricted to a scoped-by-ID
+// root: only a hidden container that is a strict descendant of root can
+// seed hiding. This is deliberately narrower than "every bean except root":
+// an ancestor of root -- however deeply hidden -- is never a strict
+// descendant of root, so it can never seed hiding here, even though it
+// would have seeded it (and marked root's whole subtree) in an
+// allBeans-wide scan. root itself is also never a seed, even if its own
+// type opted out -- naming a container by ID is a direct lookup, not the
+// aggregate view the visibility flag governs, and the bypass is for
+// exactly that named node. A hidden container nested anywhere beneath root
+// still seeds normally and takes its own subtree down with it, exactly as
+// in the unscoped roadmap.
+func hiddenSubtreesWithinScope(allBeans []*bean.Bean, children map[string][]*bean.Bean, rootID string) map[string]bool {
+	descendants := make(map[string]bool)
+	markSubtree(rootID, children, descendants)
+
+	hidden := make(map[string]bool)
+	for _, b := range allBeans {
+		if b.ID == rootID || !descendants[b.ID] {
 			continue
 		}
 		if isContainerRank(b) && !cfg.IsRoadmapType(b.Type) {
@@ -429,13 +444,14 @@ func hiddenSubtreesExcept(allBeans []*bean.Bean, children map[string][]*bean.Bea
 // The roadmap-visibility flag (cfg.IsRoadmapType, D15) governs the aggregate
 // views -- the unscoped roadmap and beans milestones -- but a direct-by-ID
 // lookup of a container the user named here bypasses hiding for the named
-// root only: hiddenSubtreesExcept exempts root from seeding hiding (root's
-// own children are not swept into hiding merely because root itself opted
-// out), while a hidden container nested anywhere beneath root still seeds
-// normally and is suppressed exactly as in the unscoped roadmap.
+// root only: hiddenSubtreesWithinScope seeds hiding only from root's strict
+// descendants, so no ancestor of root (hidden or not) can mark anything
+// inside the scope, while a hidden container nested anywhere beneath root
+// still seeds normally and is suppressed exactly as in the unscoped
+// roadmap.
 func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean) *roadmapData {
 	children := childrenIndex(allBeans)
-	hidden := hiddenSubtreesExcept(allBeans, children, root.ID)
+	hidden := hiddenSubtreesWithinScope(allBeans, children, root.ID)
 	switch cfg.RankOf(root.Type) {
 	case 1:
 		group := buildMilestoneGroup(root, children, includeDone, hidden)

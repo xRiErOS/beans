@@ -1280,27 +1280,47 @@ func TestHiddenContainerNestedUnderVisibleParentVanishesEntirely(t *testing.T) {
 	}
 }
 
-// TestScopedRoadmapBypassesHidingOnlyForTheNamedRootItself pins the refined
-// Ruling 2 (fix round 2): the scoped-by-ID bypass is root-only, not total. A
-// user who names a container directly has asked for that container -- not
-// for whatever is hidden beneath it. Both halves share one bean fixture so
-// the boundary is visible in one place: m1 (visible milestone) -> b1
-// (hidden-type rank-2 bucket) -> t1 (leaf).
-func TestScopedRoadmapBypassesHidingOnlyForTheNamedRootItself(t *testing.T) {
-	rank := 2
-	visible := false
+// TestScopedRoadmapHidingRespectsScopeBoundary pins Ruling 2 (fix round 2)
+// plus its round-3 correction: the scoped-by-ID bypass exempts exactly the
+// named root, nothing more and nothing less.
+//
+//   - Naming a hidden container directly renders its full subtree (the
+//     bypass): true for a rank-1 root (restores the coverage
+//     TestScopedRoadmapBypassesHidingForTheNamedRoot carried before it was
+//     narrowed to rank 2 only) and for a rank-2 root.
+//   - Naming a visible container that sits BELOW a hidden ancestor also
+//     renders its full subtree: a direct-by-ID lookup is not the aggregate
+//     view the visibility flag governs, and an ancestor's opt-out must not
+//     reach down past the scoped root. This is the fix-round-4 bug: seeding
+//     hidden from a bean whose ID merely differs from root reaches ancestors
+//     of root too, and marks everything root and its descendants ancestrally
+//     shared.
+//   - Naming a visible container that CONTAINS a hidden container still
+//     suppresses that inner hidden container and its subtree -- the bypass
+//     is not total, D15 still applies to anything nested inside the scope.
+//
+// One fixture carries all four cases: v1 (hidden rank-1 vault) -> e2
+// (visible epic) -> t2 (leaf), and m1 (visible milestone) -> b1 (hidden
+// rank-2 bucket) -> t1 (leaf).
+func TestScopedRoadmapHidingRespectsScopeBoundary(t *testing.T) {
+	rank1, rank2 := 1, 2
+	hidden := false
 	prev := cfg
 	cfg = &config.Config{Types: []config.TypeOverride{
-		{Name: "bucket", Rank: &rank, Roadmap: &visible},
+		{Name: "bucket", Rank: &rank2, Roadmap: &hidden},
+		{Name: "vault", Rank: &rank1, Roadmap: &hidden},
 	}}
 	defer func() { cfg = prev }()
 
 	m1 := &bean.Bean{ID: "m1", Type: "milestone", Status: "todo", Title: "Release"}
 	b1 := &bean.Bean{ID: "b1", Type: "bucket", Status: "todo", Title: "Parking lot", Parent: "m1"}
 	t1 := &bean.Bean{ID: "t1", Type: "task", Status: "todo", Title: "Someday", Parent: "b1"}
-	beans := []*bean.Bean{m1, b1, t1}
+	v1 := &bean.Bean{ID: "v1", Type: "vault", Status: "todo", Title: "Attic"}
+	e2 := &bean.Bean{ID: "e2", Type: "epic", Status: "todo", Title: "Someday feature", Parent: "v1"}
+	t2 := &bean.Bean{ID: "t2", Type: "task", Status: "todo", Title: "Someday task", Parent: "e2"}
+	beans := []*bean.Bean{m1, b1, t1, v1, e2, t2}
 
-	t.Run("scoped to the visible parent, the hidden child's subtree is suppressed", func(t *testing.T) {
+	t.Run("scoped to a visible container that contains a hidden one, the hidden subtree is suppressed", func(t *testing.T) {
 		data := buildScopedRoadmap(beans, false, m1)
 		if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "m1" {
 			t.Fatalf("expected the named root m1 to render, got %+v", data.Milestones)
@@ -1318,7 +1338,7 @@ func TestScopedRoadmapBypassesHidingOnlyForTheNamedRootItself(t *testing.T) {
 		}
 	})
 
-	t.Run("scoped directly to the hidden container, it renders in full", func(t *testing.T) {
+	t.Run("scoped directly to a hidden rank-2 container, it renders in full", func(t *testing.T) {
 		data := buildScopedRoadmap(beans, false, b1)
 		if data.Root == nil || data.Root.Epic == nil || data.Root.Epic.Epic.ID != "b1" {
 			t.Fatalf("a scoped hidden root must still render as its own container, got %+v", data.Root)
@@ -1331,6 +1351,42 @@ func TestScopedRoadmapBypassesHidingOnlyForTheNamedRootItself(t *testing.T) {
 		}
 		if !found {
 			t.Error("a scoped hidden root must render its own full content -- the bypass covers the named root")
+		}
+	})
+
+	t.Run("scoped directly to a hidden rank-1 container, it renders in full", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, v1)
+		if len(data.Milestones) != 1 || data.Milestones[0].Milestone.ID != "v1" {
+			t.Fatalf("a scoped hidden rank-1 root must still render as its own container, got %+v", data.Milestones)
+		}
+		group := data.Milestones[0]
+		if len(group.Epics) != 1 || group.Epics[0].Epic.ID != "e2" {
+			t.Fatalf("a scoped hidden rank-1 root must render its own visible child, got %+v", group.Epics)
+		}
+		found := false
+		for _, item := range group.Epics[0].Items {
+			if item.ID == "t2" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a scoped hidden rank-1 root must render its whole subtree -- the bypass covers the named root")
+		}
+	})
+
+	t.Run("scoped to a visible container below a hidden ancestor, it renders in full", func(t *testing.T) {
+		data := buildScopedRoadmap(beans, false, e2)
+		if data.Root == nil || data.Root.Epic == nil || data.Root.Epic.Epic.ID != "e2" {
+			t.Fatalf("expected the named root e2 to render, got %+v", data.Root)
+		}
+		found := false
+		for _, item := range data.Root.Epic.Items {
+			if item.ID == "t2" {
+				found = true
+			}
+		}
+		if !found {
+			t.Error("a visible root below a hidden ancestor must render its full subtree -- the ancestor's opt-out must not reach past the scoped root")
 		}
 	})
 }
