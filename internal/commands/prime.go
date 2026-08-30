@@ -141,8 +141,8 @@ var primeCmd = &cobra.Command{
 
 		data := promptData{
 			Types:                 loadedCfg.TypeList(),
-			Statuses:              config.DefaultStatuses,
-			Priorities:            config.DefaultPriorities,
+			Statuses:              loadedCfg.StatusList(),
+			Priorities:            loadedCfg.PriorityList(),
 			RequiredFields:        requiredFields,
 			CommitField:           commitField,
 			CommitFieldGated:      commitFieldGated,
