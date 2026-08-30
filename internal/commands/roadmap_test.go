@@ -1050,6 +1050,32 @@ func TestValidateRoadmapRootType(t *testing.T) {
 	}
 }
 
+// TestValidateRoadmapRootTypeWithNoContainerTypes covers a profile like
+// "todo" that defines no container types at all: the old message rendered
+// as "roadmap root must be one of , got task (x-1)" -- an empty list before
+// "got" instead of a sensible explanation. The error must instead say the
+// project has no container types, without touching the normal-case message
+// TestRoadmapCmdRejectsNonContainerRootType depends on.
+func TestValidateRoadmapRootTypeWithNoContainerTypes(t *testing.T) {
+	leafRank := config.LeafRank
+	prev := cfg
+	cfg = &config.Config{TypesExclusive: true, Types: []config.TypeOverride{
+		{Name: "task", Rank: &leafRank},
+	}}
+	defer func() { cfg = prev }()
+
+	err := validateRoadmapRootType(&bean.Bean{ID: "x-1", Type: "task"})
+	if err == nil {
+		t.Fatal("expected an error when the project defines no container types")
+	}
+	if !strings.Contains(err.Error(), "no container types") {
+		t.Errorf("expected error to say the project defines no container types, got %q", err.Error())
+	}
+	if strings.Contains(err.Error(), "must be one of ,") {
+		t.Errorf("error still renders the degenerate empty list, got %q", err.Error())
+	}
+}
+
 func TestRenderRoadmapMarkdownRootEpic(t *testing.T) {
 	e := &bean.Bean{ID: "beans-e1", Type: "epic", Title: "Auth", Status: "todo", Path: "e1--auth.md"}
 	item1 := &bean.Bean{ID: "beans-t1", Type: "task", Title: "Login", Status: "todo", Path: "t1--login.md"}

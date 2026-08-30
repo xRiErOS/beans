@@ -480,6 +480,10 @@ func validateRoadmapRootType(b *bean.Bean) error {
 	for rank := 1; rank <= 3; rank++ {
 		containers = append(containers, cfg.TypesAtRank(rank)...)
 	}
+	if len(containers) == 0 {
+		return fmt.Errorf("this project defines no container types (ranks 1-3), so %s (%s) cannot be a roadmap root",
+			b.Type, b.ID)
+	}
 	return fmt.Errorf("roadmap root must be one of %s, got %s (%s)",
 		strings.Join(containers, ", "), b.Type, b.ID)
 }
