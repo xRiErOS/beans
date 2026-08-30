@@ -18,11 +18,20 @@ type cellStyle struct {
 	hasColor bool
 }
 
-// styleFor resolves a bean's type into a colour and a weight. A type with no
-// configured colour — task, by default — keeps the terminal's own text colour;
-// it is the commonest row and earns no ink.
+// styleFor resolves a bean's type into a colour and a weight. It is a thin
+// wrapper over typeStyle so cell rendering and the Legend derive the exact
+// same colour rule from the exact same function — see typeStyle.
 func styleFor(b *bean.Bean, cfg *config.Config) cellStyle {
-	tc := cfg.GetType(b.Type)
+	return typeStyle(cfg.GetType(b.Type))
+}
+
+// typeStyle resolves a type config into a colour and a weight. A type with
+// no configured colour — task, by default — keeps the terminal's own text
+// colour; it is the commonest row and earns no ink. Both styleFor (cell
+// rendering) and Legend (columns.go) call through this one function so the
+// legend's swatch for the commonest row can never disagree with what the
+// cell actually renders.
+func typeStyle(tc *config.TypeConfig) cellStyle {
 	if tc == nil || tc.Color == "" {
 		emphasis := tc != nil && tc.Emphasis
 		return cellStyle{bold: emphasis}
@@ -245,16 +254,13 @@ func renderTree(rows []Row, title string, width int, showTags bool, cfg *config.
 		}
 		return r
 	}
-	// minRenderableTitle, not an invented tree-only floor: the table's last
-	// resort (columns.go) and the tree's must be the same number and the
-	// same story, or the two forms overflow their terminal by different
+	// clampToMinRenderableTitle, not an invented tree-only floor: the table's
+	// last resort (columns.go) and the tree's must be the same number and
+	// the same story, or the two forms overflow their terminal by different
 	// amounts for the same width. Below it the title cannot hold even a
 	// truncation ellipsis meaningfully; this is the one place this layout
 	// accepts overflow rather than guarding against it.
-	body := width - leadWidth - rightWidth(c.Tags)
-	if body < minRenderableTitle {
-		body = minRenderableTitle
-	}
+	body := clampToMinRenderableTitle(width - leadWidth - rightWidth(c.Tags))
 
 	// Same redistribution as the table: unclaimed title width goes to the tags.
 	tmp := Columns{Title: body, Tags: c.Tags, Gap: c.Gap}

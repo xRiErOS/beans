@@ -257,3 +257,24 @@ func TestPrimeDefaultConfigTypesAndRanksAgree(t *testing.T) {
 		t.Errorf("rank section does not list the default rank-1 type:\n%s", out)
 	}
 }
+
+// prime is the authoritative documentation surface for agents; a status or
+// priority appended in .beans.yml must show up in its output the same way
+// an appended type already does (see TestPrimeExclusiveConfigTypesAndRanksAgree).
+// Before this fix, promptData.Statuses/Priorities were built straight from
+// config.DefaultStatuses/DefaultPriorities, so a project-defined status or
+// priority never reached the rendered prompt at all.
+func TestPrimeReflectsConfiguredStatusesAndPriorities(t *testing.T) {
+	cfg := config.DefaultWithPrefix("demo-")
+	cfg.Statuses = []config.StatusOverride{{Name: "in-review", Description: "Awaiting review"}}
+	cfg.Priorities = []config.PriorityOverride{{Name: "urgent", Description: "Drop everything"}}
+
+	out := primeCmdOutput(t, cfg)
+
+	if !strings.Contains(out, "**in-review**: Awaiting review") {
+		t.Errorf("prime output does not reflect the configured status:\n%s", out)
+	}
+	if !strings.Contains(out, "**urgent**: Drop everything") {
+		t.Errorf("prime output does not reflect the configured priority:\n%s", out)
+	}
+}

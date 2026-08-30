@@ -1,5 +1,7 @@
 package ui
 
+import "strings"
+
 // Theme is one Catppuccin flavour: a lookup from tone name to hex value.
 //
 // All four flavours define the same tone names, which is what lets a single
@@ -61,9 +63,12 @@ var themes = map[string]Theme{
 // Themes returns every bundled flavour, keyed by name.
 func Themes() map[string]Theme { return themes }
 
-// ThemeByName looks up a flavour. The second return is false for unknown names.
+// ThemeByName looks up a flavour, case-insensitively — the same convention
+// ResolveColor already applies to tone names (see styles.go), so "Mocha"
+// and "mocha" resolve to the same flavour instead of the config lookup
+// silently disagreeing with the colour-name lookup on case sensitivity.
 func ThemeByName(name string) (Theme, bool) {
-	t, ok := themes[name]
+	t, ok := themes[strings.ToLower(name)]
 	return t, ok
 }
 
@@ -78,7 +83,7 @@ func IsValidTheme(name string) bool {
 	if name == "" {
 		return true
 	}
-	_, ok := themes[name]
+	_, ok := ThemeByName(name)
 	return ok
 }
 

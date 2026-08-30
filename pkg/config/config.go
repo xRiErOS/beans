@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -33,17 +34,22 @@ const (
 	// an explicit rank lands here, which keeps the old behaviour where an
 	// unknown type was treated like "task".
 	LeafRank = 4
+	// DefaultMaxWidth is the rendered width cap used when display.max_width
+	// is unset. GetMaxWidth() and internal/commands' resolveWidth() both
+	// need this exact number - it used to be a literal duplicated in both
+	// packages, one edit away from drifting apart.
+	DefaultMaxWidth = 110
 )
 
 // DefaultStatuses defines the built-in status table. Config.Statuses can
 // override individual entries; see (*Config).StatusList.
 // Order determines sort priority: in-progress first (active work), then todo, draft, and done states last.
 var DefaultStatuses = []StatusConfig{
-	{Name: "in-progress", Color: "peach", Description: "Currently being worked on"},
-	{Name: "todo", Color: "green", Description: "Ready to be worked on"},
-	{Name: "draft", Color: "overlay2", Description: "Needs refinement before it can be worked on"},
-	{Name: "completed", Color: "overlay1", Archive: true, Description: "Finished successfully"},
-	{Name: "scrapped", Color: "surface2", Archive: true, Description: "Will not be done"},
+	{Name: "in-progress", Color: "peach", Short: "I", Description: "Currently being worked on"},
+	{Name: "todo", Color: "green", Short: "T", Description: "Ready to be worked on"},
+	{Name: "draft", Color: "overlay2", Short: "D", Description: "Needs refinement before it can be worked on"},
+	{Name: "completed", Color: "overlay1", Archive: true, Short: "C", Description: "Finished successfully"},
+	{Name: "scrapped", Color: "surface2", Archive: true, Short: "S", Description: "Will not be done"},
 }
 
 // DefaultTypes defines the built-in type table. Config.Types can override
@@ -60,18 +66,21 @@ var DefaultTypes = []TypeConfig{
 // can override individual entries; see (*Config).PriorityList.
 // Priorities are ordered from highest to lowest urgency.
 var DefaultPriorities = []PriorityConfig{
-	{Name: "critical", Color: "red", Description: "Urgent, blocking work. When possible, address immediately"},
-	{Name: "high", Color: "yellow", Description: "Important, should be done before normal work"},
+	{Name: "critical", Color: "red", Symbol: "\u203c", Description: "Urgent, blocking work. When possible, address immediately"},
+	{Name: "high", Color: "yellow", Symbol: "!", Description: "Important, should be done before normal work"},
 	{Name: "normal", Color: "", Description: "Standard priority"},
-	{Name: "low", Color: "overlay0", Description: "Less important, can be delayed"},
-	{Name: "deferred", Color: "overlay0", Description: "Explicitly pushed back, avoid doing unless necessary"},
+	{Name: "low", Color: "overlay0", Symbol: "\u2193", Description: "Less important, can be delayed"},
+	{Name: "deferred", Color: "overlay0", Symbol: "\u2192", Description: "Explicitly pushed back, avoid doing unless necessary"},
 }
 
 // StatusConfig defines a single status with its display color.
 type StatusConfig struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color"`
-	Archive     bool   `yaml:"archive,omitempty"`
+	Name    string `yaml:"name"`
+	Color   string `yaml:"color"`
+	Archive bool   `yaml:"archive,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means "?" - see internal/ui.ShortStatus.
+	Short       string `yaml:"short,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -101,8 +110,11 @@ type TypeConfig struct {
 
 // PriorityConfig defines a single priority level with its display color.
 type PriorityConfig struct {
-	Name        string `yaml:"name"`
-	Color       string `yaml:"color"`
+	Name  string `yaml:"name"`
+	Color string `yaml:"color"`
+	// Symbol is the compact glyph the legend and narrow views render for
+	// this priority. Empty means no symbol - see internal/ui.GetPrioritySymbol.
+	Symbol      string `yaml:"symbol,omitempty"`
 	Description string `yaml:"description,omitempty"`
 }
 
@@ -116,6 +128,38 @@ type StatusOverride struct {
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
 	Archive     *bool  `yaml:"archive,omitempty"`
+	// Short is the single-character code the narrow list view renders. Empty
+	// means "?" - see internal/ui.ShortStatus.
+	Short string `yaml:"short,omitempty"`
+
+	// colorSet, descriptionSet and shortSet record whether "color"/
+	// "description"/"short" were named in the YAML source at all, so a merge
+	// can tell an explicit "color: ''" apart from color simply never being
+	// named. These are not pointers like Archive because an empty string is
+	// a legitimate value in their own right (an uncoloured/undescribed
+	// status, or a status that deliberately renders no short code) - a
+	// pointer would only move the ambiguity onto every Go-constructed
+	// StatusOverride elsewhere in the codebase, which never populates the
+	// field and would then look identically "unset". These flags are
+	// populated by UnmarshalYAML below and default to false for any
+	// override built directly in Go, which keeps that existing
+	// non-empty-always-applies behaviour unchanged.
+	colorSet, descriptionSet, shortSet bool
+}
+
+// UnmarshalYAML decodes a StatusOverride while recording which optional
+// string keys the source named explicitly (see colorSet/descriptionSet).
+func (o *StatusOverride) UnmarshalYAML(value *yaml.Node) error {
+	type plain StatusOverride
+	var raw plain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*o = StatusOverride(raw)
+	o.colorSet = yamlNodeHasKey(value, "color")
+	o.descriptionSet = yamlNodeHasKey(value, "description")
+	o.shortSet = yamlNodeHasKey(value, "short")
+	return nil
 }
 
 // TypeOverride is one entry of Config.Types: a type the config wants to
@@ -141,6 +185,26 @@ type TypeOverride struct {
 	// Short is the single-character code the narrow list view renders. Empty
 	// means the first letter of the name, upper-cased.
 	Short string `yaml:"short,omitempty"`
+
+	// colorSet, descriptionSet and shortSet record whether their YAML keys
+	// were named at all - see StatusOverride.colorSet for why these three
+	// stay plain strings (not pointers) and get this treatment instead.
+	colorSet, descriptionSet, shortSet bool
+}
+
+// UnmarshalYAML decodes a TypeOverride while recording which optional
+// string keys the source named explicitly (see colorSet/descriptionSet/shortSet).
+func (o *TypeOverride) UnmarshalYAML(value *yaml.Node) error {
+	type plain TypeOverride
+	var raw plain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*o = TypeOverride(raw)
+	o.colorSet = yamlNodeHasKey(value, "color")
+	o.descriptionSet = yamlNodeHasKey(value, "description")
+	o.shortSet = yamlNodeHasKey(value, "short")
+	return nil
 }
 
 // PriorityOverride is one entry of Config.Priorities: a priority the config
@@ -149,6 +213,43 @@ type PriorityOverride struct {
 	Name        string `yaml:"name"`
 	Color       string `yaml:"color,omitempty"`
 	Description string `yaml:"description,omitempty"`
+	// Symbol is the compact glyph the legend and narrow views render for
+	// this priority. Empty means no symbol - see internal/ui.GetPrioritySymbol.
+	Symbol string `yaml:"symbol,omitempty"`
+
+	// colorSet, descriptionSet and symbolSet record whether their YAML keys
+	// were named at all - see StatusOverride.colorSet.
+	colorSet, descriptionSet, symbolSet bool
+}
+
+// UnmarshalYAML decodes a PriorityOverride while recording which optional
+// string keys the source named explicitly (see colorSet/descriptionSet).
+func (o *PriorityOverride) UnmarshalYAML(value *yaml.Node) error {
+	type plain PriorityOverride
+	var raw plain
+	if err := value.Decode(&raw); err != nil {
+		return err
+	}
+	*o = PriorityOverride(raw)
+	o.colorSet = yamlNodeHasKey(value, "color")
+	o.descriptionSet = yamlNodeHasKey(value, "description")
+	o.symbolSet = yamlNodeHasKey(value, "symbol")
+	return nil
+}
+
+// yamlNodeHasKey reports whether a YAML mapping node names the given key,
+// regardless of the value assigned to it. Presence, not value, is what
+// distinguishes an omitted key from an explicit empty one.
+func yamlNodeHasKey(value *yaml.Node, key string) bool {
+	if value.Kind != yaml.MappingNode {
+		return false
+	}
+	for i := 0; i+1 < len(value.Content); i += 2 {
+		if value.Content[i].Value == key {
+			return true
+		}
+	}
+	return false
 }
 
 // PermissionMode represents the default agent permission mode.
@@ -406,17 +507,29 @@ func Load(configPath string) (*Config, error) {
 		cfg.Beans.DefaultStatus = "todo"
 	}
 	if cfg.Beans.DefaultType == "" {
-		// DefaultTypes[0].Name via the merged list: harmless today (an
-		// override never changes an entry's Name, only its Color and
-		// Description), kept this way only because a future merge that did
-		// allow renaming should not have to remember this call site too.
+		// "task" is the canonical fallback: Default() (used by `beans init`
+		// and whenever no config file exists) hardcodes it, and it is the
+		// leaf/most common type for day-to-day work. Prefer it here too, so
+		// a config that merely omits default_type behaves identically
+		// whether or not a .beans.yml happens to exist yet - Save() used to
+		// persist whichever value this branch picked, so disagreeing with
+		// Default() meant a config file with no default_type at all would
+		// get "milestone" baked in on first save.
 		//
 		// TypesExclusive can make TypeList() legitimately empty (an exclusive
-		// config with no types of its own); there is nothing to derive a
-		// default from in that case, so DefaultType is left as it is rather
-		// than indexing into an empty slice.
-		if types := cfg.TypeList(); len(types) > 0 {
+		// config with no types of its own), or exclude "task" entirely (a
+		// profile with its own type vocabulary); fall back to the first
+		// merged type in that case, and leave DefaultType empty when there is
+		// nothing to derive one from.
+		types := cfg.TypeList()
+		if len(types) > 0 {
 			cfg.Beans.DefaultType = types[0].Name
+			for _, t := range types {
+				if t.Name == "task" {
+					cfg.Beans.DefaultType = "task"
+					break
+				}
+			}
 		}
 	}
 
@@ -448,7 +561,13 @@ func ValidateAnchor(anchor string) error {
 // manages as a schema field. Misconfiguration must not silently degrade into
 // no policy at all.
 func (c *Config) validateRequireFieldsOn() error {
-	for status, fields := range c.Beans.RequireFieldsOn {
+	statuses := make([]string, 0, len(c.Beans.RequireFieldsOn))
+	for status := range c.Beans.RequireFieldsOn {
+		statuses = append(statuses, status)
+	}
+	sort.Strings(statuses)
+	for _, status := range statuses {
+		fields := c.Beans.RequireFieldsOn[status]
 		if !c.IsValidStatus(status) {
 			return fmt.Errorf("unknown status %q in beans.require_fields_on (valid: %s)", status, strings.Join(c.StatusNames(), ", "))
 		}
@@ -650,8 +769,18 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		key := strNode("require_fields_on")
 		key.HeadComment = "Front matter keys that must be set when a bean enters a status"
 		mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
-		for _, s := range c.StatusList() { // deterministic key order
-			fields := c.Beans.RequireFieldsOn[s.Name]
+		// Iterate the map's own keys, sorted for deterministic output -
+		// looping over StatusList() instead would silently drop any status
+		// name RequireFieldsOn carries that StatusList() doesn't (e.g. a
+		// config built directly rather than through Load, which is the only
+		// place that validates every key names a known status).
+		statuses := make([]string, 0, len(c.Beans.RequireFieldsOn))
+		for s := range c.Beans.RequireFieldsOn {
+			statuses = append(statuses, s)
+		}
+		sort.Strings(statuses)
+		for _, s := range statuses {
+			fields := c.Beans.RequireFieldsOn[s]
 			if len(fields) == 0 {
 				continue
 			}
@@ -659,7 +788,7 @@ func (c *Config) toYAMLNode() *yaml.Node {
 			for _, f := range fields {
 				seq.Content = append(seq.Content, strNode(f))
 			}
-			mapping.Content = append(mapping.Content, strNode(s.Name), seq)
+			mapping.Content = append(mapping.Content, strNode(s), seq)
 		}
 		beansMapping.Content = append(beansMapping.Content, key, mapping)
 	}
@@ -694,6 +823,12 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	integrateKey.HeadComment = "Integration strategy: \"local\" (squash-merge locally) or \"pr\" (push and create PRs)"
 	worktreeMapping.Content = append(worktreeMapping.Content, integrateKey, strNode(string(c.GetWorktreeIntegrate())))
 
+	if c.Worktree.FetchTimeout != nil {
+		key := strNode("fetch_timeout")
+		key.HeadComment = "Timeout in seconds for the fetch before creating a worktree (default: 10; 0 disables it)"
+		worktreeMapping.Content = append(worktreeMapping.Content, key, intNode(*c.Worktree.FetchTimeout))
+	}
+
 	// Build the agent mapping
 	agentMapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if c.Agent.Enabled != nil {
@@ -706,12 +841,26 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		key.HeadComment = "Default mode for agent sessions (act, plan)"
 		agentMapping.Content = append(agentMapping.Content, key, strNode(string(c.Agent.DefaultMode)))
 	}
+	if c.Agent.DefaultEffort != "" {
+		key := strNode("default_effort")
+		key.HeadComment = "Default thinking effort level for new agent sessions (low, medium, high, max)"
+		agentMapping.Content = append(agentMapping.Content, key, strNode(c.Agent.DefaultEffort))
+	}
 	// Build the server mapping
 	serverMapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if c.Server.Port != 0 {
 		portKey := strNode("port")
 		portKey.HeadComment = "Port for the web UI (used by `beans-serve`)"
 		serverMapping.Content = append(serverMapping.Content, portKey, intNode(c.Server.Port))
+	}
+	if len(c.Server.CORSOrigins) > 0 {
+		key := strNode("cors_origins")
+		key.HeadComment = "Allowed origins for CORS and WebSocket (default: http://localhost:*, http://127.0.0.1:*)"
+		seq := &yaml.Node{Kind: yaml.SequenceNode, Tag: "!!seq", Style: yaml.FlowStyle}
+		for _, origin := range c.Server.CORSOrigins {
+			seq.Content = append(seq.Content, strNode(origin))
+		}
+		serverMapping.Content = append(serverMapping.Content, key, seq)
 	}
 
 	// Build the display mapping. Like Statuses/Types/Priorities, this must be
@@ -738,13 +887,13 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	for _, s := range c.Statuses {
 		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		m.Content = append(m.Content, strNode("name"), strNode(s.Name))
-		if s.Color != "" {
+		if s.colorSet || s.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(s.Color))
 		}
 		if s.Archive != nil {
 			m.Content = append(m.Content, strNode("archive"), scalar(fmt.Sprintf("%t", *s.Archive), "!!bool"))
 		}
-		if s.Description != "" {
+		if s.descriptionSet || s.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(s.Description))
 		}
 		statusesSeq.Content = append(statusesSeq.Content, m)
@@ -754,7 +903,7 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	for _, t := range c.Types {
 		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		m.Content = append(m.Content, strNode("name"), strNode(t.Name))
-		if t.Color != "" {
+		if t.colorSet || t.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(t.Color))
 		}
 		if t.Rank != nil {
@@ -766,10 +915,10 @@ func (c *Config) toYAMLNode() *yaml.Node {
 		if t.Roadmap != nil {
 			m.Content = append(m.Content, strNode("roadmap"), scalar(fmt.Sprintf("%t", *t.Roadmap), "!!bool"))
 		}
-		if t.Short != "" {
+		if t.shortSet || t.Short != "" {
 			m.Content = append(m.Content, strNode("short"), strNode(t.Short))
 		}
-		if t.Description != "" {
+		if t.descriptionSet || t.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(t.Description))
 		}
 		typesSeq.Content = append(typesSeq.Content, m)
@@ -779,10 +928,10 @@ func (c *Config) toYAMLNode() *yaml.Node {
 	for _, p := range c.Priorities {
 		m := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 		m.Content = append(m.Content, strNode("name"), strNode(p.Name))
-		if p.Color != "" {
+		if p.colorSet || p.Color != "" {
 			m.Content = append(m.Content, strNode("color"), strNode(p.Color))
 		}
-		if p.Description != "" {
+		if p.descriptionSet || p.Description != "" {
 			m.Content = append(m.Content, strNode("description"), strNode(p.Description))
 		}
 		prioritiesSeq.Content = append(prioritiesSeq.Content, m)
@@ -865,15 +1014,18 @@ func (c *Config) IsValidStatus(status string) bool {
 // RequiredFieldsFor returns the front matter keys that must be set when a bean
 // enters status. Returns nil when no policy applies.
 func (c *Config) RequiredFieldsFor(status string) []string {
+	if c == nil {
+		return nil
+	}
 	return c.Beans.RequireFieldsOn[status]
 }
 
 // GetCommitField returns the configured commit field name, or DefaultCommitField.
 func (c *Config) GetCommitField() string {
-	if c.Beans.CommitField != "" {
-		return c.Beans.CommitField
+	if c == nil || c.Beans.CommitField == "" {
+		return DefaultCommitField
 	}
-	return DefaultCommitField
+	return c.Beans.CommitField
 }
 
 // mergeDefaults merges a config's override entries into a copy of a
@@ -923,11 +1075,14 @@ func (c *Config) StatusList() []StatusConfig {
 		func(o StatusOverride) string { return o.Name },
 		func(t *StatusConfig, o StatusOverride) {
 			t.Name = o.Name
-			if o.Color != "" {
+			if o.colorSet || o.Color != "" {
 				t.Color = o.Color
 			}
-			if o.Description != "" {
+			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
+			}
+			if o.shortSet || o.Short != "" {
+				t.Short = o.Short
 			}
 			// Archive is a pointer: only an explicit archive: key (true or
 			// false) touches it, so a colour-only override cannot flip a
@@ -963,7 +1118,7 @@ func (c *Config) GetStatus(name string) *StatusConfig {
 
 // GetDefaultStatus returns the default status name for new beans.
 func (c *Config) GetDefaultStatus() string {
-	if c.Beans.DefaultStatus == "" {
+	if c == nil || c.Beans.DefaultStatus == "" {
 		return "todo"
 	}
 	return c.Beans.DefaultStatus
@@ -971,6 +1126,9 @@ func (c *Config) GetDefaultStatus() string {
 
 // GetDefaultType returns the default type name for new beans.
 func (c *Config) GetDefaultType() string {
+	if c == nil {
+		return ""
+	}
 	return c.Beans.DefaultType
 }
 
@@ -994,10 +1152,12 @@ func (c *Config) GetType(name string) *TypeConfig {
 	return nil
 }
 
-// RankOf returns the hierarchy rank of a type name. An unknown type and a
-// type without an explicit rank both sit at LeafRank.
+// RankOf returns the hierarchy rank of a type name. An unknown type sits at
+// LeafRank; a known type's rank is TypeList()'s merged value, which is
+// itself LeafRank when the type carries no explicit rank (see TypeList) -
+// so an explicit "rank: 0" on a known type is returned as 0, not coerced.
 func (c *Config) RankOf(typeName string) int {
-	if t := c.GetType(typeName); t != nil && t.Rank != 0 {
+	if t := c.GetType(typeName); t != nil {
 		return t.Rank
 	}
 	return LeafRank
@@ -1019,6 +1179,24 @@ func (c *Config) ShortOf(typeName string) string {
 	// First RUNE, not first byte: a type named "Änderung" would otherwise
 	// yield half a rune and render as U+FFFD.
 	r, _ := utf8.DecodeRuneInString(t.Name)
+	return strings.ToUpper(string(r))
+}
+
+// ShortOfStatus returns the single-character code for a status: the
+// configured one, otherwise the upper-cased first letter, and "?" for an
+// unknown status. Mirrors ShortOf.
+func (c *Config) ShortOfStatus(name string) string {
+	s := c.GetStatus(name)
+	if s == nil {
+		return "?"
+	}
+	if s.Short != "" {
+		return s.Short
+	}
+	if s.Name == "" {
+		return "?"
+	}
+	r, _ := utf8.DecodeRuneInString(s.Name)
 	return strings.ToUpper(string(r))
 }
 
@@ -1088,10 +1266,10 @@ func (c *Config) TypeList() []TypeConfig {
 		func(o TypeOverride) string { return o.Name },
 		func(t *TypeConfig, o TypeOverride) {
 			t.Name = o.Name
-			if o.Color != "" {
+			if o.colorSet || o.Color != "" {
 				t.Color = o.Color
 			}
-			if o.Description != "" {
+			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
 			}
 			if o.Rank != nil {
@@ -1105,18 +1283,23 @@ func (c *Config) TypeList() []TypeConfig {
 			}
 			// Roadmap is a pointer for the same reason: an omitted key must
 			// stay distinct from an explicit "roadmap: false", or a
-			// colour-only override would silently hide the type.
+			// colour-only override would silently hide the type. Deep-copy
+			// it, like every other pointer field here - handing out o.Roadmap
+			// itself would alias a caller's TypeOverride, letting a mutation
+			// through the merged TypeList() reach back into c.Types.
 			if o.Roadmap != nil {
-				t.Roadmap = o.Roadmap
+				t.Roadmap = boolPtr(*o.Roadmap)
 			}
-			if o.Short != "" {
+			if o.shortSet || o.Short != "" {
 				t.Short = o.Short
 			}
 			// An appended type starts from a zero TypeConfig, so an entry
 			// without rank: would sit at rank 0 and outrank every container.
 			// Leaf rank is the safe default and matches the old behaviour for
-			// unknown types.
-			if t.Rank == 0 {
+			// unknown types - but only when rank was never named at all: an
+			// explicit "rank: 0" is a real, distinct value (o.Rank != nil)
+			// and must not be silently promoted to LeafRank.
+			if o.Rank == nil && t.Rank == 0 {
 				t.Rank = LeafRank
 			}
 		},
@@ -1207,11 +1390,14 @@ func (c *Config) PriorityList() []PriorityConfig {
 		func(o PriorityOverride) string { return o.Name },
 		func(t *PriorityConfig, o PriorityOverride) {
 			t.Name = o.Name
-			if o.Color != "" {
+			if o.colorSet || o.Color != "" {
 				t.Color = o.Color
 			}
-			if o.Description != "" {
+			if o.descriptionSet || o.Description != "" {
 				t.Description = o.Description
+			}
+			if o.symbolSet || o.Symbol != "" {
+				t.Symbol = o.Symbol
 			}
 		},
 	)
@@ -1260,7 +1446,7 @@ func expandHome(path string) (string, error) {
 // GetWorktreeBaseRef returns the configured base ref for new worktree branches.
 // Returns "main" if not set.
 func (c *Config) GetWorktreeBaseRef() string {
-	if c.Worktree.BaseRef == "" {
+	if c == nil || c.Worktree.BaseRef == "" {
 		return DefaultWorktreeBaseRef
 	}
 	return c.Worktree.BaseRef
@@ -1268,18 +1454,24 @@ func (c *Config) GetWorktreeBaseRef() string {
 
 // GetWorktreeSetup returns the configured setup command for new worktrees.
 func (c *Config) GetWorktreeSetup() string {
+	if c == nil {
+		return ""
+	}
 	return c.Worktree.Setup
 }
 
 // GetWorktreeRun returns the configured run command for worktrees.
 func (c *Config) GetWorktreeRun() string {
+	if c == nil {
+		return ""
+	}
 	return c.Worktree.Run
 }
 
 // GetWorktreeFetchTimeout returns the configured fetch timeout as a time.Duration.
 // Returns 10s by default. Returns 0 if explicitly set to 0 (disables fetch).
 func (c *Config) GetWorktreeFetchTimeout() time.Duration {
-	if c.Worktree.FetchTimeout == nil {
+	if c == nil || c.Worktree.FetchTimeout == nil {
 		return 10 * time.Second
 	}
 	return time.Duration(*c.Worktree.FetchTimeout) * time.Second
@@ -1288,6 +1480,9 @@ func (c *Config) GetWorktreeFetchTimeout() time.Duration {
 // GetWorktreeIntegrate returns the configured integration mode.
 // Returns "local" if not set or invalid.
 func (c *Config) GetWorktreeIntegrate() IntegrateMode {
+	if c == nil {
+		return IntegrateModeLocal
+	}
 	switch c.Worktree.Integrate {
 	case IntegrateModeLocal, IntegrateModePR:
 		return c.Worktree.Integrate
@@ -1299,7 +1494,7 @@ func (c *Config) GetWorktreeIntegrate() IntegrateMode {
 // IsAgentEnabled returns whether agent functionality is enabled.
 // Returns true if not explicitly set.
 func (c *Config) IsAgentEnabled() bool {
-	if c.Agent.Enabled == nil {
+	if c == nil || c.Agent.Enabled == nil {
 		return true
 	}
 	return *c.Agent.Enabled
@@ -1308,6 +1503,9 @@ func (c *Config) IsAgentEnabled() bool {
 // GetDefaultMode returns the configured default permission mode for agent sessions.
 // Returns "act" if not set or invalid. Also accepts "yolo" as a backwards-compatible alias.
 func (c *Config) GetDefaultMode() PermissionMode {
+	if c == nil {
+		return PermissionModeAct
+	}
 	switch c.Agent.DefaultMode {
 	case PermissionModeAct, PermissionModePlan:
 		return c.Agent.DefaultMode
@@ -1321,6 +1519,9 @@ func (c *Config) GetDefaultMode() PermissionMode {
 // GetDefaultEffort returns the raw configured default effort level for agent sessions.
 // Returns empty string if not set. Use IsValidEffortLevel to validate before use.
 func (c *Config) GetDefaultEffort() string {
+	if c == nil {
+		return ""
+	}
 	return c.Agent.DefaultEffort
 }
 
@@ -1346,12 +1547,15 @@ func IsValidPermissionMode(mode string) bool {
 
 // GetProjectName returns the configured project name, or empty string if not set.
 func (c *Config) GetProjectName() string {
+	if c == nil {
+		return ""
+	}
 	return c.Project.Name
 }
 
 // GetServerPort returns the configured server port, or the default if not set.
 func (c *Config) GetServerPort() int {
-	if c.Server.Port == 0 {
+	if c == nil || c.Server.Port == 0 {
 		return DefaultServerPort
 	}
 	return c.Server.Port
@@ -1359,7 +1563,7 @@ func (c *Config) GetServerPort() int {
 
 // GetCORSOrigins returns the configured CORS origins, or the defaults if not set.
 func (c *Config) GetCORSOrigins() []string {
-	if len(c.Server.CORSOrigins) > 0 {
+	if c != nil && len(c.Server.CORSOrigins) > 0 {
 		return c.Server.CORSOrigins
 	}
 	return []string{"http://localhost:*", "http://127.0.0.1:*"}
@@ -1367,17 +1571,17 @@ func (c *Config) GetCORSOrigins() []string {
 
 // GetTheme returns the configured theme name, or "mocha" when unset.
 func (c *Config) GetTheme() string {
-	if c.Display.Theme == "" {
+	if c == nil || c.Display.Theme == "" {
 		return "mocha"
 	}
 	return c.Display.Theme
 }
 
-// GetMaxWidth returns the configured width cap: 110 when unset, -1 when the
-// cap is explicitly disabled.
+// GetMaxWidth returns the configured width cap: DefaultMaxWidth when unset,
+// -1 when the cap is explicitly disabled.
 func (c *Config) GetMaxWidth() int {
-	if c.Display.MaxWidth == 0 {
-		return 110
+	if c == nil || c.Display.MaxWidth == 0 {
+		return DefaultMaxWidth
 	}
 	return c.Display.MaxWidth
 }

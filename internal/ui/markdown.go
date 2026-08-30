@@ -19,12 +19,17 @@ func RenderMarkdown(body string, width int) string {
 	if body == "" {
 		return ""
 	}
-	if width < 20 {
-		width = 20
-	}
-	textWidth := width - 2 // two columns of indent
-	if textWidth < 10 {
-		textWidth = 10
+	// textWidth is what WrapText actually gets: width minus the two columns
+	// of indent every rendered line carries. It is not floored at some
+	// larger "readable" minimum the way minRenderableTitle floors a title
+	// column — RenderMarkdown(body, 12) must emit lines that fit a 12-cell
+	// terminal, not silently claim 20. WrapText already applies the one
+	// genuine floor this layout needs (width < 1 becomes 1, see width.go)
+	// and documents the narrow case where even that still overflows by a
+	// cell or two; textWidth only guards against going negative into it.
+	textWidth := width - 2
+	if textWidth < 1 {
+		textWidth = 1
 	}
 
 	var out []string

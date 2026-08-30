@@ -502,3 +502,36 @@ func TestFeedTypeTablesSetsFullWidthFromLongestTypeName(t *testing.T) {
 		t.Errorf("FullTypeColumnWidth() = %d, want %d (len(%q)+1)", got, want, longName)
 	}
 }
+
+// TestFeedStatusPriorityTablesReflectsConfiguredOverrides pins the
+// beans-krej fix end to end: a status or priority added or overridden
+// through .beans.yml must actually reach internal/ui's process-wide
+// tables, not just the merge helpers in pkg/config. Without
+// feedStatusPriorityTables wiring this into root.go's PersistentPreRunE,
+// ShortStatus/GetPrioritySymbol would keep rendering "?" / nothing for
+// anything not in the hardcoded built-in tables forever.
+func TestFeedStatusPriorityTablesReflectsConfiguredOverrides(t *testing.T) {
+	t.Cleanup(func() {
+		ui.SetStatusShorts(nil)
+		ui.SetPrioritySymbols(nil)
+	})
+
+	c := &config.Config{
+		Statuses:   []config.StatusOverride{{Name: "blocked", Short: "X"}},
+		Priorities: []config.PriorityOverride{{Name: "urgent", Symbol: "@"}},
+	}
+
+	feedStatusPriorityTables(c)
+
+	if got := ui.ShortStatus("blocked"); got != "X" {
+		t.Errorf(`ShortStatus("blocked") = %q, want "X"`, got)
+	}
+	// A built-in status untouched by the override must still resolve from
+	// the merged defaults, not disappear because Statuses was non-empty.
+	if got := ui.ShortStatus("todo"); got != "T" {
+		t.Errorf(`ShortStatus("todo") = %q, want "T"`, got)
+	}
+	if got := ui.GetPrioritySymbol("urgent"); got != "@" {
+		t.Errorf(`GetPrioritySymbol("urgent") = %q, want "@"`, got)
+	}
+}

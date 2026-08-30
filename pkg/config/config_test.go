@@ -250,6 +250,53 @@ func TestLoadAndSave(t *testing.T) {
 	}
 }
 
+// toYAMLNode() built the agent, worktree and server mappings without three
+// of their fields - agent.default_effort, worktree.fetch_timeout and
+// server.cors_origins were all readable via their Get*/GetWorktree* getters
+// but never written back out, so a Save() (e.g. via `beans rename`) on an
+// already-loaded Config silently dropped them.
+func TestSaveRoundTripsAgentServerAndWorktreeExtras(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	fetchTimeout := 30
+	cfg := &Config{
+		Beans: BeansConfig{
+			Path:     ".beans",
+			Prefix:   "test-",
+			IDLength: 4,
+		},
+		Agent: AgentConfig{
+			DefaultEffort: "high",
+		},
+		Server: ServerConfig{
+			CORSOrigins: []string{"https://example.com", "https://example.org"},
+		},
+		Worktree: WorktreeConfig{
+			FetchTimeout: &fetchTimeout,
+		},
+	}
+	cfg.SetConfigDir(tmpDir)
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	loaded, err := Load(filepath.Join(tmpDir, ConfigFileName))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if got := loaded.GetDefaultEffort(); got != "high" {
+		t.Errorf("GetDefaultEffort() = %q, want \"high\"", got)
+	}
+	if got := loaded.GetCORSOrigins(); len(got) != 2 || got[0] != "https://example.com" || got[1] != "https://example.org" {
+		t.Errorf("GetCORSOrigins() = %v, want [https://example.com https://example.org]", got)
+	}
+	if got := loaded.GetWorktreeFetchTimeout(); got != 30*time.Second {
+		t.Errorf("GetWorktreeFetchTimeout() = %v, want 30s", got)
+	}
+}
+
 func TestLoadAppliesDefaults(t *testing.T) {
 	// Create temp directory with minimal config
 	tmpDir := t.TempDir()
@@ -281,9 +328,10 @@ func TestLoadAppliesDefaults(t *testing.T) {
 	if cfg.GetDefaultStatus() != "todo" {
 		t.Errorf("DefaultStatus: got %q, want \"todo\"", cfg.GetDefaultStatus())
 	}
-	// DefaultType should be first type name when not specified
-	if cfg.Beans.DefaultType != "milestone" {
-		t.Errorf("DefaultType default not applied: got %q, want \"milestone\"", cfg.Beans.DefaultType)
+	// DefaultType should agree with Default(): "task" when the merged type
+	// list carries it, which the built-in table always does.
+	if cfg.Beans.DefaultType != "task" {
+		t.Errorf("DefaultType default not applied: got %q, want \"task\"", cfg.Beans.DefaultType)
 	}
 }
 
@@ -385,6 +433,56 @@ func TestLoadRequireFieldsOn(t *testing.T) {
 		}
 		if got := loaded.GetCommitField(); got != "commit" {
 			t.Errorf("GetCommitField() = %q, want \"commit\"", got)
+		}
+	})
+
+	t.Run("unknown status error is deterministic across many keys", func(t *testing.T) {
+		// validateRequireFieldsOn used to range over the map directly, so
+		// which of several bad keys got reported first varied run to run
+		// with Go's randomised map iteration. Sorting the keys first pins
+		// it to the first bad status in lexical order.
+		body := "beans:\n  require_fields_on:\n" +
+			"    zzz-bogus:\n      - commit\n" +
+			"    aaa-bogus:\n      - commit\n" +
+			"    mmm-bogus:\n      - commit\n"
+		for range 20 {
+			_, err := Load(write(t, body))
+			if err == nil {
+				t.Fatal("expected error for unknown status, got nil")
+			}
+			if !strings.Contains(err.Error(), `"aaa-bogus"`) {
+				t.Fatalf("expected the lexically first bad status \"aaa-bogus\" to be reported, got %q", err.Error())
+			}
+		}
+	})
+
+	t.Run("save preserves a key StatusList does not carry", func(t *testing.T) {
+		// A Config built directly (not through Load, which validates every
+		// key) can carry a require_fields_on entry for a status name
+		// StatusList() doesn't know about. Save() used to iterate
+		// StatusList() to get deterministic key order, which silently
+		// dropped any such key instead of just writing it out.
+		tmpDir := t.TempDir()
+		cfg := &Config{
+			Beans: BeansConfig{
+				Path:            ".beans",
+				Prefix:          "test-",
+				IDLength:        4,
+				RequireFieldsOn: map[string][]string{"not-a-real-status": {"commit"}},
+			},
+		}
+		cfg.SetConfigDir(tmpDir)
+
+		if err := cfg.Save(tmpDir); err != nil {
+			t.Fatalf("Save() error = %v", err)
+		}
+
+		data, err := os.ReadFile(filepath.Join(tmpDir, ConfigFileName))
+		if err != nil {
+			t.Fatalf("ReadFile error = %v", err)
+		}
+		if !strings.Contains(string(data), "not-a-real-status") {
+			t.Errorf("saved config does not contain %q:\n%s", "not-a-real-status", data)
 		}
 	})
 }
@@ -2097,6 +2195,67 @@ func TestGettersToleratePlainDefaultsOnANilConfig(t *testing.T) {
 	}
 }
 
+// The value-returning Get*/Is* accessors (as opposed to StatusList/TypeList/
+// PriorityList, which already tolerated nil) panicked on a nil *Config
+// because they dereferenced c.Beans/c.Worktree/c.Agent/c.Project/c.Server/
+// c.Display directly. Each must fall back to the same default it already
+// returns for an unset field.
+func TestValueGettersToleratesANilConfig(t *testing.T) {
+	var c *Config
+
+	if got := c.GetDefaultStatus(); got != "todo" {
+		t.Errorf("GetDefaultStatus() = %q, want \"todo\"", got)
+	}
+	if got := c.GetDefaultType(); got != "" {
+		t.Errorf("GetDefaultType() = %q, want \"\"", got)
+	}
+	if got := c.RequiredFieldsFor("completed"); got != nil {
+		t.Errorf("RequiredFieldsFor(\"completed\") = %v, want nil", got)
+	}
+	if got := c.GetCommitField(); got != DefaultCommitField {
+		t.Errorf("GetCommitField() = %q, want %q", got, DefaultCommitField)
+	}
+	if got := c.GetWorktreeBaseRef(); got != DefaultWorktreeBaseRef {
+		t.Errorf("GetWorktreeBaseRef() = %q, want %q", got, DefaultWorktreeBaseRef)
+	}
+	if got := c.GetWorktreeSetup(); got != "" {
+		t.Errorf("GetWorktreeSetup() = %q, want \"\"", got)
+	}
+	if got := c.GetWorktreeRun(); got != "" {
+		t.Errorf("GetWorktreeRun() = %q, want \"\"", got)
+	}
+	if got := c.GetWorktreeFetchTimeout(); got != 10*time.Second {
+		t.Errorf("GetWorktreeFetchTimeout() = %v, want 10s", got)
+	}
+	if got := c.GetWorktreeIntegrate(); got != IntegrateModeLocal {
+		t.Errorf("GetWorktreeIntegrate() = %q, want %q", got, IntegrateModeLocal)
+	}
+	if got := c.IsAgentEnabled(); !got {
+		t.Error("IsAgentEnabled() = false, want true")
+	}
+	if got := c.GetDefaultMode(); got != PermissionModeAct {
+		t.Errorf("GetDefaultMode() = %q, want %q", got, PermissionModeAct)
+	}
+	if got := c.GetDefaultEffort(); got != "" {
+		t.Errorf("GetDefaultEffort() = %q, want \"\"", got)
+	}
+	if got := c.GetProjectName(); got != "" {
+		t.Errorf("GetProjectName() = %q, want \"\"", got)
+	}
+	if got := c.GetServerPort(); got != DefaultServerPort {
+		t.Errorf("GetServerPort() = %d, want %d", got, DefaultServerPort)
+	}
+	if got := c.GetCORSOrigins(); len(got) != 2 {
+		t.Errorf("GetCORSOrigins() = %v, want the two localhost defaults", got)
+	}
+	if got := c.GetTheme(); got != "mocha" {
+		t.Errorf("GetTheme() = %q, want \"mocha\"", got)
+	}
+	if got := c.GetMaxWidth(); got != 110 {
+		t.Errorf("GetMaxWidth() = %d, want 110", got)
+	}
+}
+
 // Fix round 1, Commit 3: the same data-loss bug as Statuses/Types/Priorities,
 // one struct over. toYAMLNode() did not know about DisplayConfig either, so
 // Save() (e.g. via `beans rename`) silently dropped a configured theme/
@@ -2277,6 +2436,22 @@ func TestRankOfHonoursAConfiguredRank(t *testing.T) {
 	}
 }
 
+// An explicit "rank: 0" is a real, distinct value - not the same as
+// omitting rank entirely - and must survive the merge as 0, not be silently
+// promoted to LeafRank the way an actually-unset rank is.
+func TestExplicitRankZeroIsNotCoercedToLeafRank(t *testing.T) {
+	rank := 0
+	c := &Config{Types: []TypeOverride{{Name: "package", Rank: &rank}}}
+	if got := c.RankOf("package"); got != 0 {
+		t.Errorf("RankOf(\"package\") = %d, want 0 (explicit rank must be honoured)", got)
+	}
+	for _, ty := range c.TypeList() {
+		if ty.Name == "package" && ty.Rank != 0 {
+			t.Errorf("TypeList() carries rank %d for \"package\", want 0", ty.Rank)
+		}
+	}
+}
+
 func TestAppendedTypeWithoutRankLandsOnTheLeafRank(t *testing.T) {
 	c := &Config{Types: []TypeOverride{{Name: "chore", Color: "peach"}}}
 	if got := c.RankOf("chore"); got != LeafRank {
@@ -2307,6 +2482,96 @@ func TestColourOnlyOverrideKeepsTheBuiltInRank(t *testing.T) {
 	c := &Config{Types: []TypeOverride{{Name: "epic", Color: "red"}}}
 	if got := c.RankOf("epic"); got != 2 {
 		t.Errorf("RankOf(\"epic\") = %d, want 2 - a colour override must not reset the rank", got)
+	}
+}
+
+// An explicit "color: ''"/"description: ''"/"short: ''" in the YAML source
+// is a real value - clear the built-in default - not the same as never
+// naming the key at all, which leaves the default alone. This only applies
+// to configs loaded from YAML: UnmarshalYAML is what records which keys
+// were actually named (see StatusOverride.colorSet et al.); a struct built
+// directly in Go can never make that distinction and keeps the old
+// non-empty-always-applies behaviour, which every other override literal
+// in this codebase already relies on.
+func TestExplicitEmptyOverrideClearsTheBuiltInValue(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), ConfigFileName)
+	body := "beans:\n  prefix: test-\n" +
+		"types:\n  - name: bug\n    color: \"\"\n    description: \"\"\n    short: \"\"\n" +
+		"statuses:\n  - name: completed\n    color: \"\"\n    description: \"\"\n" +
+		"priorities:\n  - name: critical\n    color: \"\"\n    description: \"\"\n"
+	if err := os.WriteFile(configPath, []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	bug := cfg.GetType("bug")
+	if bug == nil {
+		t.Fatal("GetType(\"bug\") = nil")
+	}
+	if bug.Color != "" {
+		t.Errorf("bug.Color = %q, want \"\" (explicit clear)", bug.Color)
+	}
+	if bug.Description != "" {
+		t.Errorf("bug.Description = %q, want \"\" (explicit clear)", bug.Description)
+	}
+	if bug.Short != "" {
+		t.Errorf("bug.Short = %q, want \"\" (explicit clear)", bug.Short)
+	}
+
+	completed := cfg.GetStatus("completed")
+	if completed == nil {
+		t.Fatal("GetStatus(\"completed\") = nil")
+	}
+	if completed.Color != "" {
+		t.Errorf("completed.Color = %q, want \"\" (explicit clear)", completed.Color)
+	}
+	if completed.Description != "" {
+		t.Errorf("completed.Description = %q, want \"\" (explicit clear)", completed.Description)
+	}
+
+	critical := cfg.GetPriority("critical")
+	if critical == nil {
+		t.Fatal("GetPriority(\"critical\") = nil")
+	}
+	if critical.Color != "" {
+		t.Errorf("critical.Color = %q, want \"\" (explicit clear)", critical.Color)
+	}
+	if critical.Description != "" {
+		t.Errorf("critical.Description = %q, want \"\" (explicit clear)", critical.Description)
+	}
+}
+
+// A Save() -> Load() round trip must not lose the explicit clear either:
+// toYAMLNode() has to write "color: ''" back out, not skip the key the way
+// it would for a genuinely-unset override.
+func TestSaveRoundTripsAnExplicitlyEmptyOverride(t *testing.T) {
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, ConfigFileName)
+	body := "beans:\n  prefix: test-\ntypes:\n  - name: bug\n    color: \"\"\n"
+	if err := os.WriteFile(configPath, []byte(body), 0644); err != nil {
+		t.Fatalf("WriteFile error = %v", err)
+	}
+
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	cfg.SetConfigDir(tmpDir)
+
+	if err := cfg.Save(tmpDir); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("second Load() error = %v", err)
+	}
+	if bug := reloaded.GetType("bug"); bug == nil || bug.Color != "" {
+		t.Errorf("GetType(\"bug\").Color after round trip = %+v, want empty", bug)
 	}
 }
 
@@ -2369,6 +2634,27 @@ func TestRoadmapFalseHidesAType(t *testing.T) {
 	c := &Config{Types: []TypeOverride{{Name: "bucket", Rank: &rank, Roadmap: &visible}}}
 	if c.IsRoadmapType("bucket") {
 		t.Error("a type with roadmap: false must not count as a roadmap type")
+	}
+}
+
+// TypeList() merges each override into a fresh TypeConfig, but Roadmap used
+// to hand out o.Roadmap itself rather than a copy - every other pointer
+// field here (Rank, Emphasis) is deep-copied. Mutating a Roadmap value
+// through the merged list must not reach back into the config's own
+// TypeOverride.
+func TestRoadmapPointerIsDeepCopiedNotAliased(t *testing.T) {
+	visible := true
+	override := TypeOverride{Name: "bucket", Roadmap: &visible}
+	c := &Config{Types: []TypeOverride{override}}
+
+	merged := c.GetType("bucket")
+	if merged == nil || merged.Roadmap == nil {
+		t.Fatal("GetType(\"bucket\").Roadmap = nil, want a copy of the override's pointer")
+	}
+	*merged.Roadmap = false
+
+	if !*c.Types[0].Roadmap {
+		t.Error("mutating the merged TypeConfig's Roadmap flipped c.Types[0].Roadmap - it must be an independent copy")
 	}
 }
 
