@@ -168,3 +168,105 @@ func TestPrioCellColoursVaryByPriority(t *testing.T) {
 		t.Error("critical and high should not render with the same colour")
 	}
 }
+
+func demoRows() []Row {
+	m := &bean.Bean{ID: "beans-fexy", Title: "0.5 Output alignment", Type: "milestone", Status: "in-progress", Priority: "normal", Tags: []string{"release"}}
+	e := &bean.Bean{ID: "beans-9m0d", Title: "Shared presentation vocabulary", Type: "epic", Status: "in-progress", Priority: "normal", Tags: []string{"ui", "accepted"}}
+	t1 := &bean.Bean{ID: "beans-9zpz", Title: "Extract the colour resolution into one place", Type: "task", Status: "in-progress", Priority: "high"}
+	b1 := &bean.Bean{ID: "beans-wa9y", Title: "Status column drifts by one cell when tags are on", Type: "bug", Status: "todo", Priority: "critical", Tags: []string{"regression"}}
+	return []Row{
+		{Bean: m, Depth: 0, IsLast: false},
+		{Bean: e, Depth: 1, AncestorsLast: []bool{false}, IsLast: false},
+		{Bean: t1, Depth: 2, AncestorsLast: []bool{false, false}, IsLast: false},
+		{Bean: b1, Depth: 2, AncestorsLast: []bool{false, false}, IsLast: true},
+	}
+}
+
+func TestNoLineExceedsTheWidthInEitherForm(t *testing.T) {
+	for _, form := range []Form{FormTable, FormTree} {
+		for _, w := range []int{70, 80, 100, 110, 130, 160} {
+			for _, tags := range []bool{false, true} {
+				out := Render(demoRows(), form, "Demo", w, tags, config.Default())
+				for i, line := range strings.Split(out, "\n") {
+					if got := DisplayWidth(stripANSI(line)); got > w {
+						t.Errorf("form=%s width=%d tags=%v line %d is %d cells:\n%s",
+							form, w, tags, i, got, stripANSI(line))
+					}
+				}
+			}
+		}
+	}
+}
+
+func TestTableFormHasAHeaderAndNoTreeCharacters(t *testing.T) {
+	out := stripANSI(Render(demoRows(), FormTable, "Demo", 110, false, config.Default()))
+	if !strings.Contains(out, "TITLE") {
+		t.Error("table form must carry a header")
+	}
+	for _, glyph := range []string{"├", "└", "│"} {
+		if strings.Contains(out, glyph) {
+			t.Errorf("table form must be flat, found %q", glyph)
+		}
+	}
+}
+
+func TestTreeFormHasTreeCharactersAndNoHeader(t *testing.T) {
+	out := stripANSI(Render(demoRows(), FormTree, "Demo", 110, false, config.Default()))
+	if strings.Contains(out, "TITLE") {
+		t.Error("tree form promises no columns and must carry no header")
+	}
+	if !strings.Contains(out, "├─ ") {
+		t.Error("tree form must draw its connectors")
+	}
+}
+
+func TestTreeFormRunsTheConnectorIntoTheTypeWord(t *testing.T) {
+	// The connector must not end two columns short of the word it connects.
+	out := stripANSI(Render(demoRows(), FormTree, "Demo", 110, false, config.Default()))
+	if !strings.Contains(out, "├─ epic") && !strings.Contains(out, "├─ E") {
+		t.Errorf("connector does not lead into the type word:\n%s", out)
+	}
+}
+
+func TestWrappedTitlesKeepTheVerticalLines(t *testing.T) {
+	rows := []Row{
+		{Bean: &bean.Bean{ID: "a", Title: "root", Type: "epic", Status: "todo"}, Depth: 0, IsLast: false},
+		{Bean: &bean.Bean{ID: "b", Title: strings.Repeat("word ", 30), Type: "task", Status: "todo"},
+			Depth: 1, AncestorsLast: []bool{false}, IsLast: false},
+		{Bean: &bean.Bean{ID: "c", Title: "after", Type: "task", Status: "todo"},
+			Depth: 1, AncestorsLast: []bool{false}, IsLast: true},
+	}
+	out := stripANSI(Render(rows, FormTree, "Demo", 80, false, config.Default()))
+	lines := strings.Split(out, "\n")
+	found := false
+	for i, l := range lines {
+		if strings.Contains(l, "├─ ") && i+1 < len(lines) {
+			if strings.Contains(lines[i+1], "│") {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Errorf("a wrapped row severed its branch:\n%s", out)
+	}
+}
+
+func TestSectionHeadingsAppear(t *testing.T) {
+	rows := demoRows()
+	rows[2].Section = "No Milestone"
+	out := stripANSI(Render(rows, FormTree, "Roadmap", 110, false, config.Default()))
+	if !strings.Contains(out, "No Milestone") {
+		t.Error("section heading missing")
+	}
+}
+
+func TestParseForm(t *testing.T) {
+	for _, s := range []string{"table", "tree"} {
+		if _, ok := ParseForm(s); !ok {
+			t.Errorf("ParseForm(%q) rejected a valid form", s)
+		}
+	}
+	if _, ok := ParseForm("grid"); ok {
+		t.Error(`ParseForm("grid") accepted an unknown form`)
+	}
+}

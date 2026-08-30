@@ -144,3 +144,156 @@ func tagCell(tags []string, width int) string {
 	}
 	return Muted.Render(strings.Join(shown, " "))
 }
+
+// Form is how rows are arranged. It is the caller's choice, not a property of
+// the command: a table claims its rows are peers, which is what columns promise
+// and what makes sorting meaningful; a tree claims the opposite. Doing both at
+// once produces a table nobody may sort.
+type Form string
+
+const (
+	FormTable Form = "table"
+	FormTree  Form = "tree"
+)
+
+// ParseForm validates a --view value.
+func ParseForm(s string) (Form, bool) {
+	switch Form(s) {
+	case FormTable:
+		return FormTable, true
+	case FormTree:
+		return FormTree, true
+	}
+	return "", false
+}
+
+// Render lays out rows in the requested form.
+func Render(rows []Row, form Form, title string, width int, showTags bool, cfg *config.Config) string {
+	if form == FormTable {
+		return renderTable(rows, title, width, showTags, cfg)
+	}
+	return renderTree(rows, title, width, showTags, cfg)
+}
+
+func renderTable(rows []Row, title string, width int, showTags bool, cfg *config.Config) string {
+	// Flat: the tree is dropped, not hidden, so the columns mean what they say.
+	flat := make([]Row, 0, len(rows))
+	for _, r := range rows {
+		flat = append(flat, Row{Bean: r.Bean, Depth: 0, IsLast: true, Section: r.Section, Progress: r.Progress})
+	}
+
+	c := NewColumns(flat, width, showTags, cfg)
+	c.Rebalance(flat)
+
+	var sb strings.Builder
+	sb.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render(title))
+	sb.WriteString("\n")
+	sb.WriteString(TreeLine.Render(strings.Repeat("─", width)))
+	sb.WriteString("\n")
+	sb.WriteString(c.Header())
+	sb.WriteString("\n")
+
+	gap := strings.Repeat(" ", c.Gap)
+	for _, r := range flat {
+		if r.Section != "" {
+			sb.WriteString("\n" + Muted.Render(r.Section) + "\n")
+		}
+		st := styleFor(r.Bean, cfg)
+		parts := WrapText(r.Bean.Title, c.Title)
+
+		cells := []string{
+			st.render(PadRight(c.TypeText(r.Bean), c.Type)),
+			st.render(PadRight(r.Bean.ID, c.ID)),
+			st.render(parts[0]) + strings.Repeat(" ", max(0, c.Title-DisplayWidth(parts[0]))),
+			statusCell(r.Bean, c, cfg),
+			prioCell(r.Bean, c, cfg),
+		}
+		if c.ProgressWidth > 0 {
+			cells = append(cells, progressCell(r.Progress, c))
+		}
+		line := strings.Join(cells, gap)
+		if c.Tags > 0 {
+			if tc := tagCell(r.Bean.Tags, c.Tags); tc != "" {
+				line += gap + tc
+			}
+		}
+		sb.WriteString(strings.TrimRight(line, " ") + "\n")
+
+		lead := strings.Repeat(" ", c.Type+c.Gap+c.ID+c.Gap)
+		for _, part := range parts[1:] {
+			sb.WriteString(strings.TrimRight(lead+st.render(part), " ") + "\n")
+		}
+	}
+
+	for _, l := range c.Legend(cfg) {
+		sb.WriteString(l + "\n")
+	}
+	return sb.String()
+}
+
+func renderTree(rows []Row, title string, width int, showTags bool, cfg *config.Config) string {
+	c := NewColumns(rows, width, showTags, cfg)
+
+	leadWidth := c.Indent + c.Type + c.Gap
+	rightWidth := func(tags int) int {
+		r := c.Status + c.Gap + c.Prio + c.ID + c.Gap*2
+		if tags > 0 {
+			r += c.Gap + tags
+		}
+		if c.ProgressWidth > 0 {
+			r += c.Gap + c.ProgressWidth
+		}
+		return r
+	}
+	body := max(20, width-leadWidth-rightWidth(c.Tags))
+
+	// Same redistribution as the table: unclaimed title width goes to the tags.
+	tmp := Columns{Title: body, Tags: c.Tags, Gap: c.Gap}
+	tmp.Rebalance(rows)
+	body, c.Tags = tmp.Title, tmp.Tags
+
+	var sb strings.Builder
+	sb.WriteString(lipgloss.NewStyle().Foreground(ColorPrimary).Bold(true).Render(title))
+	sb.WriteString("\n")
+	sb.WriteString(TreeLine.Render(strings.Repeat("─", width)))
+	sb.WriteString("\n")
+
+	gap := strings.Repeat(" ", c.Gap)
+	for _, r := range rows {
+		if r.Section != "" {
+			sb.WriteString("\n" + Muted.Render(r.Section) + "\n")
+		}
+		st := styleFor(r.Bean, cfg)
+		conn := r.Connector()
+		word := c.TypeText(r.Bean)
+
+		lead := TreeLine.Render(conn) + st.render(word) +
+			strings.Repeat(" ", max(0, leadWidth-DisplayWidth(conn)-DisplayWidth(word)))
+
+		parts := WrapText(r.Bean.Title, body)
+		right := statusCell(r.Bean, c, cfg) + gap + prioCell(r.Bean, c, cfg) + gap + st.render(r.Bean.ID)
+		if c.ProgressWidth > 0 {
+			right += gap + progressCell(r.Progress, c)
+		}
+
+		line := lead + st.render(parts[0]) +
+			strings.Repeat(" ", max(0, body-DisplayWidth(parts[0]))) + gap + right
+		if c.Tags > 0 {
+			if tc := tagCell(r.Bean.Tags, c.Tags); tc != "" {
+				line += gap + tc
+			}
+		}
+		sb.WriteString(strings.TrimRight(line, " ") + "\n")
+
+		stem := r.Stem()
+		hang := TreeLine.Render(stem) + strings.Repeat(" ", max(0, leadWidth-DisplayWidth(stem)))
+		for _, part := range parts[1:] {
+			sb.WriteString(strings.TrimRight(hang+st.render(part), " ") + "\n")
+		}
+	}
+
+	for _, l := range c.Legend(cfg) {
+		sb.WriteString(l + "\n")
+	}
+	return sb.String()
+}
