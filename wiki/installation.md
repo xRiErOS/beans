@@ -35,7 +35,7 @@ go install github.com/xRiErOS/beans/cmd/beans-tui@latest
 
 A `beans-serve` built this way embeds no web assets — the repository tracks only a placeholder (`internal/web/dist/.gitkeep`) so the `//go:embed` directive in `internal/web/embed.go` compiles, but the actual frontend build is not part of the module source. Requesting `/` returns 404. Use Homebrew, the install script, or a release archive for a working `beans-serve`.
 
-A binary installed this way still reports a real version, commit, and date: `internal/version/buildinfo.go` reads them from `runtime/debug.ReadBuildInfo()` when the build did not receive `-ldflags` (which `go install` never does).
+A binary installed this way still reports the correct release version (`beans version` shows `v0.7.0`, not `dev`): `internal/version/buildinfo.go` reads it from `runtime/debug.ReadBuildInfo()` when the build did not receive `-ldflags` (which `go install` never does). Commit and build date stay `unknown` for a `go install pkg@version` install, since module proxy downloads carry no `.git` history to stamp from; they are only populated when building from a local git checkout (`go build`/`go install` run inside the cloned repository).
 
 ### GitHub Releases
 
