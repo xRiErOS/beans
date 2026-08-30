@@ -2148,6 +2148,67 @@ func TestGettersToleratePlainDefaultsOnANilConfig(t *testing.T) {
 	}
 }
 
+// The value-returning Get*/Is* accessors (as opposed to StatusList/TypeList/
+// PriorityList, which already tolerated nil) panicked on a nil *Config
+// because they dereferenced c.Beans/c.Worktree/c.Agent/c.Project/c.Server/
+// c.Display directly. Each must fall back to the same default it already
+// returns for an unset field.
+func TestValueGettersToleratesANilConfig(t *testing.T) {
+	var c *Config
+
+	if got := c.GetDefaultStatus(); got != "todo" {
+		t.Errorf("GetDefaultStatus() = %q, want \"todo\"", got)
+	}
+	if got := c.GetDefaultType(); got != "" {
+		t.Errorf("GetDefaultType() = %q, want \"\"", got)
+	}
+	if got := c.RequiredFieldsFor("completed"); got != nil {
+		t.Errorf("RequiredFieldsFor(\"completed\") = %v, want nil", got)
+	}
+	if got := c.GetCommitField(); got != DefaultCommitField {
+		t.Errorf("GetCommitField() = %q, want %q", got, DefaultCommitField)
+	}
+	if got := c.GetWorktreeBaseRef(); got != DefaultWorktreeBaseRef {
+		t.Errorf("GetWorktreeBaseRef() = %q, want %q", got, DefaultWorktreeBaseRef)
+	}
+	if got := c.GetWorktreeSetup(); got != "" {
+		t.Errorf("GetWorktreeSetup() = %q, want \"\"", got)
+	}
+	if got := c.GetWorktreeRun(); got != "" {
+		t.Errorf("GetWorktreeRun() = %q, want \"\"", got)
+	}
+	if got := c.GetWorktreeFetchTimeout(); got != 10*time.Second {
+		t.Errorf("GetWorktreeFetchTimeout() = %v, want 10s", got)
+	}
+	if got := c.GetWorktreeIntegrate(); got != IntegrateModeLocal {
+		t.Errorf("GetWorktreeIntegrate() = %q, want %q", got, IntegrateModeLocal)
+	}
+	if got := c.IsAgentEnabled(); !got {
+		t.Error("IsAgentEnabled() = false, want true")
+	}
+	if got := c.GetDefaultMode(); got != PermissionModeAct {
+		t.Errorf("GetDefaultMode() = %q, want %q", got, PermissionModeAct)
+	}
+	if got := c.GetDefaultEffort(); got != "" {
+		t.Errorf("GetDefaultEffort() = %q, want \"\"", got)
+	}
+	if got := c.GetProjectName(); got != "" {
+		t.Errorf("GetProjectName() = %q, want \"\"", got)
+	}
+	if got := c.GetServerPort(); got != DefaultServerPort {
+		t.Errorf("GetServerPort() = %d, want %d", got, DefaultServerPort)
+	}
+	if got := c.GetCORSOrigins(); len(got) != 2 {
+		t.Errorf("GetCORSOrigins() = %v, want the two localhost defaults", got)
+	}
+	if got := c.GetTheme(); got != "mocha" {
+		t.Errorf("GetTheme() = %q, want \"mocha\"", got)
+	}
+	if got := c.GetMaxWidth(); got != 110 {
+		t.Errorf("GetMaxWidth() = %d, want 110", got)
+	}
+}
+
 // Fix round 1, Commit 3: the same data-loss bug as Statuses/Types/Priorities,
 // one struct over. toYAMLNode() did not know about DisplayConfig either, so
 // Save() (e.g. via `beans rename`) silently dropped a configured theme/

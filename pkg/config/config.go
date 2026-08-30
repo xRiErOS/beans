@@ -894,15 +894,18 @@ func (c *Config) IsValidStatus(status string) bool {
 // RequiredFieldsFor returns the front matter keys that must be set when a bean
 // enters status. Returns nil when no policy applies.
 func (c *Config) RequiredFieldsFor(status string) []string {
+	if c == nil {
+		return nil
+	}
 	return c.Beans.RequireFieldsOn[status]
 }
 
 // GetCommitField returns the configured commit field name, or DefaultCommitField.
 func (c *Config) GetCommitField() string {
-	if c.Beans.CommitField != "" {
-		return c.Beans.CommitField
+	if c == nil || c.Beans.CommitField == "" {
+		return DefaultCommitField
 	}
-	return DefaultCommitField
+	return c.Beans.CommitField
 }
 
 // mergeDefaults merges a config's override entries into a copy of a
@@ -992,7 +995,7 @@ func (c *Config) GetStatus(name string) *StatusConfig {
 
 // GetDefaultStatus returns the default status name for new beans.
 func (c *Config) GetDefaultStatus() string {
-	if c.Beans.DefaultStatus == "" {
+	if c == nil || c.Beans.DefaultStatus == "" {
 		return "todo"
 	}
 	return c.Beans.DefaultStatus
@@ -1000,6 +1003,9 @@ func (c *Config) GetDefaultStatus() string {
 
 // GetDefaultType returns the default type name for new beans.
 func (c *Config) GetDefaultType() string {
+	if c == nil {
+		return ""
+	}
 	return c.Beans.DefaultType
 }
 
@@ -1293,7 +1299,7 @@ func expandHome(path string) (string, error) {
 // GetWorktreeBaseRef returns the configured base ref for new worktree branches.
 // Returns "main" if not set.
 func (c *Config) GetWorktreeBaseRef() string {
-	if c.Worktree.BaseRef == "" {
+	if c == nil || c.Worktree.BaseRef == "" {
 		return DefaultWorktreeBaseRef
 	}
 	return c.Worktree.BaseRef
@@ -1301,18 +1307,24 @@ func (c *Config) GetWorktreeBaseRef() string {
 
 // GetWorktreeSetup returns the configured setup command for new worktrees.
 func (c *Config) GetWorktreeSetup() string {
+	if c == nil {
+		return ""
+	}
 	return c.Worktree.Setup
 }
 
 // GetWorktreeRun returns the configured run command for worktrees.
 func (c *Config) GetWorktreeRun() string {
+	if c == nil {
+		return ""
+	}
 	return c.Worktree.Run
 }
 
 // GetWorktreeFetchTimeout returns the configured fetch timeout as a time.Duration.
 // Returns 10s by default. Returns 0 if explicitly set to 0 (disables fetch).
 func (c *Config) GetWorktreeFetchTimeout() time.Duration {
-	if c.Worktree.FetchTimeout == nil {
+	if c == nil || c.Worktree.FetchTimeout == nil {
 		return 10 * time.Second
 	}
 	return time.Duration(*c.Worktree.FetchTimeout) * time.Second
@@ -1321,6 +1333,9 @@ func (c *Config) GetWorktreeFetchTimeout() time.Duration {
 // GetWorktreeIntegrate returns the configured integration mode.
 // Returns "local" if not set or invalid.
 func (c *Config) GetWorktreeIntegrate() IntegrateMode {
+	if c == nil {
+		return IntegrateModeLocal
+	}
 	switch c.Worktree.Integrate {
 	case IntegrateModeLocal, IntegrateModePR:
 		return c.Worktree.Integrate
@@ -1332,7 +1347,7 @@ func (c *Config) GetWorktreeIntegrate() IntegrateMode {
 // IsAgentEnabled returns whether agent functionality is enabled.
 // Returns true if not explicitly set.
 func (c *Config) IsAgentEnabled() bool {
-	if c.Agent.Enabled == nil {
+	if c == nil || c.Agent.Enabled == nil {
 		return true
 	}
 	return *c.Agent.Enabled
@@ -1341,6 +1356,9 @@ func (c *Config) IsAgentEnabled() bool {
 // GetDefaultMode returns the configured default permission mode for agent sessions.
 // Returns "act" if not set or invalid. Also accepts "yolo" as a backwards-compatible alias.
 func (c *Config) GetDefaultMode() PermissionMode {
+	if c == nil {
+		return PermissionModeAct
+	}
 	switch c.Agent.DefaultMode {
 	case PermissionModeAct, PermissionModePlan:
 		return c.Agent.DefaultMode
@@ -1354,6 +1372,9 @@ func (c *Config) GetDefaultMode() PermissionMode {
 // GetDefaultEffort returns the raw configured default effort level for agent sessions.
 // Returns empty string if not set. Use IsValidEffortLevel to validate before use.
 func (c *Config) GetDefaultEffort() string {
+	if c == nil {
+		return ""
+	}
 	return c.Agent.DefaultEffort
 }
 
@@ -1379,12 +1400,15 @@ func IsValidPermissionMode(mode string) bool {
 
 // GetProjectName returns the configured project name, or empty string if not set.
 func (c *Config) GetProjectName() string {
+	if c == nil {
+		return ""
+	}
 	return c.Project.Name
 }
 
 // GetServerPort returns the configured server port, or the default if not set.
 func (c *Config) GetServerPort() int {
-	if c.Server.Port == 0 {
+	if c == nil || c.Server.Port == 0 {
 		return DefaultServerPort
 	}
 	return c.Server.Port
@@ -1392,7 +1416,7 @@ func (c *Config) GetServerPort() int {
 
 // GetCORSOrigins returns the configured CORS origins, or the defaults if not set.
 func (c *Config) GetCORSOrigins() []string {
-	if len(c.Server.CORSOrigins) > 0 {
+	if c != nil && len(c.Server.CORSOrigins) > 0 {
 		return c.Server.CORSOrigins
 	}
 	return []string{"http://localhost:*", "http://127.0.0.1:*"}
@@ -1400,7 +1424,7 @@ func (c *Config) GetCORSOrigins() []string {
 
 // GetTheme returns the configured theme name, or "mocha" when unset.
 func (c *Config) GetTheme() string {
-	if c.Display.Theme == "" {
+	if c == nil || c.Display.Theme == "" {
 		return "mocha"
 	}
 	return c.Display.Theme
@@ -1409,7 +1433,7 @@ func (c *Config) GetTheme() string {
 // GetMaxWidth returns the configured width cap: 110 when unset, -1 when the
 // cap is explicitly disabled.
 func (c *Config) GetMaxWidth() int {
-	if c.Display.MaxWidth == 0 {
+	if c == nil || c.Display.MaxWidth == 0 {
 		return 110
 	}
 	return c.Display.MaxWidth
