@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -26,7 +27,27 @@ var initCmd = &cobra.Command{
 		var dirName string
 
 		if beansPath != "" && initProfile != "" {
-			return fmt.Errorf("--profile writes a .beans.yml, which --beans-path skips; use one or the other")
+			msg := "--profile writes a .beans.yml, which --beans-path skips; use one or the other"
+			if initJSON {
+				return output.Error(output.ErrValidation, msg)
+			}
+			return errors.New(msg)
+		}
+
+		// Resolve the profile before any side effect (beancore.Init creates
+		// .beans/ and its .gitignore): a typo must not leave a half-initialised
+		// project behind.
+		var profileTypes []config.TypeOverride
+		if initProfile != "" {
+			types, ok := config.ProfileTypes(initProfile)
+			if !ok {
+				msg := fmt.Sprintf("unknown profile %q (must be %s)", initProfile, strings.Join(config.ProfileNames(), ", "))
+				if initJSON {
+					return output.Error(output.ErrValidation, msg)
+				}
+				return errors.New(msg)
+			}
+			profileTypes = types
 		}
 
 		if beansPath != "" {
@@ -69,15 +90,7 @@ var initCmd = &cobra.Command{
 			defaultCfg := config.DefaultWithPrefix(dirName + "-")
 			defaultCfg.Project.Name = dirName
 			if initProfile != "" {
-				types, ok := config.ProfileTypes(initProfile)
-				if !ok {
-					if initJSON {
-						return output.Error(output.ErrValidation,
-							fmt.Sprintf("unknown profile %q (must be %s)", initProfile, strings.Join(config.ProfileNames(), ", ")))
-					}
-					return fmt.Errorf("unknown profile %q (must be %s)", initProfile, strings.Join(config.ProfileNames(), ", "))
-				}
-				defaultCfg.Types = types
+				defaultCfg.Types = profileTypes
 				// The default type must exist in the chosen profile: todo has no
 				// milestone, complex has no plain feature leaf.
 				defaultCfg.Beans.DefaultType = "task"
