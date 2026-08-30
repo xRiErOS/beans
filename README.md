@@ -94,7 +94,7 @@ Profiles are expanded into the repository's `.beans.yml` when `beans init --prof
 
 ## Installation
 
-The fork does not currently publish downloadable GitHub Release artifacts. Build the verified checkout with the repository's `mise` pipeline, which installs the frontend assets required by Go's embedded web UI and stamps all three binaries with version metadata.
+Tagged versions publish binaries on the fork's [Releases page](https://github.com/xRiErOS/beans/releases). To build the current checkout instead, use the repository's `mise` pipeline, which generates the frontend assets required by the embedded web UI and stamps all three binaries with version metadata.
 
 ````sh
 git clone https://github.com/xRiErOS/beans.git

@@ -92,21 +92,6 @@ changelog:
     - title: Other
       order: 999
 
-homebrew_casks:
-  - repository:
-      owner: hmans
-      name: homebrew-beans
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: "https://github.com/hmans/beans"
-    description: "Agentic-first issue tracker"
-    license: "Apache-2.0"
-    hooks:
-      post:
-        install: |
-          if OS.mac?
-            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/beans"]
-          end
-
 release:
   footer: >-
 

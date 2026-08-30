@@ -24,9 +24,9 @@ Do not rely on any binary's internal safety mechanisms as a substitute for your 
 
 ## Review changes before upgrading
 
-The fork does not currently publish GitHub Release artifacts. Review the fork's [commit history](https://github.com/xRiErOS/beans/commits/main) before replacing a binary, paying particular attention to changes marked as breaking.
+Read the release notes for the version you are upgrading to on the fork's [Releases page](https://github.com/xRiErOS/beans/releases). For changes made after the newest release, review the fork's [commit history](https://github.com/xRiErOS/beans/commits/main), paying particular attention to changes marked as breaking.
 
-The project uses Conventional Commit prefixes such as `feat:`, `fix:`, `perf:`, and `refactor:`; a `!` in the commit type or scope marks a breaking change. Once the fork publishes releases, prefer their release notes as the upgrade fixpoint.
+The project uses Conventional Commit prefixes such as `feat:`, `fix:`, `perf:`, and `refactor:`; a `!` in the commit type or scope marks a breaking change, and the generated release notes group those entries under their own heading.
 
 If a change affects the bean file format itself, prefer an explicit migration step over guessing; where no automated migration is provided, edit the affected front matter fields by hand across your `.beans` directory before relying on the new binary for further writes.
 
