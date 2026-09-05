@@ -127,10 +127,13 @@ func sectionOf(t *testing.T, out, heading string) string {
 
 // AC7: beans-spo2's Scope rules out a new promptData field or a new
 // {{...}} directive for these facts, since none of them vary by project
-// config -- the section renders as static prose only.
+// config -- the section renders as static prose only. Scanning the raw
+// embedded template (rather than rendered output) matters: Execute
+// consumes and removes any real {{...}} directive from its output, so a
+// check against rendered text passes whether or not the section carries
+// one.
 func TestPrimeReviewFindingsSectionHasNoTemplateDirective(t *testing.T) {
-	out := renderPrimeTemplate(t)
-	section := sectionOf(t, out, "## Review Findings and Attachments")
+	section := sectionOf(t, agentPromptTemplate, "## Review Findings and Attachments")
 	if strings.Contains(section, "{{") {
 		t.Errorf("Review Findings and Attachments section contains a template directive:\n%s", section)
 	}
