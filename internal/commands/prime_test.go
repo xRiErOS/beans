@@ -108,14 +108,12 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 	}
 }
 
-// reviewFindingsSection extracts the "## Review Findings and Attachments"
-// section of a rendered prime prompt (up to the next "## " heading), the
-// same pattern issueTypesSection uses below, so a check confined to this
-// section cannot false-positive on unrelated template syntax elsewhere in
-// the document.
-func reviewFindingsSection(t *testing.T, out string) string {
+// sectionOf extracts the section starting at heading (up to the next "\n## "
+// heading) from a rendered or raw prime prompt, so a check confined to one
+// section cannot false-positive on unrelated template syntax or prose
+// elsewhere in the document.
+func sectionOf(t *testing.T, out, heading string) string {
 	t.Helper()
-	const heading = "## Review Findings and Attachments"
 	start := strings.Index(out, heading)
 	if start == -1 {
 		t.Fatalf("prompt has no %s section:\n%s", heading, out)
@@ -132,7 +130,7 @@ func reviewFindingsSection(t *testing.T, out string) string {
 // config -- the section renders as static prose only.
 func TestPrimeReviewFindingsSectionHasNoTemplateDirective(t *testing.T) {
 	out := renderPrimeTemplate(t)
-	section := reviewFindingsSection(t, out)
+	section := sectionOf(t, out, "## Review Findings and Attachments")
 	if strings.Contains(section, "{{") {
 		t.Errorf("Review Findings and Attachments section contains a template directive:\n%s", section)
 	}
@@ -254,23 +252,6 @@ func TestPromptTemplateNoLongerCarriesTheLinearChain(t *testing.T) {
 	}
 }
 
-// issueTypesSection extracts the "## Issue Types" section of a rendered
-// prime prompt (up to the next "## " heading), so assertions about it don't
-// also match an unrelated illustrative example elsewhere in the document
-// (e.g. the Recipes section's "...descendants (e.g. a milestone or epic)").
-func issueTypesSection(t *testing.T, out string) string {
-	t.Helper()
-	start := strings.Index(out, "## Issue Types")
-	if start == -1 {
-		t.Fatalf("prompt has no ## Issue Types section:\n%s", out)
-	}
-	rest := out[start+len("## Issue Types"):]
-	if end := strings.Index(rest, "\n## "); end != -1 {
-		rest = rest[:end]
-	}
-	return rest
-}
-
 // An exclusive config (beans init --profile todo, say) is its own complete
 // type table: DefaultTypes' milestone/epic/feature/bug must not leak into
 // the "## Issue Types" section, and that section must name exactly the same
@@ -283,7 +264,7 @@ func TestPrimeExclusiveConfigTypesAndRanksAgree(t *testing.T) {
 	cfg.Types = []config.TypeOverride{{Name: "task", Rank: &rank, Short: "T"}}
 
 	out := primeCmdOutput(t, cfg)
-	issueTypes := issueTypesSection(t, out)
+	issueTypes := sectionOf(t, out, "## Issue Types")
 
 	for _, name := range []string{"milestone", "epic", "feature", "bug"} {
 		if strings.Contains(issueTypes, name) {
