@@ -12,11 +12,12 @@ import (
 	"strings"
 	"text/template"
 
+	"github.com/spf13/cobra"
+	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/pkg/config"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 )
 
@@ -113,16 +114,16 @@ argument the root is that item, so --depth 1 lists its direct children.
 		resolver := &beangraph.CoreResolver{Core: core}
 		allBeans, err := resolver.Beans(context.Background(), nil)
 		if err != nil {
-			return fmt.Errorf("querying beans: %w", err)
+			return cmdError(roadmapJSON, output.ErrValidation, "querying beans: %v", err)
 		}
 
 		if err := validateRoadmapDepth(roadmapDepth, cmd.Flags().Changed("depth")); err != nil {
-			return err
+			return cmdError(roadmapJSON, output.ErrValidation, "%s", err)
 		}
 
 		form, ok := ui.ParseForm(roadmapView)
 		if !ok {
-			return fmt.Errorf("invalid --view %q: must be one of \"tree\", \"table\"", roadmapView)
+			return cmdError(roadmapJSON, output.ErrValidation, "invalid --view %q: must be one of \"tree\", \"table\"", roadmapView)
 		}
 
 		var formatOverride roadmapFormatOverride
@@ -134,7 +135,7 @@ argument the root is that item, so --depth 1 lists its direct children.
 		case "markdown":
 			formatOverride = roadmapFormatMarkdown
 		default:
-			return fmt.Errorf("invalid --format %q: must be one of \"tty\", \"markdown\"", roadmapFormat)
+			return cmdError(roadmapJSON, output.ErrValidation, "invalid --format %q: must be one of \"tty\", \"markdown\"", roadmapFormat)
 		}
 
 		// Build the roadmap
@@ -142,14 +143,14 @@ argument the root is that item, so --depth 1 lists its direct children.
 		scoped := len(args) == 1
 		if scoped {
 			if len(roadmapStatus) > 0 || len(roadmapNoStatus) > 0 {
-				return fmt.Errorf("--status/--no-status cannot be combined with a roadmap root ID")
+				return cmdError(roadmapJSON, output.ErrValidation, "--status/--no-status cannot be combined with a roadmap root ID")
 			}
 			root, err := core.Get(args[0])
 			if err != nil {
-				return fmt.Errorf("unknown bean: %s", args[0])
+				return cmdError(roadmapJSON, output.ErrNotFound, "unknown bean: %s", args[0])
 			}
 			if err := validateRoadmapRootType(root); err != nil {
-				return err
+				return cmdError(roadmapJSON, output.ErrValidation, "%s", err)
 			}
 			data = buildScopedRoadmap(allBeans, roadmapIncludeDone, root)
 		} else {

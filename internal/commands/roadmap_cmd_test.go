@@ -3,12 +3,15 @@ package commands
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/spf13/cobra"
+	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
@@ -409,5 +412,210 @@ func TestRoadmapOutputMaxWidthAboveDefaultCapIsHonoured(t *testing.T) {
 	}
 	if w := ui.DisplayWidth(lines[1]); w != 200 {
 		t.Errorf("divider width = %d, want 200 -- roadmap must not silently re-cap what resolveWidth already decided", w)
+	}
+}
+
+// captureRoadmapJSONError runs roadmapCmd.RunE(cmd, args) with roadmapJSON
+// true, capturing os.Stdout. cmdError's JSON branch writes through
+// output.Error -> output.JSON, which encodes straight to os.Stdout
+// (internal/output/output.go), not through cmd.OutOrStdout() -- unlike the
+// success path (roadmap.go's json.NewEncoder(cmd.OutOrStdout())), so a
+// cmd.SetOut buffer would see nothing on an error path and this swap is the
+// only way to observe the envelope.
+func captureRoadmapJSONError(t *testing.T, cmd *cobra.Command, args []string) (runErr error, resp output.Response) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	runErr = roadmapCmd.RunE(cmd, args)
+
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+
+	if runErr == nil {
+		return runErr, resp
+	}
+	dec := json.NewDecoder(bytes.NewReader(captured))
+	if err := dec.Decode(&resp); err != nil {
+		t.Fatalf("decoding JSON output error = %v; output = %s", err, captured)
+	}
+	return runErr, resp
+}
+
+// depthOnlyCmd builds a throwaway *cobra.Command carrying only a "depth"
+// int flag, set to 0 and marked Changed -- the one shape RunE needs to
+// exercise validateRoadmapDepth's "changed && depth < 1" branch. A fresh
+// command is used instead of roadmapCmd itself because pflag's Changed bit
+// is sticky: setting it on the shared roadmapCmd would leak into every
+// later test in this file, whereas a command built and discarded inside a
+// single test case cannot leak anywhere.
+func depthOnlyCmd(t *testing.T) *cobra.Command {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.Flags().IntVar(&roadmapDepth, "depth", 0, "")
+	if err := cmd.Flags().Set("depth", "0"); err != nil {
+		t.Fatalf(`cmd.Flags().Set("depth", "0") error = %v`, err)
+	}
+	return cmd
+}
+
+// roadmapJSONErrorCases enumerates every RunE failure path (beans-9vqb
+// Acceptance: "every failure path ... emits the standard JSON error
+// envelope"), not only the two the bean's Guard section names as the
+// minimum. Each row's wantCode also fixes the error-code convention this
+// fix must follow: ErrNotFound for a missing root bean (matching
+// progress.go/update.go/delete.go/order.go's "bean not found" handling),
+// ErrValidation for every flag/shape validation (matching
+// list.go/milestones.go/next.go/progress.go's "querying beans" and
+// unknown-flag-value handling). cmd defaults to roadmapCmd when nil; only
+// the depth case needs an isolated command (see depthOnlyCmd).
+func roadmapJSONErrorCases(t *testing.T) []struct {
+	name     string
+	cmd      func(t *testing.T) *cobra.Command
+	args     func(core *beancore.Core) []string
+	wantCode string
+} {
+	t.Helper()
+	return []struct {
+		name     string
+		cmd      func(t *testing.T) *cobra.Command
+		args     func(core *beancore.Core) []string
+		wantCode string
+	}{
+		{
+			name: "invalid view",
+			args: func(core *beancore.Core) []string {
+				roadmapView = "bogus"
+				return nil
+			},
+			wantCode: output.ErrValidation,
+		},
+		{
+			name: "invalid format",
+			args: func(core *beancore.Core) []string {
+				roadmapFormat = "bogus"
+				return nil
+			},
+			wantCode: output.ErrValidation,
+		},
+		{
+			name: "invalid depth",
+			cmd:  depthOnlyCmd,
+			args: func(core *beancore.Core) []string {
+				return nil
+			},
+			wantCode: output.ErrValidation,
+		},
+		{
+			name: "status mutex with root id",
+			args: func(core *beancore.Core) []string {
+				root := &bean.Bean{ID: "beans-mutex1", Slug: bean.Slugify("Root"), Title: "Root", Status: "todo", Type: "milestone"}
+				if err := core.Create(root); err != nil {
+					t.Fatalf("core.Create(root) error = %v", err)
+				}
+				roadmapStatus = []string{"todo"}
+				return []string{root.ID}
+			},
+			wantCode: output.ErrValidation,
+		},
+		{
+			name: "unknown root id",
+			args: func(core *beancore.Core) []string {
+				return []string{"beans-doesnotexist"}
+			},
+			wantCode: output.ErrNotFound,
+		},
+		{
+			name: "invalid root type",
+			args: func(core *beancore.Core) []string {
+				task := &bean.Bean{ID: "beans-badroot1", Slug: bean.Slugify("Just a task"), Title: "Just a task", Status: "todo", Type: "task"}
+				if err := core.Create(task); err != nil {
+					t.Fatalf("core.Create(task) error = %v", err)
+				}
+				return []string{task.ID}
+			},
+			wantCode: output.ErrValidation,
+		},
+	}
+}
+
+func TestRoadmapCmdJSONErrorEnvelope(t *testing.T) {
+	cases := roadmapJSONErrorCases(t)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			testCore := setupRoadmapCmdTest(t)
+			resetRoadmapFlags(t)
+			roadmapJSON = true
+
+			args := tc.args(testCore)
+			cmd := roadmapCmd
+			if tc.cmd != nil {
+				cmd = tc.cmd(t)
+			}
+
+			runErr, resp := captureRoadmapJSONError(t, cmd, args)
+			if runErr == nil {
+				t.Fatal("roadmapCmd.RunE() expected error, got nil")
+			}
+			if resp.Success {
+				t.Errorf("response success = true, want false")
+			}
+			if resp.Code != tc.wantCode {
+				t.Errorf("response code = %q, want %q", resp.Code, tc.wantCode)
+			}
+			if resp.Error == "" {
+				t.Errorf("response error message is empty")
+			}
+		})
+	}
+}
+
+// TestRoadmapCmdInvalidViewWithoutJSONStaysPlainText is the Acceptance
+// criterion's non-regression half: "the plain-text form is unchanged when
+// --json is absent". It asserts the exact pre-fix message text and that
+// nothing resembling the JSON envelope leaks onto stdout when --json was
+// never set.
+func TestRoadmapCmdInvalidViewWithoutJSONStaysPlainText(t *testing.T) {
+	setupRoadmapCmdTest(t)
+	resetRoadmapFlags(t)
+	roadmapView = "bogus"
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+
+	runErr := roadmapCmd.RunE(roadmapCmd, nil)
+
+	os.Stdout = oldStdout
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	captured, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+
+	if runErr == nil {
+		t.Fatal("expected an error for an invalid --view")
+	}
+	want := `invalid --view "bogus": must be one of "tree", "table"`
+	if runErr.Error() != want {
+		t.Errorf("error = %q, want %q", runErr.Error(), want)
+	}
+	if len(captured) != 0 {
+		t.Errorf("expected nothing written to stdout without --json, got %q", captured)
 	}
 }
