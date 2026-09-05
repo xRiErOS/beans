@@ -6,6 +6,7 @@ project:
 beans:
   # Directory where bean files are stored
   path: ../.beans
+  anchor: repo-root
   # Prefix for bean IDs (e.g., "myproject-abc1")
   prefix: beans-
   # Length of the random ID suffix
