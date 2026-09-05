@@ -109,7 +109,7 @@ written, so an unknown ID or a policy violation leaves the whole batch alone.`,
 		}
 
 		return emitBatchSuccess(completeJSON, done,
-			func(b *bean.Bean) error { return output.Success(b, "Bean completed") },
+			func(b *bean.Bean) error { return output.SuccessSingle(b) },
 			func(b *bean.Bean) string {
 				return ui.Success.Render("Completed ") + ui.ID.Render(b.ID) + " " + b.Title
 			})

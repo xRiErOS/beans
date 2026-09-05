@@ -101,13 +101,7 @@ func emitBatchFailure(jsonMode bool, done []*bean.Bean, err error) error {
 	if jsonMode {
 		// A bare array cannot carry the failure, so the error case keeps the
 		// envelope — one document, with the beans already written inside it.
-		_ = output.JSON(output.Response{
-			Success: false,
-			Beans:   done,
-			Count:   len(done),
-			Error:   err.Error(),
-			Code:    mutationErrorCode(err),
-		})
+		_ = output.PartialFailure(done, mutationErrorCode(err), err)
 		return fmt.Errorf("%s", err)
 	}
 

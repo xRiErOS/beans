@@ -66,7 +66,7 @@ bean file being placed, never the neighbours around it.`,
 		}
 
 		if orderJSON {
-			return output.Success(b, "Bean order updated")
+			return output.SuccessSingle(b)
 		}
 		fmt.Println(ui.Success.Render("Ordered ") + ui.ID.Render(b.ID) + " " + ui.Muted.Render(b.Path))
 		return nil
