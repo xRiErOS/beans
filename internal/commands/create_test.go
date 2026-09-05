@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -50,11 +52,63 @@ func setupCreateTest(t *testing.T) {
 // sharing the createCmd package-level flag vars.
 func resetCreateFlags(t *testing.T) {
 	t.Helper()
-	oldType, oldSet, oldUnset, oldOrder := createType, createSet, createUnset, createOrder
-	createType, createSet, createUnset, createOrder = "", nil, nil, ""
+	oldType, oldSet, oldUnset, oldOrder, oldJSON := createType, createSet, createUnset, createOrder, createJSON
+	createType, createSet, createUnset, createOrder, createJSON = "", nil, nil, "", false
 	t.Cleanup(func() {
-		createType, createSet, createUnset, createOrder = oldType, oldSet, oldUnset, oldOrder
+		createType, createSet, createUnset, createOrder, createJSON = oldType, oldSet, oldUnset, oldOrder, oldJSON
 	})
+}
+
+// D05/D12: `create --json` returns the bare bean document directly, not a
+// {success,bean,message} envelope -- same shape as `show`/`update`/`tag`.
+func TestCreateCmdJSONReturnsBareBean(t *testing.T) {
+	setupCreateTest(t)
+	resetCreateFlags(t)
+	createJSON = true
+
+	out := captureCreateStdout(t, func() {
+		if err := createCmd.RunE(createCmd, []string{"A", "new", "bean"}); err != nil {
+			t.Fatalf("createCmd.RunE() error = %v", err)
+		}
+	})
+
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decoding JSON: %v; output = %s", err, out)
+	}
+	for _, envelopeKey := range []string{"success", "message", "bean"} {
+		if _, ok := got[envelopeKey]; ok {
+			t.Errorf("captured JSON has envelope key %q; want the raw bean", envelopeKey)
+		}
+	}
+	if _, ok := got["id"]; !ok {
+		t.Errorf("captured JSON = %s, want top-level bean fields like id", out)
+	}
+	if got["title"] != "A new bean" {
+		t.Errorf("title = %v, want %q", got["title"], "A new bean")
+	}
+}
+
+// captureCreateStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureCreateStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return data
 }
 
 // AC1: --order writes the given value to the new bean's order field.

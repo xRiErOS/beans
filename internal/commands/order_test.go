@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -67,11 +69,61 @@ func setupOrderTest(t *testing.T, n int) (parent *bean.Bean, children []*bean.Be
 // resetOrderFlags clears every order* package global the tests below touch.
 func resetOrderFlags(t *testing.T) {
 	t.Helper()
-	oldAfter, oldBefore, oldFirst, oldLast := orderAfter, orderBefore, orderFirst, orderLast
-	orderAfter, orderBefore, orderFirst, orderLast = "", "", false, false
+	oldAfter, oldBefore, oldFirst, oldLast, oldJSON := orderAfter, orderBefore, orderFirst, orderLast, orderJSON
+	orderAfter, orderBefore, orderFirst, orderLast, orderJSON = "", "", false, false, false
 	t.Cleanup(func() {
-		orderAfter, orderBefore, orderFirst, orderLast = oldAfter, oldBefore, oldFirst, oldLast
+		orderAfter, orderBefore, orderFirst, orderLast, orderJSON = oldAfter, oldBefore, oldFirst, oldLast, oldJSON
 	})
+}
+
+// D05/D12: `order --json` returns the bare bean document directly, not a
+// {success,bean,message} envelope -- same shape as `show`/`update`/`tag`.
+func TestOrderCmdJSONReturnsBareBean(t *testing.T) {
+	_, children := setupOrderTest(t, 3) // A, B, C
+	resetOrderFlags(t)
+	orderFirst = true
+	orderJSON = true
+
+	out := captureOrderStdout(t, func() {
+		if err := orderCmd.RunE(orderCmd, []string{children[2].ID}); err != nil {
+			t.Fatalf("orderCmd.RunE() error = %v", err)
+		}
+	})
+
+	var got map[string]any
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decoding JSON: %v; output = %s", err, out)
+	}
+	for _, envelopeKey := range []string{"success", "message", "bean"} {
+		if _, ok := got[envelopeKey]; ok {
+			t.Errorf("captured JSON has envelope key %q; want the raw bean", envelopeKey)
+		}
+	}
+	if got["id"] != children[2].ID {
+		t.Errorf("captured JSON = %s, want top-level id %q", out, children[2].ID)
+	}
+}
+
+// captureOrderStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureOrderStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	orig := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = orig
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatalf("reading captured stdout: %v", err)
+	}
+	return data
 }
 
 // allBeanFileContents walks the beans dir and returns a map of relative path

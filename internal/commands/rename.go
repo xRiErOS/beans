@@ -7,8 +7,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/spf13/cobra"
+	"github.com/xRiErOS/beans/pkg/beancore"
 )
 
 var (
@@ -229,6 +229,9 @@ func renderRenamePlan(cmd *cobra.Command, plan *beancore.RenamePlan, jsonOut boo
 			total += n
 		}
 		fmt.Fprintf(w, "ref updates: %d across %d bean(s)\n", total, len(plan.RefUpdates))
+	}
+	for _, m := range plan.AttachmentMoves {
+		fmt.Fprintf(w, "  attachments: %s -> %s\n", m.OldPath, m.NewPath)
 	}
 	if plan.ConfigWrite {
 		fmt.Fprintf(w, "config: .beans.yml prefix -> %q\n", plan.NewPrefix)

@@ -68,7 +68,7 @@ beans start <id> [id...]                                # Mark in-progress
 beans tag <id> [id...] --tag cli --remove-tag stale     # Merge tags, one call over n beans
 # Every ID is resolved and policy-checked before the first write: an unknown ID,
 # a repeated ID or a policy violation leaves the whole batch untouched. With one
-# ID the --json shape is unchanged; with several you get a bare array.
+# ID you get the bare bean document; with several a bare array of them.
 
 # Find the next thing to work on, narrowed the way list is narrowed
 beans next --type bug --tag cli          # Highest-priority ready bug tagged cli
@@ -203,6 +203,20 @@ Any other required field needs a plain `--set <field>=<value>` in the same write
 Surface every policy violation across the workspace: `beans check --strict` (warnings show by default; `--strict` counts them as issues and exits non-zero). A bean already sitting in a gated status without the field (e.g. pre-policy data) can still receive maintenance writes -- rename, body edits -- as long as its status doesn't change; the policy only gates the transition itself.
 {{end}}
 
+## Review Findings and Attachments
+
+`.beans/attachments/<bean-id>/` carries machine evidence artifacts only -- findings documents, diffs, guard drafts. Human knowledge (`PLAN`, `DESIGN`, `DECISIONS`, `REQUIREMENTS`) drains to `docs/archive/<slug>/` on closure and is cited by path from the bean body, never duplicated into the attachments directory. No check finding, write-time guard, or schema constraint enforces what goes into the directory -- it holds by agreement only; `beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure.
+
+Promote selected findings from a review artifact into beans:
+
+```bash
+beans promote <artifact> <finding-id> [<finding-id>...]
+```
+
+Every bean it creates carries `review=<artifact-path>` (the artifact path exactly as given on the command line) and `finding=<finding-id>` as extra front matter -- the pair a rerun checks before creating a duplicate, and the pair `beans list --where review=<path>` queries to audit everything promoted from one artifact.
+
+`beans rename` carries a bean's attachment directory along under all three ID-changing modes -- `beans rename <id> <new-id>`, `beans rename <id> --suffix <suffix>`, and `beans rename --prefix <prefix>` -- and shows the move in `--dry-run` output as `attachments: <old-path> -> <new-path>`. Archiving a bean leaves its attachment directory in place: archiving does not change the bean's ID, so the directory it is keyed by stays valid -- `beans archive` itself is a batch verb with no `<id>` argument, moving every bean already in an archive status to `.beans/archive/` in one call.
+
 ## Manual Ordering
 
 Beans carry an optional `order` field (a fractional-index string) for manual sequencing among siblings under the same parent.
@@ -276,10 +290,14 @@ With `--json`, one document goes to stdout and stderr stays empty:
 Codes: `NOT_FOUND`, `NO_BEANS_DIR`, `INVALID_STATUS`, `FILE_ERROR`,
 `VALIDATION_ERROR`, `CONFLICT`, `POLICY_VIOLATION`.
 
-So: under `--json`, parse stdout and branch on `success`; an empty stderr is
-normal and not a sign that something went missing. A success payload never
-carries an `error` key, so the two are unambiguous. No command prints a usage
-block on failure — if you want the flags, ask for them with `--help`.
+So: under `--json`, parse stdout and branch on the presence of an `error` key;
+an empty stderr is normal and not a sign that something went missing. A success
+payload never carries `error`, and a failure always does, so the two are
+unambiguous. Do not branch on `success` — a successful mutation returns the bare
+bean document (or a bare array), which carries no `success` key at all; only the
+failure document, `check`, and the message-only verbs (`init`, `archive`, `next`
+with no match) still have one. No command prints a usage block on failure — if you want the
+flags, ask for them with `--help`.
 
 A batch verb (`complete`, `scrap`, `start`, `tag`, `delete`) that fails partway
 through returns `{"success": false, "beans": [...], "count": n, ...}` — the

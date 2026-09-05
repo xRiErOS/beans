@@ -80,6 +80,81 @@ func TestPrimeCmdDocumentsManualOrdering(t *testing.T) {
 	}
 }
 
+// beans-spo2 added the "## Review Findings and Attachments" section as the
+// single authoritative source for the attachments convention, the real
+// `beans promote` invocation, and rename's attachment carry-along -- every
+// other surface (starting with skill:use-beans) cites this heading instead
+// of restating its content.
+func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	for _, want := range []string{
+		"## Review Findings and Attachments",
+		".beans/attachments/<bean-id>/",
+		"docs/archive/<slug>/",
+		"beans promote <artifact> <finding-id> [<finding-id>...]",
+		"review=<artifact-path>",
+		"finding=<finding-id>",
+		"beans list --where review=<path>",
+		"beans rename <id> <new-id>",
+		"--suffix <suffix>",
+		"beans rename --prefix <prefix>",
+		"--dry-run",
+		"Archiving a bean leaves its attachment directory in place",
+		"`beans archive` itself is a batch verb with no `<id>` argument",
+		"`beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure",
+		"moving every bean already in an archive status",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prime output missing %q (review findings/attachments undocumented)", want)
+		}
+	}
+}
+
+// beans-8zlv: the archive sentence added by 7f1ffb8 named completed/scrapped as a
+// fixed literal although archiveCmd selects beans via the per-status
+// Archive config flag (Config.IsArchiveStatus, pkg/config/config.go), not
+// an invariant -- a project with a different archive-status profile would
+// have been told the wrong statuses. Guard against that literal creeping
+// back in.
+func TestPrimeReviewFindingsSectionDoesNotNameArchiveStatusesAsFixed(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	section := sectionOf(t, out, "## Review Findings and Attachments")
+	if strings.Contains(section, "status `completed`/`scrapped`") {
+		t.Errorf("Review Findings and Attachments section names archive statuses as a fixed literal:\n%s", section)
+	}
+}
+
+// sectionOf extracts the section starting at heading (up to the next "\n## "
+// heading) from a rendered or raw prime prompt, so a check confined to one
+// section cannot false-positive on unrelated template syntax or prose
+// elsewhere in the document.
+func sectionOf(t *testing.T, out, heading string) string {
+	t.Helper()
+	start := strings.Index(out, heading)
+	if start == -1 {
+		t.Fatalf("prompt has no %s section:\n%s", heading, out)
+	}
+	rest := out[start+len(heading):]
+	if end := strings.Index(rest, "\n## "); end != -1 {
+		rest = rest[:end]
+	}
+	return rest
+}
+
+// AC7: beans-spo2's Scope rules out a new promptData field or a new
+// {{...}} directive for these facts, since none of them vary by project
+// config -- the section renders as static prose only. Scanning the raw
+// embedded template (rather than rendered output) matters: Execute
+// consumes and removes any real {{...}} directive from its output, so a
+// check against rendered text passes whether or not the section carries
+// one.
+func TestPrimeReviewFindingsSectionHasNoTemplateDirective(t *testing.T) {
+	section := sectionOf(t, agentPromptTemplate, "## Review Findings and Attachments")
+	if strings.Contains(section, "{{") {
+		t.Errorf("Review Findings and Attachments section contains a template directive:\n%s", section)
+	}
+}
+
 // Task 7 (beans-9m5y) replaced the old beans update -s <status> lifecycle
 // prose with dedicated wrapper commands. The prime template is the only
 // interface most agents read, so each recipe must be documented by name
@@ -196,23 +271,6 @@ func TestPromptTemplateNoLongerCarriesTheLinearChain(t *testing.T) {
 	}
 }
 
-// issueTypesSection extracts the "## Issue Types" section of a rendered
-// prime prompt (up to the next "## " heading), so assertions about it don't
-// also match an unrelated illustrative example elsewhere in the document
-// (e.g. the Recipes section's "...descendants (e.g. a milestone or epic)").
-func issueTypesSection(t *testing.T, out string) string {
-	t.Helper()
-	start := strings.Index(out, "## Issue Types")
-	if start == -1 {
-		t.Fatalf("prompt has no ## Issue Types section:\n%s", out)
-	}
-	rest := out[start+len("## Issue Types"):]
-	if end := strings.Index(rest, "\n## "); end != -1 {
-		rest = rest[:end]
-	}
-	return rest
-}
-
 // An exclusive config (beans init --profile todo, say) is its own complete
 // type table: DefaultTypes' milestone/epic/feature/bug must not leak into
 // the "## Issue Types" section, and that section must name exactly the same
@@ -225,7 +283,7 @@ func TestPrimeExclusiveConfigTypesAndRanksAgree(t *testing.T) {
 	cfg.Types = []config.TypeOverride{{Name: "task", Rank: &rank, Short: "T"}}
 
 	out := primeCmdOutput(t, cfg)
-	issueTypes := issueTypesSection(t, out)
+	issueTypes := sectionOf(t, out, "## Issue Types")
 
 	for _, name := range []string{"milestone", "epic", "feature", "bug"} {
 		if strings.Contains(issueTypes, name) {

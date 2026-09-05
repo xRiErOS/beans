@@ -11,6 +11,11 @@ bin_dir := env_var_or_default("BEANS_BIN_DIR", "/opt/homebrew/bin")
 # picks `fork` when present and falls back to `origin` otherwise.
 release_remote := env_var_or_default("BEANS_RELEASE_REMOTE", `git remote get-url fork >/dev/null 2>&1 && echo fork || echo origin`)
 
+# Name des WIP-Binaries für Testläufe. Bewusst ein eigener Name statt eines
+# zweiten Zielverzeichnisses: in Eriks PATH gewinnt {{bin_dir}}, ein dort
+# abgelegter Teststand würde also das reguläre Binary verdecken.
+wip_bin := env_var_or_default("BEANS_WIP_BIN", "beanst")
+
 # List available recipes
 default:
     @just --list
@@ -23,6 +28,22 @@ build:
 install: build
     install -m 755 beans beans-serve beans-tui "{{bin_dir}}/"
     @"{{bin_dir}}/beans" version
+
+# Liegt neben dem regulären Binary statt es zu ersetzen: nach dem Merge auf
+# main wirkt `just install` wieder regulär, dieses Rezept ist kein Ersatz
+# dafür. Stempelt denselben Version/Commit/Date-Stand wie `build`.
+
+# Teststand des ungemergten CLI als {{wip_bin}} nach {{bin_dir}} installieren
+install-wip: build
+    install -m 755 beans "{{bin_dir}}/{{wip_bin}}"
+    @"{{bin_dir}}/{{wip_bin}}" version
+
+# Ein liegengebliebenes {{wip_bin}} täuscht in einem späteren Testlauf einen
+# Stand vor, den das Repo nicht mehr hat.
+
+# Teststand {{wip_bin}} wieder aus {{bin_dir}} entfernen
+uninstall-wip:
+    rm -f "{{bin_dir}}/{{wip_bin}}"
 
 # Run the Go test suite, e.g. `just test ./internal/bean/...`
 test ARGS='./...':

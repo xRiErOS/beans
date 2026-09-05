@@ -8,10 +8,10 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/xRiErOS/beans/internal/gitutil"
+	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/xRiErOS/beans/pkg/config"
-	"github.com/xRiErOS/beans/internal/ui"
 )
 
 // unknownTypeBeans returns every bean whose type the current configuration
@@ -37,11 +37,31 @@ var (
 )
 
 type checkResult struct {
-	Success        bool                      `json:"success"`
-	ConfigErrors   []string                  `json:"config_errors"`
-	BeanIssues     *beancore.LinkCheckResult `json:"bean_issues,omitempty"`
-	Fixed          int                       `json:"fixed,omitempty"`
-	PolicyWarnings []string                  `json:"policy_warnings,omitempty"`
+	Success           bool                      `json:"success"`
+	ConfigErrors      []string                  `json:"config_errors"`
+	BeanIssues        *beancore.LinkCheckResult `json:"bean_issues,omitempty"`
+	Fixed             int                       `json:"fixed,omitempty"`
+	PolicyWarnings    []string                  `json:"policy_warnings,omitempty"`
+	AttachmentOrphans []string                  `json:"attachment_orphans,omitempty"`
+}
+
+// attachmentOrphanIssues reports one line per attachment directory whose
+// bean no longer resolves. It exists because the carry-along invariant of
+// an ID rename is otherwise only asserted: the measured failure was a green
+// check over a directory left behind by a prefix rebrand. A store without
+// attachments yields nothing, and a read error is reported rather than
+// swallowed — a directory that cannot be read is exactly the case where a
+// silent nil would hide the drift again.
+func attachmentOrphanIssues(c *beancore.Core) []string {
+	orphans, err := c.OrphanAttachments()
+	if err != nil {
+		return []string{fmt.Sprintf("cannot read %s: %v", beancore.AttachmentsDir, err)}
+	}
+	issues := make([]string, 0, len(orphans))
+	for _, id := range orphans {
+		issues = append(issues, fmt.Sprintf("%s/%s has no bean %s", beancore.AttachmentsDir, id, id))
+	}
+	return issues
 }
 
 var checkCmd = &cobra.Command{
@@ -159,13 +179,13 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 			}
 		}
 
-	// 4. Check prefix consistency (configuration vs on-disk)
-	prefixError := core.ValidatePrefixConsistency()
-	if prefixError != "" {
-		configErrors = append(configErrors, "prefix consistency: "+prefixError)
-	} else if !checkJSON {
-		fmt.Printf("  %s Prefix consistency valid\n", ui.Success.Render("✓"))
-	}
+		// 4. Check prefix consistency (configuration vs on-disk)
+		prefixError := core.ValidatePrefixConsistency()
+		if prefixError != "" {
+			configErrors = append(configErrors, "prefix consistency: "+prefixError)
+		} else if !checkJSON {
+			fmt.Printf("  %s Prefix consistency valid\n", ui.Success.Render("✓"))
+		}
 
 		// Print config errors in human-readable mode
 		if !checkJSON {
@@ -226,6 +246,20 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 		// Show success if no issues
 		if !checkJSON && !linkResult.HasIssues() && fixed == 0 {
 			fmt.Printf("  %s No link issues found\n", ui.Success.Render("✓"))
+		}
+
+		// === Attachments ===
+		// Reported next to the link check because it is the same class of
+		// defect: a reference that no longer resolves. Only emitted when a
+		// store actually uses attachments, so every existing store's output
+		// is unchanged.
+		attachmentOrphans := attachmentOrphanIssues(core)
+		if !checkJSON && len(attachmentOrphans) > 0 {
+			fmt.Println()
+			fmt.Println(ui.Bold.Render("Attachments"))
+			for _, issue := range attachmentOrphans {
+				fmt.Printf("  %s %s\n", ui.Danger.Render("✗"), issue)
+			}
 		}
 
 		// === Policy checks ===
@@ -292,18 +326,19 @@ Note: Cycles cannot be auto-fixed and require manual intervention.`,
 		}
 
 		// === Summary ===
-		totalIssues := len(configErrors) + linkResult.TotalIssues()
+		totalIssues := len(configErrors) + linkResult.TotalIssues() + len(attachmentOrphans)
 		if checkStrict {
 			totalIssues += len(policyWarnings)
 		}
 
 		if checkJSON {
 			result := checkResult{
-				Success:        totalIssues == 0,
-				ConfigErrors:   configErrors,
-				BeanIssues:     linkResult,
-				Fixed:          fixed,
-				PolicyWarnings: policyWarnings,
+				Success:           totalIssues == 0,
+				ConfigErrors:      configErrors,
+				BeanIssues:        linkResult,
+				Fixed:             fixed,
+				PolicyWarnings:    policyWarnings,
+				AttachmentOrphans: attachmentOrphans,
 			}
 			data, _ := json.MarshalIndent(result, "", "  ")
 			fmt.Println(string(data))

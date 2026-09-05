@@ -13,13 +13,22 @@ import (
 	"sync"
 	"time"
 
+	"github.com/xRiErOS/beans/internal/search"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/config"
-	"github.com/xRiErOS/beans/internal/search"
 )
 
 const BeansDir = ".beans"
 const ArchiveDir = "archive"
+
+// AttachmentsDir holds machine evidence artifacts belonging to a bean, one
+// subdirectory per bean ID (D14/D16: findings documents, diffs, guard
+// drafts). It is deliberately NOT dot-prefixed, because bean bodies cite
+// paths inside it and a hidden path is a poor citation target -- which is
+// exactly why the bean walk has to skip it by name: the walk loads every
+// .md it meets under any visible subdirectory, so a guard draft parked here
+// would otherwise be parsed into a bean of its own (D24/R-31).
+const AttachmentsDir = "attachments"
 
 var ErrNotFound = errors.New("bean not found")
 
@@ -60,10 +69,10 @@ type Core struct {
 	config *config.Config // project configuration
 
 	// In-memory state
-	mu             sync.RWMutex
-	beans          map[string]*bean.Bean // ID -> Bean
-	dirty          map[string]bool       // IDs of beans modified in runtime but not yet persisted to disk
-	worktreeLinks  map[string]string     // bean ID -> worktree path (beans linked to a worktree)
+	mu            sync.RWMutex
+	beans         map[string]*bean.Bean // ID -> Bean
+	dirty         map[string]bool       // IDs of beans modified in runtime but not yet persisted to disk
+	worktreeLinks map[string]string     // bean ID -> worktree path (beans linked to a worktree)
 
 	// incoming is the reverse link index: target bean ID -> the links pointing
 	// at it. Derived state, rebuilt lazily from beans — every mutation of beans
@@ -82,11 +91,11 @@ type Core struct {
 	searchIndex *search.Index
 
 	// File watching (optional)
-	watching          bool
-	done              chan struct{}
-	onChange          func() // callback when beans change (legacy API)
+	watching               bool
+	done                   chan struct{}
+	onChange               func()                      // callback when beans change (legacy API)
 	worktreeWatchers       map[string]*worktreeWatcher // worktree path -> watcher
-	onWorktreeBeansChanged func() // called when worktree bean files change
+	onWorktreeBeansChanged func()                      // called when worktree bean files change
 
 	// Event subscribers (for channel-based API)
 	subscribers map[uint64]*subscription
@@ -100,14 +109,14 @@ type Core struct {
 // New creates a new Core with the given root path and configuration.
 func New(root string, cfg *config.Config) *Core {
 	return &Core{
-		root:        root,
-		config:      cfg,
+		root:          root,
+		config:        cfg,
 		beans:         make(map[string]*bean.Bean),
 		dirty:         make(map[string]bool),
 		worktreeLinks: make(map[string]string),
 		mainPaths:     make(map[string]string),
-		subscribers: make(map[uint64]*subscription),
-		warnWriter:  os.Stderr,
+		subscribers:   make(map[uint64]*subscription),
+		warnWriter:    os.Stderr,
 	}
 }
 
@@ -194,20 +203,20 @@ func HasOrphanBackup(beansRoot string) bool {
 // Returns true if repair was performed, false otherwise.
 func (c *Core) detectOrphanBackup() bool {
 	repo := c.repoRoot()
-	
+
 	// Check if .beans exists and has content
 	entries, err := os.ReadDir(c.root)
 	if err == nil && len(entries) > 0 {
 		// .beans exists and has content; no orphan
 		return false
 	}
-	
+
 	// .beans is missing or empty. Look for .beans.bak-* backups.
 	allEntries, err := os.ReadDir(repo)
 	if err != nil {
 		return false // can't read repo dir, nothing to do
 	}
-	
+
 	var backups []string
 	for _, entry := range allEntries {
 		if strings.HasPrefix(entry.Name(), ".beans.bak-") && entry.IsDir() {
@@ -219,7 +228,7 @@ func (c *Core) detectOrphanBackup() bool {
 			}
 		}
 	}
-	
+
 	if len(backups) == 0 {
 		// No backups found: ensure .beans dir exists (even if empty)
 		if err := os.MkdirAll(c.root, 0755); err != nil {
@@ -227,7 +236,7 @@ func (c *Core) detectOrphanBackup() bool {
 		}
 		return false
 	}
-	
+
 	if len(backups) == 1 {
 		// Exactly one backup exists: repair by renaming back
 		// First remove empty .beans if it exists
@@ -244,7 +253,7 @@ func (c *Core) detectOrphanBackup() bool {
 		c.logWarn("repaired .beans from backup %s (stageAndSwap crash detected and recovered)", backups[0])
 		return true
 	}
-	
+
 	// Multiple backups exist: emit warning with each path and recovery command
 	c.logWarn("detected multiple .beans.bak-* backups (stageAndSwap may have crashed multiple times):")
 	for _, backup := range backups {
@@ -257,7 +266,6 @@ func (c *Core) detectOrphanBackup() bool {
 	}
 	return false
 }
-
 
 // Load reads all beans from disk into memory.
 func (c *Core) Load() error {
@@ -272,10 +280,10 @@ func (c *Core) Load() error {
 func (c *Core) loadFromDisk() error {
 	// Migrate legacy directory names (worktrees/ → .worktrees/, conversations/ → .conversations/)
 	c.migrateLegacyDirs()
-	
+
 	// Detect and repair .beans.bak-* orphans left by interrupted stageAndSwap
 	_ = c.detectOrphanBackup() // best-effort; continue loading even if repair failed
-	
+
 	// Clear existing beans and dirty state
 	c.beans = make(map[string]*bean.Bean)
 	c.dirty = make(map[string]bool)
@@ -287,9 +295,17 @@ func (c *Core) loadFromDisk() error {
 		}
 
 		// Skip dot-prefixed subdirectories (e.g. .worktrees/, .conversations/)
-		// — these contain non-bean data and should never be walked.
+		// — these contain non-bean data and should never be walked. The
+		// attachments dir is the one visible directory with the same
+		// property: it carries a bean's evidence artifacts, which include
+		// markdown, and only its name keeps it out of the store (D24).
+		// archive/ is NOT skipped, deliberately — an archived bean stays
+		// loaded and addressable.
 		if d.IsDir() && path != c.root {
 			if strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			if path == filepath.Join(c.root, AttachmentsDir) {
 				return filepath.SkipDir
 			}
 			return nil

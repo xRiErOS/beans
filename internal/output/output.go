@@ -39,25 +39,6 @@ func JSON(resp Response) error {
 	return enc.Encode(resp)
 }
 
-// Success outputs a successful single-bean response.
-func Success(b *bean.Bean, message string) error {
-	return JSON(Response{
-		Success: true,
-		Bean:    b,
-		Message: message,
-	})
-}
-
-// SuccessWithWarnings outputs a successful single-bean response with warnings.
-func SuccessWithWarnings(b *bean.Bean, message string, warnings []string) error {
-	return JSON(Response{
-		Success:  true,
-		Bean:     b,
-		Message:  message,
-		Warnings: warnings,
-	})
-}
-
 // SuccessSingle outputs a single bean directly (no wrapper).
 // This allows intuitive jq usage: beans show --json <id> | jq '.title'
 func SuccessSingle(b *bean.Bean) error {
@@ -89,6 +70,28 @@ func SuccessInit(path string) error {
 		Message: "Initialized .beans directory",
 		Path:    path,
 	})
+}
+
+// PartialFailure outputs a failed multi-bean response naming the beans that
+// were already written before the failure struck. It is the one Response
+// literal still built with the envelope: a bare array cannot carry the
+// failure, so batch verbs keep this document for the case where a write
+// loop over several IDs fails partway through.
+//
+// Like Error, it returns an *emittedError rather than the encoder's own
+// result: JSON only fails if os.Stdout itself breaks, and surfacing that nil
+// in the common case would leave reportExecutionError free to print a
+// second, human-readable copy of the failure this function just wrote.
+func PartialFailure(beans []*bean.Bean, code string, err error) error {
+	message := err.Error()
+	_ = JSON(Response{
+		Success: false,
+		Beans:   beans,
+		Count:   len(beans),
+		Error:   message,
+		Code:    code,
+	})
+	return &emittedError{message: message}
 }
 
 // emittedError marks an error whose machine-readable document has already

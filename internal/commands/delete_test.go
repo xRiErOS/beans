@@ -75,11 +75,11 @@ func captureDeleteStdout(t *testing.T, fn func()) []byte {
 	return data
 }
 
-// TestDeleteJSONShape pins delete to the same contract as the other batch
-// verbs: one ID keeps the envelope earlier releases emitted, several IDs give
-// a bare array instead of the hand-built response delete used to construct.
+// TestDeleteJSONShape pins delete to the same D05 contract as the other
+// batch verbs: one ID gives a bare bean document, several IDs give a bare
+// array instead of the hand-built response delete used to construct.
 func TestDeleteJSONShape(t *testing.T) {
-	t.Run("single stays an envelope", func(t *testing.T) {
+	t.Run("single gives a bare bean", func(t *testing.T) {
 		setupDeleteTest(t)
 		resetDeleteFlags(t)
 		b := mkDeleteBean(t, "beans-del1", "First bean")
@@ -91,17 +91,14 @@ func TestDeleteJSONShape(t *testing.T) {
 			}
 		})
 
-		var resp struct {
-			Success bool `json:"success"`
-			Bean    struct {
-				ID string `json:"id"`
-			} `json:"bean"`
+		var got struct {
+			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(out, &resp); err != nil {
+		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatalf("decoding JSON: %v; output = %s", err, out)
 		}
-		if !resp.Success || resp.Bean.ID != b.ID {
-			t.Errorf("single-ID JSON = %s, want the unchanged envelope for %s", out, b.ID)
+		if got.ID != b.ID {
+			t.Errorf("bare bean = %s, want id %s", out, b.ID)
 		}
 	})
 

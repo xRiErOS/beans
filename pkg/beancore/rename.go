@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -20,14 +21,23 @@ type RenameChange struct {
 	OldPath, NewPath string
 }
 
+// AttachmentMove is a directory move under AttachmentsDir that an
+// ID-changing rename entails. Paths are .beans-relative, matching
+// RenameChange.
+type AttachmentMove struct {
+	OldPath, NewPath string
+}
+
 // RenamePlan is the dry-run result of a rename computation. Mode is one of
-// "slug", "id", "prefix".
+// "slug", "id", "prefix". AttachmentMoves is empty for "slug", which does
+// not touch the ID an attachment directory is keyed by.
 type RenamePlan struct {
-	Mode        string
-	Changes     []RenameChange
-	RefUpdates  map[string]int // beanID -> number of ref fields rewritten
-	NewPrefix   string
-	ConfigWrite bool
+	Mode            string
+	Changes         []RenameChange
+	RefUpdates      map[string]int // beanID -> number of ref fields rewritten
+	AttachmentMoves []AttachmentMove
+	NewPrefix       string
+	ConfigWrite     bool
 }
 
 // repoRoot returns the directory containing the .beans dir (used for the
@@ -175,6 +185,14 @@ func (c *Core) planCascade(mode string, idMap map[string]string, renamed map[str
 			OldPath: b.Path,
 			NewPath: newBeanPath(b.Path, newID, b.Slug),
 		})
+		// An attachment directory is keyed by bean ID, so an ID change
+		// strands it unless it moves too. Only plan a move for a directory
+		// that is actually there: most beans have no attachments, and a
+		// move of a missing directory would fail the apply for every one of
+		// them.
+		if move, ok := c.planAttachmentMove(oldID, newID); ok {
+			plan.AttachmentMoves = append(plan.AttachmentMoves, move)
+		}
 	}
 	for _, b := range c.beans {
 		if n := countRefHits(b, idMap); n > 0 {
@@ -182,6 +200,47 @@ func (c *Core) planCascade(mode string, idMap map[string]string, renamed map[str
 		}
 	}
 	return plan, nil
+}
+
+// planAttachmentMove reports the directory move an ID change entails, and
+// whether there is one at all. Reported false when the bean has no
+// attachment directory, which is the common case.
+func (c *Core) planAttachmentMove(oldID, newID string) (AttachmentMove, bool) {
+	oldRel := filepath.Join(AttachmentsDir, oldID)
+	info, err := os.Stat(filepath.Join(c.root, oldRel))
+	if err != nil || !info.IsDir() {
+		return AttachmentMove{}, false
+	}
+	return AttachmentMove{OldPath: oldRel, NewPath: filepath.Join(AttachmentsDir, newID)}, true
+}
+
+// OrphanAttachments lists attachment directories whose bean ID no longer
+// resolves, sorted for stable output. Without this the carry-along
+// invariant of an ID rename is merely asserted: the measured failure mode
+// was a green `beans check` over a directory pointing at an ID that had
+// been rebranded away. Archived beans stay loaded, so their attachments are
+// not orphans.
+func (c *Core) OrphanAttachments() ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(c.root, AttachmentsDir))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	var orphans []string
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if _, ok := c.beans[e.Name()]; !ok {
+			orphans = append(orphans, e.Name())
+		}
+	}
+	sort.Strings(orphans)
+	return orphans, nil
 }
 
 // countRefHits counts how many of b's ref fields (Parent/Blocking/BlockedBy)
@@ -367,7 +426,7 @@ func (c *Core) applyRenameCascade(plan *RenamePlan) error {
 	}
 	c.mu.RUnlock()
 
-	if err := c.stageAndSwap(writes, removes); err != nil {
+	if err := c.stageAndSwap(writes, removes, plan.AttachmentMoves...); err != nil {
 		return err
 	}
 
@@ -448,7 +507,13 @@ var swapRename = os.Rename
 // in for c.root. writes/removes keys are .beans-relative (matching
 // Bean.Path, e.g. "x.md" or "epic/x.md"). Any error before the swap leaves
 // the original .beans tree untouched and removes the staging dir.
-func (c *Core) stageAndSwap(writes map[string][]byte, removes []string) error {
+//
+// moves are directory renames applied inside the staging tree after the
+// clone, which is what makes an attachment directory follow an ID change
+// under the same atomic swap as the bean files themselves — there is no
+// window in which the bean carries its new ID and the attachment still the
+// old one.
+func (c *Core) stageAndSwap(writes map[string][]byte, removes []string, moves ...AttachmentMove) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -479,6 +544,20 @@ func (c *Core) stageAndSwap(writes map[string][]byte, removes []string) error {
 		}
 		if err := os.WriteFile(target, content, 0644); err != nil {
 			return fmt.Errorf("staging write: %w", err)
+		}
+	}
+
+	for _, m := range moves {
+		from := filepath.Join(staging, m.OldPath)
+		to := filepath.Join(staging, m.NewPath)
+		if _, err := os.Stat(to); err == nil {
+			return fmt.Errorf("staging move: %s already exists", m.NewPath)
+		}
+		if err := os.MkdirAll(filepath.Dir(to), 0755); err != nil {
+			return fmt.Errorf("staging move dir: %w", err)
+		}
+		if err := os.Rename(from, to); err != nil {
+			return fmt.Errorf("staging move %s -> %s: %w", m.OldPath, m.NewPath, err)
 		}
 	}
 
