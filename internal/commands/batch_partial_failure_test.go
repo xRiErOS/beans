@@ -268,3 +268,33 @@ func TestTagBatchPartialFailureJSONSuppressesStderr(t *testing.T) {
 		t.Errorf("beans[0].id = %q, want %q (the target written before the failure)", gotID, first.ID)
 	}
 }
+
+// TestTagBatchPartialFailurePlainKeepsStderr is the counterpart to
+// TestTagBatchPartialFailureJSONSuppressesStderr: the plain-text branch
+// never wrote a document, so it is the one path whose stderr line must
+// survive. Without this, a fix that silenced stderr on both branches instead
+// of only the json one would pass every other test in this file — the json
+// subtests above assert stdout, and TestTagBatchPartialFailure's plain
+// subtest calls tagCmd.RunE directly, which never reaches stderr at all.
+func TestTagBatchPartialFailurePlainKeepsStderr(t *testing.T) {
+	first := setupTagTest(t)
+	resetTagFlags(t)
+	beansDir := core.Root()
+	second := mkTagBean(t, "beans-tgt11", "Second bean", nil)
+	denyWrite(t, filepath.Join(beansDir, second.Path))
+
+	stdout, stderr, err := runRootInDir(t, beansDir, "tag", "--tag", "seamtest", first.ID, second.ID)
+
+	if err == nil {
+		t.Fatal("root.ExecuteC() error = nil, want the second write's permission failure")
+	}
+	if stdout != "" {
+		t.Errorf("stdout = %q, want empty — the plain path never writes a document", stdout)
+	}
+	if stderr == "" {
+		t.Fatal("stderr is empty, want the permission failure reported (naming the already-written id)")
+	}
+	if !strings.Contains(stderr, first.ID) {
+		t.Errorf("stderr = %q, want it to name the already-written id %q", stderr, first.ID)
+	}
+}
