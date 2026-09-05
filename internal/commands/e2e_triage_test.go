@@ -163,8 +163,29 @@ func TestEndToEndTriageControl(t *testing.T) {
 	// AC-06: the rejected pair -- the set difference between the artifact's
 	// three finding IDs and the promoted set -- has no bean, file or record
 	// anywhere in the store.
-	allIDs := map[string]bool{"B01": true, "I01": true, "I02": true}
-	promotedIDs := map[string]bool{"B01": true}
+	// Both sides are derived, never literal: allIDs comes from the
+	// artifact bytes the review step actually wrote, promotedIDs from the
+	// finding= front matter of the beans genuinely present in the store --
+	// so a defect that promotes the wrong record, or the wrong count of
+	// records, changes this computation instead of being invisible to it.
+	var artifactDecoded struct {
+		Findings []struct {
+			ID string `json:"id"`
+		} `json:"findings"`
+	}
+	if err := json.Unmarshal(originalArtifactBytes, &artifactDecoded); err != nil {
+		t.Fatalf("decoding artifact to derive its finding IDs: %v", err)
+	}
+	allIDs := make(map[string]bool, len(artifactDecoded.Findings))
+	for _, f := range artifactDecoded.Findings {
+		allIDs[f.ID] = true
+	}
+	promotedIDs := make(map[string]bool, len(promotedByQuery))
+	for _, b := range promotedByQuery {
+		if id, ok := b.Extra["finding"].(string); ok {
+			promotedIDs[id] = true
+		}
+	}
 	var rejected []string
 	for id := range allIDs {
 		if !promotedIDs[id] {
