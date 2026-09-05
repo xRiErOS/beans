@@ -101,7 +101,7 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 		"--dry-run",
 		"Archiving a bean leaves its attachment directory in place",
 		"`beans archive` itself is a batch verb with no `<id>` argument",
-		"`beans check` only reports an attachment directory whose bean no longer resolves",
+		"`beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure",
 		"moving every bean already in an archive status",
 	} {
 		if !strings.Contains(out, want) {

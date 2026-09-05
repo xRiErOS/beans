@@ -205,7 +205,7 @@ Surface every policy violation across the workspace: `beans check --strict` (war
 
 ## Review Findings and Attachments
 
-`.beans/attachments/<bean-id>/` carries machine evidence artifacts only -- findings documents, diffs, guard drafts. Human knowledge (`PLAN`, `DESIGN`, `DECISIONS`, `REQUIREMENTS`) drains to `docs/archive/<slug>/` on closure and is cited by path from the bean body, never duplicated into the attachments directory. No check finding, write-time guard, or schema constraint enforces what goes into the directory -- it holds by agreement only; `beans check` only reports an attachment directory whose bean no longer resolves.
+`.beans/attachments/<bean-id>/` carries machine evidence artifacts only -- findings documents, diffs, guard drafts. Human knowledge (`PLAN`, `DESIGN`, `DECISIONS`, `REQUIREMENTS`) drains to `docs/archive/<slug>/` on closure and is cited by path from the bean body, never duplicated into the attachments directory. No check finding, write-time guard, or schema constraint enforces what goes into the directory -- it holds by agreement only; `beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure.
 
 Promote selected findings from a review artifact into beans:
 
