@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/pkg/beancore"
@@ -54,9 +53,12 @@ func captureRunEStdout(t *testing.T, fn func()) []byte {
 		t.Fatalf("os.Pipe() error = %v", err)
 	}
 	os.Stdout = w
+	defer func() {
+		os.Stdout = old
+		w.Close()
+	}()
 	fn()
 	w.Close()
-	os.Stdout = old
 
 	out := make([]byte, 0, 4096)
 	buf := make([]byte, 4096)
@@ -564,7 +566,7 @@ func TestPromoteSetsAxisFrontMatter(t *testing.T) {
 // promote's own vocabulary) so this checks the command metadata only, not
 // bean bodies.
 func TestPromoteVocabularyIsEnglish(t *testing.T) {
-	RegisterPromoteCmd(&cobra.Command{Use: "root-for-flag-registration"})
+	sharedTestRoot(t)
 	forbidden := []string{"Beschreibung", "Empfehlung", "Nutzen", "Schwere", "Befund"}
 	haystacks := []string{promoteCmd.Use, promoteCmd.Short, promoteCmd.Long}
 	promoteCmd.Flags().VisitAll(func(f *pflag.Flag) {
@@ -582,3 +584,27 @@ func TestPromoteVocabularyIsEnglish(t *testing.T) {
 	}
 }
 
+
+// AC1: promote is the exclusive CLI surface, reachable through the real root
+// command -- every other test in this file calls promoteCmd.RunE directly,
+// which never touches register.go's RegisterPromoteCmd(root) call and so
+// cannot detect that line going missing. This test drives sharedTestRoot's
+// real ExecuteC path instead (the same helper error_shape_test.go's wiring
+// tests use), so removing RegisterPromoteCmd(root) from register.go turns
+// this test red without touching command behavior, which stays covered by
+// the RunE-based tests above.
+func TestPromoteReachableThroughRootCommand(t *testing.T) {
+	setupPromoteTest(t)
+	resetPromoteFlags(t)
+
+	_, stderr, err := runRootWithArgs(t, "promote", "/nonexistent/artifact.json", "B01")
+	if err == nil {
+		t.Fatal("expected an error: the artifact path does not exist")
+	}
+	if strings.Contains(stderr, "unknown command") {
+		t.Fatalf("command \"promote\" is not reachable through the root command: %s", stderr)
+	}
+	if !strings.Contains(stderr, "findings artifact") {
+		t.Errorf("root command did not reach promote's own RunE (expected the artifact-read error, got): %s", stderr)
+	}
+}
