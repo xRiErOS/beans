@@ -102,10 +102,25 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 		"Archiving a bean leaves its attachment directory in place",
 		"`beans archive` itself is a batch verb with no `<id>` argument",
 		"`beans check` only reports an attachment directory whose bean no longer resolves",
+		"moving every bean already in an archive status",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prime output missing %q (review findings/attachments undocumented)", want)
 		}
+	}
+}
+
+// beans-8zlv: the archive sentence in b5777c0 named completed/scrapped as a
+// fixed literal although archiveCmd selects beans via the per-status
+// Archive config flag (Config.IsArchiveStatus, pkg/config/config.go), not
+// an invariant -- a project with a different archive-status profile would
+// have been told the wrong statuses. Guard against that literal creeping
+// back in.
+func TestPrimeReviewFindingsSectionDoesNotNameArchiveStatusesAsFixed(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	section := sectionOf(t, out, "## Review Findings and Attachments")
+	if strings.Contains(section, "status `completed`/`scrapped`") {
+		t.Errorf("Review Findings and Attachments section names archive statuses as a fixed literal:\n%s", section)
 	}
 }
 
