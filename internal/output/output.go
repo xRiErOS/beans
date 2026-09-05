@@ -77,14 +77,21 @@ func SuccessInit(path string) error {
 // literal still built with the envelope: a bare array cannot carry the
 // failure, so batch verbs keep this document for the case where a write
 // loop over several IDs fails partway through.
+//
+// Like Error, it returns an *emittedError rather than the encoder's own
+// result: JSON only fails if os.Stdout itself breaks, and surfacing that nil
+// in the common case would leave reportExecutionError free to print a
+// second, human-readable copy of the failure this function just wrote.
 func PartialFailure(beans []*bean.Bean, code string, err error) error {
-	return JSON(Response{
+	message := err.Error()
+	_ = JSON(Response{
 		Success: false,
 		Beans:   beans,
 		Count:   len(beans),
-		Error:   err.Error(),
+		Error:   message,
 		Code:    code,
 	})
+	return &emittedError{message: message}
 }
 
 // emittedError marks an error whose machine-readable document has already
