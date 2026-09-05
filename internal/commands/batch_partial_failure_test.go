@@ -1,11 +1,14 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 // denyWrite makes the on-disk file for a bean unwritable (0o444) so that the
@@ -185,4 +188,83 @@ func TestTagBatchPartialFailure(t *testing.T) {
 			t.Errorf("stdout = %q, want empty — the non-json path must not print a JSON document", out)
 		}
 	})
+}
+
+// runRootInDir mirrors runRootWithArgs (error_shape_test.go) for a scenario
+// that needs the same on-disk store across more than one command: a setup
+// step writes state through the package's core/cfg globals (setupTagTest,
+// mkTagBean), then the command under test is reached through the real
+// ExecuteC + reportExecutionError path so its stderr is observable.
+// Duplicated here rather than folded into runRootWithArgs itself, because a
+// parallel container (beans-iw5j) edits error_shape_test.go in this same
+// package.
+//
+// stdout is captured via os.Pipe, not cobra's SetOut: output.JSON (and
+// PartialFailure through it) writes straight to os.Stdout rather than
+// through the command's own out stream, the same reason tag_test.go's
+// captureTagStdout exists instead of reading cmd.OutOrStdout().
+func runRootInDir(t *testing.T, beansDir string, args ...string) (stdout, stderr string, err error) {
+	t.Helper()
+
+	root := sharedTestRoot(t)
+	resetFlags(root)
+
+	var errBuf bytes.Buffer
+	root.SetErr(&errBuf)
+	root.SetArgs(append([]string{"--beans-path", beansDir}, args...))
+
+	out := captureTagStdout(t, func() {
+		var cmd *cobra.Command
+		cmd, err = root.ExecuteC()
+		if err != nil {
+			reportExecutionError(cmd, err)
+		}
+	})
+	return string(out), errBuf.String(), err
+}
+
+// TestTagBatchPartialFailureJSONSuppressesStderr pins D06 on the batch
+// partial-failure path: the json document PartialFailure already wrote to
+// stdout must be the ONLY artifact, so reportExecutionError must not also
+// print a plain-text copy to stderr. TestTagBatchPartialFailure's json
+// subtests drive tagCmd.RunE directly and so cannot observe stderr at all —
+// that only happens through the real ExecuteC path, hence runRootInDir
+// instead of captureTagStdout.
+//
+// This test asserts stdout's shape and stderr's emptiness independently, on
+// purpose: it must go red only when stderr regains its stray line (the
+// _ = output.PartialFailure(...) regression), and stay green if PartialFailure
+// itself regresses to returning the encoder's own result — that second
+// regression already turns TestTagBatchPartialFailure's json subtests red
+// (their runErr-must-be-non-nil assertion), and a test that also asserted
+// runErr != nil here would double-count that failure instead of leaving this
+// test's own target isolated.
+func TestTagBatchPartialFailureJSONSuppressesStderr(t *testing.T) {
+	first := setupTagTest(t)
+	resetTagFlags(t)
+	beansDir := core.Root()
+	second := mkTagBean(t, "beans-tgt9", "Second bean", nil)
+	denyWrite(t, filepath.Join(beansDir, second.Path))
+
+	stdout, stderr, _ := runRootInDir(t, beansDir, "tag", "--json", "--tag", "seamtest", first.ID, second.ID)
+
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty — the json document on stdout already reported the failure", stderr)
+	}
+
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(stdout), &doc); err != nil {
+		t.Fatalf("decoding stdout as JSON: %v; stdout = %s", err, stdout)
+	}
+	if success, _ := doc["success"].(bool); success {
+		t.Errorf("success = %v, want false", success)
+	}
+	beans, ok := doc["beans"].([]any)
+	if !ok || len(beans) != 1 {
+		t.Fatalf("beans = %v, want a one-element array naming %s", doc["beans"], first.ID)
+	}
+	gotID, _ := beans[0].(map[string]any)["id"].(string)
+	if gotID != first.ID {
+		t.Errorf("beans[0].id = %q, want %q (the target written before the failure)", gotID, first.ID)
+	}
 }
