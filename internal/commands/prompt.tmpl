@@ -215,7 +215,7 @@ beans promote <artifact> <finding-id> [<finding-id>...]
 
 Every bean it creates carries `review=<artifact-path>` (the artifact path exactly as given on the command line) and `finding=<finding-id>` as extra front matter -- the pair a rerun checks before creating a duplicate, and the pair `beans list --where review=<path>` queries to audit everything promoted from one artifact.
 
-`beans rename` carries a bean's attachment directory along under all three ID-changing modes -- `beans rename <id> <new-id>`, `beans rename <id> --suffix <suffix>`, and `beans rename --prefix <prefix>` -- and shows the move in `--dry-run` output as `attachments: <old-path> -> <new-path>`. Archiving a bean leaves its attachment directory in place: archiving does not change the bean's ID, so the directory it is keyed by stays valid -- `beans archive` itself is a batch verb with no `<id>` argument, moving every bean already in status `completed`/`scrapped` to `.beans/archive/` in one call.
+`beans rename` carries a bean's attachment directory along under all three ID-changing modes -- `beans rename <id> <new-id>`, `beans rename <id> --suffix <suffix>`, and `beans rename --prefix <prefix>` -- and shows the move in `--dry-run` output as `attachments: <old-path> -> <new-path>`. Archiving a bean leaves its attachment directory in place: archiving does not change the bean's ID, so the directory it is keyed by stays valid -- `beans archive` itself is a batch verb with no `<id>` argument, moving every bean already in an archive status to `.beans/archive/` in one call.
 
 ## Manual Ordering
 
