@@ -110,7 +110,7 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 	}
 }
 
-// beans-8zlv: the archive sentence in b5777c0 named completed/scrapped as a
+// beans-8zlv: the archive sentence added by 7f1ffb8 named completed/scrapped as a
 // fixed literal although archiveCmd selects beans via the per-status
 // Archive config flag (Config.IsArchiveStatus, pkg/config/config.go), not
 // an invariant -- a project with a different archive-status profile would
