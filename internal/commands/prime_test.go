@@ -101,6 +101,7 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 		"--dry-run",
 		"Archiving a bean leaves its attachment directory in place",
 		"`beans archive` itself is a batch verb with no `<id>` argument",
+		"`beans check` only reports an attachment directory whose bean no longer resolves",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prime output missing %q (review findings/attachments undocumented)", want)
