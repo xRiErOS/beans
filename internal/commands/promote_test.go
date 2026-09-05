@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
+	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/xRiErOS/beans/pkg/config"
 )
@@ -334,6 +336,94 @@ func TestPromoteWriteFailureNamesCreatedBeans(t *testing.T) {
 	}
 }
 
+// R-27/Risks: the idempotency skip is keyed on the review+finding PAIR, never
+// on finding alone -- finding-ids restart at 01 per report, so the same
+// value recurs across unrelated artifacts. Promoting the same finding-id
+// from two different artifacts must create two independent beans, not
+// silently skip the second as "already promoted".
+func TestPromoteCrossArtifactIdempotencyKeyedOnReviewAndFinding(t *testing.T) {
+	setupPromoteTest(t)
+	resetPromoteFlags(t)
+	firstArtifact := writeArtifact(t, `{"findings":[`+validBugRecord+`]}`)
+	secondArtifact := writeArtifact(t, `{"findings":[`+validBugRecord+`]}`)
+
+	if err := promoteCmd.RunE(promoteCmd, []string{firstArtifact, "B01"}); err != nil {
+		t.Fatalf("promoting B01 from artifact 1: %v", err)
+	}
+	if err := promoteCmd.RunE(promoteCmd, []string{secondArtifact, "B01"}); err != nil {
+		t.Fatalf("promoting B01 from artifact 2: %v", err)
+	}
+
+	if got := countBeans(t); got != 2 {
+		t.Fatalf("beans created = %d, want 2 (B01 from two different artifacts must not be deduplicated)", got)
+	}
+	fromFirst := filterByWhere(core.All(), []string{"review=" + firstArtifact, "finding=B01"})
+	if len(fromFirst) != 1 {
+		t.Errorf("bean for B01 from artifact 1 (%s) missing", firstArtifact)
+	}
+	fromSecond := filterByWhere(core.All(), []string{"review=" + secondArtifact, "finding=B01"})
+	if len(fromSecond) != 1 {
+		t.Errorf("bean for B01 from artifact 2 (%s) missing", secondArtifact)
+	}
+}
+
+// AC2/R-20: an unselected finding-id argument is rejected via ErrNotFound,
+// naming the id, without touching the store.
+func TestPromoteRejectsUnknownFindingID(t *testing.T) {
+	setupPromoteTest(t)
+	resetPromoteFlags(t)
+	path := writeArtifact(t, `{"findings":[`+validBugRecord+`]}`)
+
+	before := countBeans(t)
+	err := promoteCmd.RunE(promoteCmd, []string{path, "B99"})
+	if err == nil {
+		t.Fatal("expected an error for an unknown finding id, got nil")
+	}
+	if !contains(err.Error(), "B99") {
+		t.Errorf("error for unknown finding id %q does not name it", err.Error())
+	}
+	if got := countBeans(t); got != before {
+		t.Errorf("beans written = %d, want %d (zero writes for an unknown finding id)", got, before)
+	}
+}
+
+// AC3: a successful partial promote (only some finding-ids named) never
+// edits the artifact file, and the unselected record is not itself
+// promoted -- "without requiring the artifact file to be edited" is a
+// guarantee about the artifact's own bytes, which the AC5 error-path tests
+// never exercise since they never reach a successful write.
+func TestPromoteSuccessLeavesArtifactFileUntouched(t *testing.T) {
+	setupPromoteTest(t)
+	resetPromoteFlags(t)
+	doc := `{"findings":[` + validBugRecord + `,` + validImprovementRecord + `]}`
+	path := writeArtifact(t, doc)
+
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading artifact before promote: %v", err)
+	}
+
+	if err := promoteCmd.RunE(promoteCmd, []string{path, "B01"}); err != nil {
+		t.Fatalf("promoteCmd.RunE() error = %v", err)
+	}
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading artifact after promote: %v", err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Errorf("artifact file %s was modified by promote; before=%q after=%q", path, before, after)
+	}
+
+	matches := filterByWhere(core.All(), []string{"finding=I02"})
+	if len(matches) != 0 {
+		t.Errorf("unselected record I02 was promoted (%d beans), want 0", len(matches))
+	}
+	if got := countBeans(t); got != 1 {
+		t.Errorf("beans created = %d, want 1 (only the selected B01)", got)
+	}
+}
+
 // SC-06: JSON output shape matches the established batch convention -- a
 // single finding-id gives a bare bean, several give a bare array, and a
 // preflight rejection returns the standard error envelope.
@@ -410,6 +500,35 @@ func TestPromoteJSONShape(t *testing.T) {
 		}
 		if got.Code == "" {
 			t.Errorf("Code empty, want an output.Err* code")
+		}
+	})
+
+	t.Run("unknown finding id returns the NOT_FOUND envelope", func(t *testing.T) {
+		setupPromoteTest(t)
+		resetPromoteFlags(t)
+		promoteJSON = true
+		path := writeArtifact(t, `{"findings":[`+validBugRecord+`]}`)
+
+		out := captureRunEStdout(t, func() {
+			err := promoteCmd.RunE(promoteCmd, []string{path, "B99"})
+			if err == nil {
+				t.Fatal("expected a not-found error, got nil")
+			}
+		})
+
+		var got struct {
+			Success bool   `json:"success"`
+			Code    string `json:"code"`
+			Error   string `json:"error"`
+		}
+		if err := json.Unmarshal(out, &got); err != nil {
+			t.Fatalf("decoding JSON envelope: %v; output = %s", err, out)
+		}
+		if got.Success {
+			t.Errorf("Success = true, want false")
+		}
+		if got.Code != output.ErrNotFound {
+			t.Errorf("Code = %q, want %q", got.Code, output.ErrNotFound)
 		}
 	})
 }
