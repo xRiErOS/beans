@@ -1,0 +1,207 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://beans.dev/schemas/findings-artifact.schema.json",
+  "title": "Findings artifact",
+  "description": "The artifact a finished review writes: one JSON object holding an array of finding records. `beans promote` (WP2) validates every selected record against this document before writing anything; `skill:review-spec` / `specs-reviewer` (WP3) write records that conform to it.",
+  "type": "object",
+  "required": ["findings"],
+  "properties": {
+    "findings": {
+      "type": "array",
+      "description": "May be empty.",
+      "items": { "$ref": "#/$defs/record" }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "record": {
+      "title": "Finding record",
+      "type": "object",
+      "required": ["id", "code", "title", "axis", "fields", "evidence"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "The code plus a two-digit ordinal, restarting at 01 per artifact. The first character always equals code (enforced per-code below).",
+          "pattern": "^[DTBIQ][0-9]{2}$"
+        },
+        "code": {
+          "type": "string",
+          "description": "The existing rule-19 / OKF kind axis, unchanged by this schema.",
+          "enum": ["D", "T", "B", "I", "Q"]
+        },
+        "title": {
+          "type": "string",
+          "description": "Short, non-empty title.",
+          "minLength": 1
+        },
+        "axis": {
+          "type": "string",
+          "description": "Which review axis produced this finding. Required on every record, no default (R-30).",
+          "enum": ["standards", "spec"]
+        },
+        "fields": {
+          "type": "object",
+          "description": "Canonical per-code field labels inherited unchanged from rule 19 / OKF. The exact required key set per code is enforced by the allOf conditionals below; no code's fields object may carry a Status key."
+        },
+        "evidence": {
+          "type": "array",
+          "description": "S## evidence references (R-17). May be an empty array.",
+          "items": {
+            "type": "string",
+            "pattern": "^S[0-9]{2}$"
+          }
+        },
+        "blocking": {
+          "type": "boolean",
+          "description": "Permitted only on a record whose code is B (R-15)."
+        },
+        "criterion": {
+          "type": "string",
+          "description": "Required exactly when blocking is true; forbidden otherwise (R-14). Closed enumeration.",
+          "enum": [
+            "acceptance-criteria-violation",
+            "regression",
+            "security-or-data-integrity-risk",
+            "demonstrated-stability-risk"
+          ]
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": ["code"],
+            "properties": { "code": { "const": "D" } }
+          },
+          "then": {
+            "properties": {
+              "id": { "pattern": "^D[0-9]{2}$" },
+              "fields": {
+                "type": "object",
+                "required": ["Hintergrund", "Entscheidung", "Empfehlung"],
+                "properties": {
+                  "Hintergrund": {},
+                  "Entscheidung": {},
+                  "Empfehlung": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["code"],
+            "properties": { "code": { "const": "T" } }
+          },
+          "then": {
+            "properties": {
+              "id": { "pattern": "^T[0-9]{2}$" },
+              "fields": {
+                "type": "object",
+                "required": ["Prio", "Aufgabe"],
+                "properties": {
+                  "Prio": {},
+                  "Aufgabe": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["code"],
+            "properties": { "code": { "const": "B" } }
+          },
+          "then": {
+            "properties": {
+              "id": { "pattern": "^B[0-9]{2}$" },
+              "fields": {
+                "type": "object",
+                "required": ["Schwere", "Beschreibung", "Empfehlung"],
+                "properties": {
+                  "Schwere": {},
+                  "Beschreibung": {},
+                  "Empfehlung": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["code"],
+            "properties": { "code": { "const": "I" } }
+          },
+          "then": {
+            "properties": {
+              "id": { "pattern": "^I[0-9]{2}$" },
+              "fields": {
+                "type": "object",
+                "required": ["Beschreibung", "Nutzen", "Empfehlung"],
+                "properties": {
+                  "Beschreibung": {},
+                  "Nutzen": {},
+                  "Empfehlung": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "required": ["code"],
+            "properties": { "code": { "const": "Q" } }
+          },
+          "then": {
+            "properties": {
+              "id": { "pattern": "^Q[0-9]{2}$" },
+              "fields": {
+                "type": "object",
+                "required": ["Hintergrund", "Relevanz", "Frage"],
+                "properties": {
+                  "Hintergrund": {},
+                  "Relevanz": {},
+                  "Frage": {}
+                },
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "not": {
+              "required": ["code"],
+              "properties": { "code": { "const": "B" } }
+            }
+          },
+          "then": { "not": { "required": ["blocking"] } }
+        },
+        {
+          "if": {
+            "required": ["blocking"],
+            "properties": { "blocking": { "const": true } }
+          },
+          "then": {
+            "required": ["criterion"],
+            "properties": {
+              "criterion": {
+                "enum": [
+                  "acceptance-criteria-violation",
+                  "regression",
+                  "security-or-data-integrity-risk",
+                  "demonstrated-stability-risk"
+                ]
+              }
+            }
+          },
+          "else": { "not": { "required": ["criterion"] } }
+        }
+      ]
+    }
+  }
+}
