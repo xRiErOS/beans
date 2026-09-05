@@ -143,21 +143,31 @@ func TestEndToEndTriageControl(t *testing.T) {
 	if err := json.NewDecoder(bytes.NewReader(out)).Decode(&promotedByQuery); err != nil {
 		t.Fatalf("decoding list --where JSON: %v; output = %s", err, out)
 	}
+	// Errorf, not Fatalf: this is the one substantive assertion (not a
+	// setup/IO guard) a downstream mutation must be able to fail in
+	// isolation without halting AC-06/AC-07/AC-08's independent checks. A
+	// nil `promoted` guards every block below that needs a single
+	// unambiguous match to inspect.
 	if len(promotedByQuery) != 1 {
-		t.Fatalf("list --where review=... returned %d beans, want 1", len(promotedByQuery))
+		t.Errorf("list --where review=... returned %d beans, want 1", len(promotedByQuery))
 	}
-	promoted := promotedByQuery[0]
-	if promoted.Extra["finding"] != "B01" {
-		t.Errorf("promoted bean finding = %v, want %q", promoted.Extra["finding"], "B01")
+	var promoted *bean.Bean
+	if len(promotedByQuery) == 1 {
+		promoted = promotedByQuery[0]
 	}
+	if promoted != nil {
+		if promoted.Extra["finding"] != "B01" {
+			t.Errorf("promoted bean finding = %v, want %q", promoted.Extra["finding"], "B01")
+		}
 
-	// AC-04: the promoted bean's body carries the selected record's
-	// evidence and source locations unchanged from the artifact.
-	if !contains(promoted.Body, "Batch path dereferences without a nil check.") {
-		t.Errorf("promoted body missing the record's Beschreibung: %q", promoted.Body)
-	}
-	if !contains(promoted.Body, "S01") {
-		t.Errorf("promoted body missing evidence reference S01: %q", promoted.Body)
+		// AC-04: the promoted bean's body carries the selected record's
+		// evidence and source locations unchanged from the artifact.
+		if !contains(promoted.Body, "Batch path dereferences without a nil check.") {
+			t.Errorf("promoted body missing the record's Beschreibung: %q", promoted.Body)
+		}
+		if !contains(promoted.Body, "S01") {
+			t.Errorf("promoted body missing evidence reference S01: %q", promoted.Body)
+		}
 	}
 
 	// AC-06: the rejected pair -- the set difference between the artifact's
@@ -280,7 +290,7 @@ func TestEndToEndTriageControl(t *testing.T) {
 	// AC-09: the artifact path recorded on the promoted bean resolves to the
 	// exact file the artifact-writing step produced, byte-for-byte
 	// unmodified.
-	if promoted.Extra["review"] != artifactPath {
+	if promoted != nil && promoted.Extra["review"] != artifactPath {
 		t.Errorf("promoted bean review = %v, want %q", promoted.Extra["review"], artifactPath)
 	}
 	finalArtifactBytes, err := os.ReadFile(artifactPath)
