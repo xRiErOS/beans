@@ -196,8 +196,9 @@ func TestTagBatchPartialFailure(t *testing.T) {
 // mkTagBean), then the command under test is reached through the real
 // ExecuteC + reportExecutionError path so its stderr is observable.
 // Duplicated here rather than folded into runRootWithArgs itself, because a
-// parallel container (beans-iw5j) edits error_shape_test.go in this same
-// package.
+// parallel container (beans-iw5j) writes promote.go/promote_test.go/
+// register.go in this same package and may depend on error_shape_test.go's
+// helpers staying exactly as they are — not because it edits that file.
 //
 // stdout is captured via os.Pipe, not cobra's SetOut: output.JSON (and
 // PartialFailure through it) writes straight to os.Stdout rather than
