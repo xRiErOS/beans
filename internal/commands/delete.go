@@ -77,7 +77,7 @@ warned and those references will be removed after confirmation. Use -f to skip a
 		// Output results
 		if deleteJSON {
 			if len(deleted) == 1 {
-				return output.Success(deleted[0], "Bean deleted")
+				return output.SuccessSingle(deleted[0])
 			}
 			// Bare array, like every other batch verb — the hand-built
 			// envelope here was the one shape a consumer had to special-case.

@@ -39,25 +39,6 @@ func JSON(resp Response) error {
 	return enc.Encode(resp)
 }
 
-// Success outputs a successful single-bean response.
-func Success(b *bean.Bean, message string) error {
-	return JSON(Response{
-		Success: true,
-		Bean:    b,
-		Message: message,
-	})
-}
-
-// SuccessWithWarnings outputs a successful single-bean response with warnings.
-func SuccessWithWarnings(b *bean.Bean, message string, warnings []string) error {
-	return JSON(Response{
-		Success:  true,
-		Bean:     b,
-		Message:  message,
-		Warnings: warnings,
-	})
-}
-
 // SuccessSingle outputs a single bean directly (no wrapper).
 // This allows intuitive jq usage: beans show --json <id> | jq '.title'
 func SuccessSingle(b *bean.Bean) error {
@@ -88,6 +69,21 @@ func SuccessInit(path string) error {
 		Success: true,
 		Message: "Initialized .beans directory",
 		Path:    path,
+	})
+}
+
+// PartialFailure outputs a failed multi-bean response naming the beans that
+// were already written before the failure struck. It is the one Response
+// literal still built with the envelope: a bare array cannot carry the
+// failure, so batch verbs keep this document for the case where a write
+// loop over several IDs fails partway through.
+func PartialFailure(beans []*bean.Bean, code string, err error) error {
+	return JSON(Response{
+		Success: false,
+		Beans:   beans,
+		Count:   len(beans),
+		Error:   err.Error(),
+		Code:    code,
 	})
 }
 

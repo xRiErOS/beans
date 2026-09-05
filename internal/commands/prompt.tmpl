@@ -68,7 +68,7 @@ beans start <id> [id...]                                # Mark in-progress
 beans tag <id> [id...] --tag cli --remove-tag stale     # Merge tags, one call over n beans
 # Every ID is resolved and policy-checked before the first write: an unknown ID,
 # a repeated ID or a policy violation leaves the whole batch untouched. With one
-# ID the --json shape is unchanged; with several you get a bare array.
+# ID you get the bare bean document; with several a bare array of them.
 
 # Find the next thing to work on, narrowed the way list is narrowed
 beans next --type bug --tag cli          # Highest-priority ready bug tagged cli
@@ -276,10 +276,14 @@ With `--json`, one document goes to stdout and stderr stays empty:
 Codes: `NOT_FOUND`, `NO_BEANS_DIR`, `INVALID_STATUS`, `FILE_ERROR`,
 `VALIDATION_ERROR`, `CONFLICT`, `POLICY_VIOLATION`.
 
-So: under `--json`, parse stdout and branch on `success`; an empty stderr is
-normal and not a sign that something went missing. A success payload never
-carries an `error` key, so the two are unambiguous. No command prints a usage
-block on failure — if you want the flags, ask for them with `--help`.
+So: under `--json`, parse stdout and branch on the presence of an `error` key;
+an empty stderr is normal and not a sign that something went missing. A success
+payload never carries `error`, and a failure always does, so the two are
+unambiguous. Do not branch on `success` — a successful mutation returns the bare
+bean document (or a bare array), which carries no `success` key at all; only the
+failure document, `check`, and the message-only verbs (`init`, `archive`, `next`
+with no match) still have one. No command prints a usage block on failure — if you want the
+flags, ask for them with `--help`.
 
 A batch verb (`complete`, `scrap`, `start`, `tag`, `delete`) that fails partway
 through returns `{"success": false, "beans": [...], "count": n, ...}` — the

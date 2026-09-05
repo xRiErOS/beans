@@ -76,7 +76,7 @@ the first bean is written, so an unknown ID leaves the whole batch alone.`,
 		}
 
 		return emitBatchSuccess(scrapJSON, done,
-			func(b *bean.Bean) error { return output.Success(b, "Bean scrapped") },
+			func(b *bean.Bean) error { return output.SuccessSingle(b) },
 			func(b *bean.Bean) string {
 				return ui.Success.Render("Scrapped ") + ui.ID.Render(b.ID) + " " + b.Title
 			})

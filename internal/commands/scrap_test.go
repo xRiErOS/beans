@@ -1,7 +1,6 @@
 package commands
 
 import (
-	"bytes"
 	"encoding/json"
 	"io"
 	"os"
@@ -9,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/xRiErOS/beans/pkg/config"
@@ -136,70 +134,64 @@ func TestScrapRejectsUnknownID(t *testing.T) {
 	}
 }
 
-// TestScrapJSONOutput verifies that --json flag produces valid JSON with expected shape.
+// TestScrapJSONOutput verifies D05/D12: --json returns the bare bean
+// document directly, with no {success,bean,message} envelope.
 func TestScrapJSONOutput(t *testing.T) {
 	b := setupScrapTest(t)
 	resetScrapFlags(t)
+	scrapJSON = true
+	scrapReason = "Test reason for scrapping"
 
-	// Capture stdout to verify JSON output
+	out := captureScrapStdout(t, func() {
+		if err := scrapCmd.RunE(scrapCmd, []string{b.ID}); err != nil {
+			t.Fatalf("scrapCmd.RunE() error = %v", err)
+		}
+	})
+
+	var got struct {
+		ID     string `json:"id"`
+		Status string `json:"status"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		t.Fatalf("decoding JSON: %v; output = %s", err, out)
+	}
+	if got.ID != b.ID {
+		t.Errorf("bare bean id = %q, want %q", got.ID, b.ID)
+	}
+	if got.Status != "scrapped" {
+		t.Errorf("bare bean status = %q, want %q", got.Status, "scrapped")
+	}
+
+	// Also verify the bean was actually persisted with correct status
+	persisted, err := core.Get(b.ID)
+	if err != nil {
+		t.Fatalf("core.Get() error = %v", err)
+	}
+	if persisted.Status != "scrapped" {
+		t.Errorf("persisted bean status = %q, want %q", persisted.Status, "scrapped")
+	}
+}
+
+// captureScrapStdout redirects os.Stdout for the duration of fn and returns
+// everything written to it.
+func captureScrapStdout(t *testing.T, fn func()) []byte {
+	t.Helper()
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatalf("os.Pipe() error = %v", err)
 	}
-
-	oldStdout := os.Stdout
+	orig := os.Stdout
 	os.Stdout = w
-
-	scrapJSON = true
-	scrapReason = "Test reason for scrapping"
-	runErr := scrapCmd.RunE(scrapCmd, []string{b.ID})
-
-	os.Stdout = oldStdout
+	fn()
+	os.Stdout = orig
 	if err := w.Close(); err != nil {
 		t.Fatalf("closing pipe write end: %v", err)
 	}
-
-	captured, err := io.ReadAll(r)
+	data, err := io.ReadAll(r)
 	if err != nil {
 		t.Fatalf("reading captured stdout: %v", err)
 	}
-
-	if runErr != nil {
-		t.Fatalf("scrapCmd.RunE() error = %v", runErr)
-	}
-
-	// Parse the JSON output
-	dec := json.NewDecoder(bytes.NewReader(captured))
-	var resp output.Response
-	if err := dec.Decode(&resp); err != nil {
-		t.Fatalf("decoding JSON output error = %v; output = %s", err, captured)
-	}
-
-	// Verify the response structure
-	if !resp.Success {
-		t.Errorf("response success = false, want true")
-	}
-	if resp.Bean == nil {
-		t.Errorf("response bean = nil, want *bean.Bean")
-	}
-	if resp.Bean != nil && resp.Bean.ID != b.ID {
-		t.Errorf("response bean ID = %q, want %q", resp.Bean.ID, b.ID)
-	}
-	if resp.Bean != nil && resp.Bean.Status != "scrapped" {
-		t.Errorf("response bean status = %q, want %q", resp.Bean.Status, "scrapped")
-	}
-	if resp.Message != "Bean scrapped" {
-		t.Errorf("response message = %q, want %q", resp.Message, "Bean scrapped")
-	}
-
-	// Also verify the bean was actually persisted with correct status
-	got, err := core.Get(b.ID)
-	if err != nil {
-		t.Fatalf("core.Get() error = %v", err)
-	}
-	if got.Status != "scrapped" {
-		t.Errorf("persisted bean status = %q, want %q", got.Status, "scrapped")
-	}
+	return data
 }
 
 // mkScrapBean adds another bean to the store set up by setupScrapTest.

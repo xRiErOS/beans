@@ -97,7 +97,7 @@ Every command failure surfaces in exactly one place, and which place depends on 
 - Without `--json`: two lines to stderr, empty stdout — `Error: <message>` followed by `Run '<command> --help' for usage.`.
 - With `--json`: one JSON error document to stdout, empty stderr — `{"success": false, "error": "<message>", "code": "<CODE>"}`. Errors that occur before JSON handling, such as loading an unreadable config or missing store, still surface on stderr.
 
-Successful JSON shapes vary by command. `list`, `show`, `progress`, and `roadmap` return domain data directly; `check` has its own `success` plus diagnostic fields; `update` returns the updated bean; and lifecycle mutations commonly return a success envelope. Agents should branch on process exit status first, parse the command-specific success shape second, and use `error` plus `code` for a JSON failure.
+Successful JSON shapes carry domain data, not a wrapper. `list`, `show`, `progress`, and `roadmap` return domain data directly; `check` has its own `success` plus diagnostic fields; and the bean-mutating commands (`create`, `update`, `start`, `complete`, `scrap`, `delete`, `tag`, `order`) return the affected bean for a single-bean call and a bare array for a multi-bean one. `init`, `archive`, and a `next` with no match return a message envelope, having no bean to name. Agents should branch on process exit status first, parse the command-specific success shape second, and use `error` plus `code` for a JSON failure — not the absence of a `success` key, which a successful bean document never has.
 
 Error codes: `NOT_FOUND`, `NO_BEANS_DIR`, `INVALID_STATUS`, `FILE_ERROR`, `VALIDATION_ERROR`, `CONFLICT`, `POLICY_VIOLATION`.
 

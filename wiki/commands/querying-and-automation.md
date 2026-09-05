@@ -47,14 +47,15 @@ The schema itself — every `Query`, `Mutation`, and `Subscription` field, with 
 
 ## JSON output contract
 
-Successful JSON payloads are command-specific. `list`, `show`, `progress`, and `roadmap` return their domain model directly; `check` returns its own `success` plus diagnostic fields; `update --json` returns the updated bean directly; and rename dry runs return a rename plan. Mutating lifecycle commands such as `create`, `start`, `complete`, `scrap`, `archive`, `delete`, `tag`, and `order` use a success envelope with command-appropriate `bean`, `beans`, `message`, or `warnings` fields.
+Successful JSON payloads carry the domain model, not a wrapper. `list`, `show`, `progress`, and `roadmap` return their domain model directly; `check` returns its own `success` plus diagnostic fields; and rename dry runs return a rename plan. The bean-mutating commands `create`, `update`, `start`, `complete`, `scrap`, `delete`, `tag`, and `order` return the affected bean itself when the call names one bean, and a bare array of beans when it names several — the same shape `beans show --json` emits, so `jq -r .id` means the same thing at every call site. Only `init`, `archive`, and a `next` with no match still return a message envelope (`{"success": true, "message": "...", "path": "..."}` for `init`, without `path` for the other two), because they have no bean to name.
 
-For example, a lifecycle mutation can return:
+For example, a lifecycle mutation on one bean returns:
 
 ```json
 {
-  "success": true,
-  "bean": { "...": "the affected bean" }
+  "id": "beans-ab12",
+  "title": "the affected bean",
+  "status": "completed"
 }
 ```
 

@@ -118,7 +118,8 @@ func TestCompleteRejectsUnknownID(t *testing.T) {
 	}
 }
 
-// TestCompleteJSONOutput verifies that --json flag produces valid JSON with expected shape.
+// TestCompleteJSONOutput verifies that --json flag produces valid JSON with
+// expected shape, and that the bean it names really was written to disk.
 func TestCompleteJSONOutput(t *testing.T) {
 	b := setupCompleteTest(t)
 	resetCompleteFlags(t)
@@ -149,28 +150,20 @@ func TestCompleteJSONOutput(t *testing.T) {
 		t.Fatalf("completeCmd.RunE() error = %v", runErr)
 	}
 
-	// Parse the JSON output
+	// Parse the JSON output: D05 makes this the bare bean document, the same
+	// shape `beans show --json` emits, with no envelope around it.
 	dec := json.NewDecoder(bytes.NewReader(captured))
-	var resp output.Response
-	if err := dec.Decode(&resp); err != nil {
+	var doc bean.Bean
+	if err := dec.Decode(&doc); err != nil {
 		t.Fatalf("decoding JSON output error = %v; output = %s", err, captured)
 	}
 
 	// Verify the response structure
-	if !resp.Success {
-		t.Errorf("response success = false, want true")
+	if doc.ID != b.ID {
+		t.Errorf("response bean ID = %q, want %q", doc.ID, b.ID)
 	}
-	if resp.Bean == nil {
-		t.Errorf("response bean = nil, want *bean.Bean")
-	}
-	if resp.Bean != nil && resp.Bean.ID != b.ID {
-		t.Errorf("response bean ID = %q, want %q", resp.Bean.ID, b.ID)
-	}
-	if resp.Bean != nil && resp.Bean.Status != "completed" {
-		t.Errorf("response bean status = %q, want %q", resp.Bean.Status, "completed")
-	}
-	if resp.Message != "Bean completed" {
-		t.Errorf("response message = %q, want %q", resp.Message, "Bean completed")
+	if doc.Status != "completed" {
+		t.Errorf("response bean status = %q, want %q", doc.Status, "completed")
 	}
 
 	// Also verify the bean was actually persisted with correct status
@@ -481,10 +474,10 @@ func TestCompletePolicySatisfiedByCommitFlag(t *testing.T) {
 	}
 }
 
-// TestCompleteJSONShape pins E5 down: one ID keeps the shape earlier releases
-// emitted, several IDs give a bare array.
+// TestCompleteJSONShape pins D05 down: one ID gives a bare bean document,
+// several IDs give a bare array.
 func TestCompleteJSONShape(t *testing.T) {
-	t.Run("single stays an envelope", func(t *testing.T) {
+	t.Run("single gives a bare bean", func(t *testing.T) {
 		b := setupCompleteTest(t)
 		resetCompleteFlags(t)
 		completeJSON = true
@@ -495,17 +488,14 @@ func TestCompleteJSONShape(t *testing.T) {
 			}
 		})
 
-		var resp struct {
-			Success bool `json:"success"`
-			Bean    struct {
-				ID string `json:"id"`
-			} `json:"bean"`
+		var got struct {
+			ID string `json:"id"`
 		}
-		if err := json.Unmarshal(out, &resp); err != nil {
+		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatalf("decoding JSON: %v; output = %s", err, out)
 		}
-		if !resp.Success || resp.Bean.ID != b.ID {
-			t.Errorf("single-ID JSON = %s, want the unchanged envelope for %s", out, b.ID)
+		if got.ID != b.ID {
+			t.Errorf("bare bean = %s, want id %s", out, b.ID)
 		}
 	})
 
