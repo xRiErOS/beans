@@ -80,6 +80,64 @@ func TestPrimeCmdDocumentsManualOrdering(t *testing.T) {
 	}
 }
 
+// beans-spo2 added the "## Review Findings and Attachments" section as the
+// single authoritative source for the attachments convention, the real
+// `beans promote` invocation, and rename's attachment carry-along -- every
+// other surface (starting with skill:use-beans) cites this heading instead
+// of restating its content.
+func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	for _, want := range []string{
+		"## Review Findings and Attachments",
+		".beans/attachments/<bean-id>/",
+		"docs/archive/<slug>/",
+		"beans promote <artifact> <finding-id> [<finding-id>...]",
+		"review=<artifact-path>",
+		"finding=<finding-id>",
+		"beans list --where review=<path>",
+		"beans rename <id> <new-id>",
+		"--suffix <suffix>",
+		"beans rename --prefix <prefix>",
+		"--dry-run",
+		"Archiving a bean leaves its attachment directory in place",
+		"`beans archive` itself is a batch verb with no `<id>` argument",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("prime output missing %q (review findings/attachments undocumented)", want)
+		}
+	}
+}
+
+// reviewFindingsSection extracts the "## Review Findings and Attachments"
+// section of a rendered prime prompt (up to the next "## " heading), the
+// same pattern issueTypesSection uses below, so a check confined to this
+// section cannot false-positive on unrelated template syntax elsewhere in
+// the document.
+func reviewFindingsSection(t *testing.T, out string) string {
+	t.Helper()
+	const heading = "## Review Findings and Attachments"
+	start := strings.Index(out, heading)
+	if start == -1 {
+		t.Fatalf("prompt has no %s section:\n%s", heading, out)
+	}
+	rest := out[start+len(heading):]
+	if end := strings.Index(rest, "\n## "); end != -1 {
+		rest = rest[:end]
+	}
+	return rest
+}
+
+// AC7: beans-spo2's Scope rules out a new promptData field or a new
+// {{...}} directive for these facts, since none of them vary by project
+// config -- the section renders as static prose only.
+func TestPrimeReviewFindingsSectionHasNoTemplateDirective(t *testing.T) {
+	out := renderPrimeTemplate(t)
+	section := reviewFindingsSection(t, out)
+	if strings.Contains(section, "{{") {
+		t.Errorf("Review Findings and Attachments section contains a template directive:\n%s", section)
+	}
+}
+
 // Task 7 (beans-9m5y) replaced the old beans update -s <status> lifecycle
 // prose with dedicated wrapper commands. The prime template is the only
 // interface most agents read, so each recipe must be documented by name
