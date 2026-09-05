@@ -203,6 +203,35 @@ Any other required field needs a plain `--set <field>=<value>` in the same write
 Surface every policy violation across the workspace: `beans check --strict` (warnings show by default; `--strict` counts them as issues and exits non-zero). A bean already sitting in a gated status without the field (e.g. pre-policy data) can still receive maintenance writes -- rename, body edits -- as long as its status doesn't change; the policy only gates the transition itself.
 {{end}}
 
+## Review Findings and Attachments
+
+`.beans/attachments/<bean-id>/` carries machine evidence artifacts only --
+findings documents, diffs, guard drafts. Human knowledge (`PLAN`, `DESIGN`,
+`DECISIONS`, `REQUIREMENTS`) drains to `docs/archive/<slug>/` on closure and
+is cited by path from the bean body, never duplicated into the attachments
+directory. Nothing in the store enforces this convention -- there is no
+`check` finding, write-time guard, or schema constraint for it; it holds by
+agreement only.
+
+Promote selected findings from a review artifact into beans:
+
+```bash
+beans promote <artifact> <finding-id> [<finding-id>...]
+```
+
+Every bean it creates carries `review=<artifact-path>` (the artifact path
+exactly as given on the command line) and `finding=<finding-id>` as extra
+front matter -- the pair a rerun checks before creating a duplicate, and the
+pair `beans list --where review=<path>` queries to audit everything promoted
+from one artifact.
+
+`beans rename` carries a bean's attachment directory along under all three
+ID-changing modes -- `beans rename <id> <new-id>`, `beans rename <id>
+--suffix <suffix>`, and `beans rename --prefix <prefix>` -- and shows the
+move in `--dry-run` output as `attachments: <old-path> -> <new-path>`.
+`beans archive <id>` leaves the directory in place: archiving does not
+change the bean's ID, so the directory it is keyed by stays valid.
+
 ## Manual Ordering
 
 Beans carry an optional `order` field (a fractional-index string) for manual sequencing among siblings under the same parent.
