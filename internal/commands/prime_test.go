@@ -99,7 +99,8 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 		"--suffix <suffix>",
 		"beans rename --prefix <prefix>",
 		"--dry-run",
-		"beans archive <id>",
+		"Archiving a bean leaves its attachment directory in place",
+		"`beans archive` itself is a batch verb with no `<id>` argument",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prime output missing %q (review findings/attachments undocumented)", want)

@@ -229,8 +229,11 @@ from one artifact.
 ID-changing modes -- `beans rename <id> <new-id>`, `beans rename <id>
 --suffix <suffix>`, and `beans rename --prefix <prefix>` -- and shows the
 move in `--dry-run` output as `attachments: <old-path> -> <new-path>`.
-`beans archive <id>` leaves the directory in place: archiving does not
-change the bean's ID, so the directory it is keyed by stays valid.
+Archiving a bean leaves its attachment directory in place: archiving does
+not change the bean's ID, so the directory it is keyed by stays valid --
+`beans archive` itself is a batch verb with no `<id>` argument, moving
+every bean already in status `completed`/`scrapped` to `.beans/archive/`
+in one call.
 
 ## Manual Ordering
 
