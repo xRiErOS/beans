@@ -91,12 +91,19 @@ func TestBeanIDCandidatesNeverExposeBody(t *testing.T) {
 }
 
 // AC-03/SC-03 (structural class): a substring grep is undergoverned for an
-// absence criterion, so this parses completion.go's AST and asserts that no
-// call inside beanIDCandidates names a body-loading/parsing operation
-// (Get, GetFromArchive, Render, ReadFile, loadFromDisk) -- it may only walk
-// the already-resident core.All() slice.
+// absence criterion, so this parses completion.go's AST and asserts that
+// beanIDCandidates neither calls a body-loading/parsing operation (Get,
+// GetFromArchive, Render, ReadFile, loadFromDisk) nor references a bean's
+// Body field directly -- it may only walk the already-resident
+// core.All() slice and read ID/Type/Title/Status. The Body-selector check
+// exists because the call-name check alone does not cover a mutation that
+// appends b.Body directly (a field read, not a call): confirmed by running
+// that exact mutation, which left the call-name check green and only the
+// substring test (TestBeanIDCandidatesNeverExposeBody) red -- SC-03 was
+// covered only by the two tests together, not by this one alone, until
+// this selector check closed the gap.
 func TestBeanIDCandidatesSourceNeverCallsBodyLoader(t *testing.T) {
-	disallowed := map[string]bool{
+	disallowedCalls := map[string]bool{
 		"Get":              true,
 		"GetFromArchive":   true,
 		"Render":           true,
@@ -125,19 +132,22 @@ func TestBeanIDCandidatesSourceNeverCallsBodyLoader(t *testing.T) {
 	}
 
 	ast.Inspect(found.Body, func(n ast.Node) bool {
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
-		var name string
-		switch fn := call.Fun.(type) {
+		switch node := n.(type) {
+		case *ast.CallExpr:
+			var name string
+			switch fn := node.Fun.(type) {
+			case *ast.SelectorExpr:
+				name = fn.Sel.Name
+			case *ast.Ident:
+				name = fn.Name
+			}
+			if disallowedCalls[name] {
+				t.Errorf("beanIDCandidates calls disallowed body-loading function %q", name)
+			}
 		case *ast.SelectorExpr:
-			name = fn.Sel.Name
-		case *ast.Ident:
-			name = fn.Name
-		}
-		if disallowed[name] {
-			t.Errorf("beanIDCandidates calls disallowed body-loading function %q", name)
+			if node.Sel.Name == "Body" {
+				t.Errorf("beanIDCandidates references a bean's Body field directly")
+			}
 		}
 		return true
 	})
@@ -162,32 +172,38 @@ func TestCompletionUnboundedNeverStops(t *testing.T) {
 }
 
 // AC-05: a bounded verb stops offering candidates once its declared arity
-// is satisfied. Measured at the three points that matter -- one position
-// under the boundary, at it, and one past it -- because only the boundary
-// itself proves anything (BOUNDARIES evidence cited in the bean).
+// is satisfied. Measured at the three points that matter for each n -- one
+// position under the boundary, at it, and one past it -- because only the
+// boundary itself proves anything (BOUNDARIES evidence cited in the bean).
+// n=1 is the value every wired verb actually ships (order, update, graph,
+// progress, roadmap, rename all call completionUpTo(1)); n=2 is measured
+// too, on the same shared primitive, to show the logic generalizes rather
+// than happening to work at the one value that ships.
 func TestCompletionUpToStopsAtBoundary(t *testing.T) {
 	setupCompletionTest(t, 4)
 
-	fn := completionUpTo(2)
-	cases := []struct {
-		argc      int
-		wantEmpty bool
-	}{
-		{argc: 1, wantEmpty: false}, // under the boundary: still offering
-		{argc: 2, wantEmpty: true},  // at the boundary: arity satisfied
-		{argc: 3, wantEmpty: true},  // past the boundary: stays stopped
-	}
-	for _, tc := range cases {
-		args := make([]string, tc.argc)
-		got, directive := fn(nil, args, "")
-		if tc.wantEmpty && len(got) != 0 {
-			t.Errorf("argc=%d: got %d candidates, want 0", tc.argc, len(got))
+	for _, n := range []int{1, 2} {
+		fn := completionUpTo(n)
+		cases := []struct {
+			argc      int
+			wantEmpty bool
+		}{
+			{argc: n - 1, wantEmpty: false}, // under the boundary: still offering
+			{argc: n, wantEmpty: true},      // at the boundary: arity satisfied
+			{argc: n + 1, wantEmpty: true},  // past the boundary: stays stopped
 		}
-		if !tc.wantEmpty && len(got) == 0 {
-			t.Errorf("argc=%d: got 0 candidates, want > 0", tc.argc)
-		}
-		if directive != cobra.ShellCompDirectiveNoFileComp {
-			t.Errorf("argc=%d: directive = %v, want ShellCompDirectiveNoFileComp", tc.argc, directive)
+		for _, tc := range cases {
+			args := make([]string, tc.argc)
+			got, directive := fn(nil, args, "")
+			if tc.wantEmpty && len(got) != 0 {
+				t.Errorf("n=%d argc=%d: got %d candidates, want 0", n, tc.argc, len(got))
+			}
+			if !tc.wantEmpty && len(got) == 0 {
+				t.Errorf("n=%d argc=%d: got 0 candidates, want > 0", n, tc.argc)
+			}
+			if directive != cobra.ShellCompDirectiveNoFileComp {
+				t.Errorf("n=%d argc=%d: directive = %v, want ShellCompDirectiveNoFileComp", n, tc.argc, directive)
+			}
 		}
 	}
 }
