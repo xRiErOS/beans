@@ -35,7 +35,7 @@ func NewIndex() (*Index, error) {
 		return nil, err
 	}
 
-	return &Index{index: idx}, nil
+	return &Index{index: idx, etags: map[string]string{}}, nil
 }
 
 // buildIndexMapping creates the Bleve index mapping for bean documents.
@@ -78,9 +78,21 @@ func (idx *Index) Close() error {
 	return err
 }
 
+// staleKey is the freshness signal Sync/IndexBean record and compare: the
+// bean's ETag alone is blind to a rename or move, because Slug/Path are
+// excluded from the rendered front matter (`yaml:"-"`) and therefore never
+// affect ETag. Folding Path into the key means a `beans rename` or a
+// `git checkout` that only changes the filename is still detected as a
+// change worth reindexing, even though the file's bytes (and thus the ETag
+// component) did not move.
+func staleKey(b *bean.Bean) string {
+	return b.ETag() + "\x1f" + b.Path
+}
+
 // IndexBean adds or updates a bean in the search index. For a persistent
-// index this also records the bean's current ETag in the sidecar, so a
-// later Sync in another process recognizes this bean as already current.
+// index this also records the bean's current staleness key in the sidecar,
+// so a later Sync in another process recognizes this bean as already
+// current.
 func (idx *Index) IndexBean(b *bean.Bean) error {
 	doc := beanDocument{
 		ID:    b.ID,
@@ -91,8 +103,8 @@ func (idx *Index) IndexBean(b *bean.Bean) error {
 	if err := idx.index.Index(b.ID, doc); err != nil {
 		return err
 	}
+	idx.etags[b.ID] = staleKey(b)
 	if idx.persistent {
-		idx.etags[b.ID] = b.ETag()
 		return saveETags(idx.dir, idx.etags)
 	}
 	return nil
@@ -104,8 +116,8 @@ func (idx *Index) DeleteBean(id string) error {
 	if err := idx.index.Delete(id); err != nil {
 		return err
 	}
+	delete(idx.etags, id)
 	if idx.persistent {
-		delete(idx.etags, id)
 		return saveETags(idx.dir, idx.etags)
 	}
 	return nil
@@ -164,31 +176,36 @@ func (idx *Index) IndexBeans(beans []*bean.Bean) error {
 }
 
 // Sync brings the index up to date with the given beans, indexing only what
-// changed since the last Sync (AC-02): a bean whose ETag differs from the
-// sidecar's recorded value -- new, edited by this process, or edited on disk
-// by another process or an editor since this index was last synced -- is
-// reindexed; a bean no longer present is removed. ETag, not mtime, is the
-// staleness signal (AC-03). An in-memory index has no sidecar to diff
-// against and is rebuilt in full, matching its pre-persistence behavior.
+// changed since the last Sync (AC-02): a bean whose staleness key (ETag plus
+// Path, see staleKey) differs from the recorded value -- new, edited by this
+// process, or edited on disk by another process or an editor since this
+// index was last synced -- is reindexed; a bean no longer present is
+// removed. ETag, not mtime, is the staleness signal (AC-03); Path is folded
+// in because a rename alone never changes ETag (AC-02).
+//
+// The diff runs the same way for a persistent and an in-memory index: only
+// the persisted sidecar write at the end is conditional. An in-memory index
+// starts with an empty idx.etags (see NewIndex), so its first Sync in a
+// fresh process still reindexes everything; within one process, a later
+// Sync on the same Index is incremental exactly like the persistent case,
+// including retracting beans no longer present -- swapping the underlying
+// Bleve index instead would race Core.Search, which reads idx.index after
+// releasing its lock.
 func (idx *Index) Sync(beans []*bean.Bean) error {
-	if !idx.persistent {
-		return idx.IndexBeans(beans)
-	}
-
 	seen := make(map[string]struct{}, len(beans))
 	batch := idx.index.NewBatch()
 	dirty := false
 	for _, b := range beans {
 		seen[b.ID] = struct{}{}
-		etag := b.ETag()
-		if idx.etags[b.ID] == etag {
+		key := staleKey(b)
+		if idx.etags[b.ID] == key {
 			continue
 		}
 		doc := beanDocument{ID: b.ID, Slug: b.Slug, Title: b.Title, Body: b.Body}
 		if err := batch.Index(b.ID, doc); err != nil {
 			return err
 		}
-		idx.etags[b.ID] = etag
+		idx.etags[b.ID] = key
 		dirty = true
 	}
 	for id := range idx.etags {
@@ -207,5 +224,8 @@ func (idx *Index) Sync(beans []*bean.Bean) error {
 			return err
 		}
 	}
-	return saveETags(idx.dir, idx.etags)
+	if idx.persistent {
+		return saveETags(idx.dir, idx.etags)
+	}
+	return nil
 }

@@ -2,7 +2,6 @@ package search
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,14 +47,16 @@ func Open(dir string) (*Index, error) {
 	}, nil
 }
 
-// openOrCreatePersistent opens the Bleve index at dir, creating it (and a
-// fresh, empty ETag sidecar) if absent. A corrupt on-disk index is treated as
-// absent: it is discarded and rebuilt, so a damaged persisted index heals
-// itself on the next open (AC-05) instead of wedging every future search.
+// openOrCreatePersistent opened dir's Bleve index. Note there is no separate
+// "absent" case: Open always MkdirAll's dir first, so bleve.Open on a first
+// use sees an *existing, empty* directory and reports ErrorIndexMetaMissing,
+// not ErrorIndexPathDoesNotExist -- verified directly against this bleve
+// version (v2.5.6) rather than assumed. A first-ever open and a corrupt
+// leftover therefore take the same path below: any non-nil error wipes the
+// directory and creates fresh.
 func openOrCreatePersistent(dir string) (bleve.Index, map[string]string, error) {
 	idx, err := bleve.Open(dir)
-	switch {
-	case err == nil:
+	if err == nil {
 		etags, loadErr := loadETags(dir)
 		if loadErr != nil {
 			// Sidecar missing or unreadable but the Bleve index itself
@@ -65,23 +66,18 @@ func openOrCreatePersistent(dir string) (bleve.Index, map[string]string, error) 
 			etags = map[string]string{}
 		}
 		return idx, etags, nil
-	case errors.Is(err, bleve.ErrorIndexPathDoesNotExist):
-		idx, createErr := bleve.New(dir, buildIndexMapping())
-		if createErr != nil {
-			return nil, nil, createErr
-		}
-		return idx, map[string]string{}, nil
-	default:
-		// Corrupt or otherwise unopenable: wipe and rebuild fresh.
-		if rmErr := removeContents(dir); rmErr != nil {
-			return nil, nil, fmt.Errorf("clearing corrupt index at %s: %w", dir, rmErr)
-		}
-		idx, createErr := bleve.New(dir, buildIndexMapping())
-		if createErr != nil {
-			return nil, nil, createErr
-		}
-		return idx, map[string]string{}, nil
 	}
+
+	// Absent (never created) or corrupt (leftover from a crash): wipe and
+	// (re)build fresh either way (AC-05).
+	if rmErr := removeContents(dir); rmErr != nil {
+		return nil, nil, fmt.Errorf("clearing index at %s: %w", dir, rmErr)
+	}
+	fresh, createErr := bleve.New(dir, buildIndexMapping())
+	if createErr != nil {
+		return nil, nil, createErr
+	}
+	return fresh, map[string]string{}, nil
 }
 
 // removeContents deletes everything inside dir (but not dir itself, which

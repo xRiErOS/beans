@@ -62,12 +62,15 @@ func TestIndexDir_DistinctPerStore(t *testing.T) {
 
 // TestSearchIndexField_OnlyTouchedByKnownSeams is the structural half of
 // AC-06 ("no command other than search depends on the index"): it parses
-// core.go and asserts the Core.searchIndex field is referenced only inside
-// the known, already-audited seams -- the lazy initializer, Search itself,
-// the incremental maintenance hooks on Create/Update/Delete, the resync on
-// reload, and Close. Any other function touching it (in particular anything
-// backing list/roadmap/milestones/progress/next/show/graph) fails this test
-// before it ever reaches a behavioral difference.
+// every non-test source file in this package -- not just core.go, so a
+// dependency introduced from another file or a free function in the
+// package would still be caught -- and asserts the Core.searchIndex field
+// is referenced only inside the known, already-audited seams: the lazy
+// initializer, Search itself, the incremental maintenance hooks on
+// Create/Update/Delete, the resync on reload, and Close. Any other
+// function touching it (in particular anything backing
+// list/roadmap/milestones/progress/next/show/graph) fails this test before
+// it ever reaches a behavioral difference.
 func TestSearchIndexField_OnlyTouchedByKnownSeams(t *testing.T) {
 	allowed := map[string]bool{
 		"ensureSearchIndexLocked": true,
@@ -77,36 +80,62 @@ func TestSearchIndexField_OnlyTouchedByKnownSeams(t *testing.T) {
 		"Update":                  true,
 		"Delete":                  true,
 		"Close":                   true,
+		// The widened, whole-package scan also caught fsnotify-driven
+		// incremental maintenance in watcher.go/worktree_watcher.go for
+		// long-running processes (beans-serve, the TUI): the same
+		// best-effort, nil-gated IndexBean/DeleteBean pattern as
+		// Create/Update/Delete, just triggered by a filesystem event
+		// instead of a direct API call. Not a correctness dependency for
+		// any non-search command: errors are logged, never surfaced.
+		"handleChanges":            true,
+		"loadWorktreeBeansInitial": true,
+		"handleWorktreeChanges":    true,
+	}
+
+	entries, err := os.ReadDir(".")
+	if err != nil {
+		t.Fatalf("ReadDir() error = %v", err)
 	}
 
 	fset := token.NewFileSet()
-	file, err := parser.ParseFile(fset, "core.go", nil, 0)
-	if err != nil {
-		t.Fatalf("ParseFile() error = %v", err)
-	}
-
 	var offenders []string
-	for _, decl := range file.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil {
+	scanned := 0
+	for _, entry := range entries {
+		name := entry.Name()
+		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
 			continue
 		}
-		name := fn.Name.Name
-		touches := false
-		ast.Inspect(fn.Body, func(n ast.Node) bool {
-			sel, ok := n.(*ast.SelectorExpr)
-			if ok && sel.Sel.Name == "searchIndex" {
-				touches = true
-			}
-			return true
-		})
-		if touches && !allowed[name] {
-			offenders = append(offenders, name)
+		file, err := parser.ParseFile(fset, name, nil, 0)
+		if err != nil {
+			t.Fatalf("ParseFile(%q) error = %v", name, err)
 		}
+		scanned++
+
+		for _, decl := range file.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Body == nil {
+				continue
+			}
+			fnName := fn.Name.Name
+			touches := false
+			ast.Inspect(fn.Body, func(n ast.Node) bool {
+				sel, ok := n.(*ast.SelectorExpr)
+				if ok && sel.Sel.Name == "searchIndex" {
+					touches = true
+				}
+				return true
+			})
+			if touches && !allowed[fnName] {
+				offenders = append(offenders, name+":"+fnName)
+			}
+		}
+	}
+	if scanned == 0 {
+		t.Fatal("scanned zero source files -- test is not exercising the package")
 	}
 
 	if len(offenders) > 0 {
-		t.Fatalf("Core methods outside the audited search-index seams reference c.searchIndex: %v", offenders)
+		t.Fatalf("functions outside the audited search-index seams reference c.searchIndex: %v", offenders)
 	}
 }
 

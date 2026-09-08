@@ -261,10 +261,11 @@ func TestSync_UsesETagNotUpdatedAt(t *testing.T) {
 	}
 }
 
-// TestSync_InMemoryIndexAlwaysRebuildsFully documents the fallback index's
-// behavior: with no sidecar to diff against, Sync is a full rebuild, same as
-// IndexBeans, matching pre-persistence behavior exactly.
-func TestSync_InMemoryIndexAlwaysRebuildsFully(t *testing.T) {
+// TestSync_InMemoryIndexRebuildsColdFromScratch documents the fallback
+// index's cold-start behavior: a fresh in-memory index has an empty
+// idx.etags (see NewIndex), so its first Sync in a new process indexes
+// everything, same as IndexBeans.
+func TestSync_InMemoryIndexRebuildsColdFromScratch(t *testing.T) {
 	idx := setupTestIndex(t)
 	b := beanWith("aaa1", "Title", "body")
 	if err := idx.Sync([]*bean.Bean{b}); err != nil {
@@ -276,5 +277,112 @@ func TestSync_InMemoryIndexAlwaysRebuildsFully(t *testing.T) {
 	}
 	if len(results) != 1 {
 		t.Fatalf("Search() = %v, want [aaa1]", results)
+	}
+}
+
+// TestSync_InMemoryIndexRetractsDeletedBeans closes the fallback-path gap a
+// review found: the in-memory index used under AC-07's contention fallback
+// must retract a bean no longer present on a later Sync (a reload while
+// contended is a reachable sequence), exactly like the persistent path.
+func TestSync_InMemoryIndexRetractsDeletedBeans(t *testing.T) {
+	idx := setupTestIndex(t)
+	a := beanWith("aaa1", "Keep Me", "x")
+	b := beanWith("bbb2", "Delete Me", "x")
+	if err := idx.Sync([]*bean.Bean{a, b}); err != nil {
+		t.Fatalf("Sync() #1 error = %v", err)
+	}
+
+	if err := idx.Sync([]*bean.Bean{a}); err != nil {
+		t.Fatalf("Sync() #2 error = %v", err)
+	}
+
+	results, err := idx.Search("Delete", 0)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) != 0 {
+		t.Fatalf("Search() = %v, want none: the in-memory fallback did not retract a deleted bean", results)
+	}
+}
+
+// TestSync_SidecarPersistsAcrossReopen proves the sidecar write at the end
+// of Sync actually lands on disk and is read back: without it, a second
+// process (a fresh Index over the same directory) would start with an empty
+// idx.etags and reindex everything it sees, silently losing AC-01's warm
+// path. A hand-planted sentinel on the reopened index would then be
+// overwritten by that spurious reindex; this test asserts it survives.
+func TestSync_SidecarPersistsAcrossReopen(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "idx")
+
+	b := beanWith("aaa1", "Persisted Sync", "content")
+	idx1, err := Open(dir)
+	if err != nil {
+		t.Fatalf("Open() #1 error = %v", err)
+	}
+	if err := idx1.Sync([]*bean.Bean{b}); err != nil {
+		t.Fatalf("Sync() #1 error = %v", err)
+	}
+	if err := idx1.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	idx2 := mustOpen(t, dir)
+	if err := idx2.index.Index("aaa1", beanDocument{ID: "aaa1", Title: "SENTINEL-UNTOUCHED"}); err != nil {
+		t.Fatalf("planting sentinel error = %v", err)
+	}
+
+	// Same bean, unchanged since before Close: a correctly loaded sidecar
+	// means Sync recognizes it as current and leaves the sentinel alone.
+	if err := idx2.Sync([]*bean.Bean{b}); err != nil {
+		t.Fatalf("Sync() #2 error = %v", err)
+	}
+
+	results, err := idx2.Search("SENTINEL-UNTOUCHED", 0)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) != 1 {
+		t.Fatalf("Sync() on reopen reindexed despite an unchanged bean; the ETag sidecar was not persisted/loaded, sentinel lost, got %v", results)
+	}
+}
+
+// TestSync_ReindexesOnPathChangeEvenWithUnchangedETag proves the fix for the
+// rename hole in AC-02: Slug/Path are excluded from the rendered front
+// matter (`yaml:"-"` in bean.Bean), so a rename alone -- same bytes, new
+// filename, as `beans rename` or a `git checkout` that only renames a file
+// produces -- never changes ETag. staleKey folds Path in specifically so
+// this case still reindexes.
+func TestSync_ReindexesOnPathChangeEvenWithUnchangedETag(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "idx")
+	idx := mustOpen(t, dir)
+
+	const fileBytes = "identical file bytes, only the filename changes"
+	before := beanWith("aaa1", "Same Title", "same body")
+	before.Path = "old-slug--aaa1.md"
+	before.Slug = "old-slug"
+	before.SetContentETag([]byte(fileBytes))
+
+	if err := idx.Sync([]*bean.Bean{before}); err != nil {
+		t.Fatalf("Sync() #1 error = %v", err)
+	}
+
+	after := beanWith("aaa1", "Same Title", "same body")
+	after.Path = "new-slug--aaa1.md"
+	after.Slug = "new-slug"
+	after.SetContentETag([]byte(fileBytes))
+	if before.ETag() != after.ETag() {
+		t.Fatalf("test precondition failed: rename should not change ETag, got %q vs %q", before.ETag(), after.ETag())
+	}
+
+	if err := idx.Sync([]*bean.Bean{after}); err != nil {
+		t.Fatalf("Sync() #2 error = %v", err)
+	}
+
+	results, err := idx.Search("new-slug", 0)
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if len(results) != 1 || results[0] != "aaa1" {
+		t.Fatalf("Search(new-slug) = %v, want [aaa1]: rename was not reflected despite an unchanged ETag", results)
 	}
 }
