@@ -139,8 +139,7 @@ type TagCount struct {
 }
 
 // TagCandidates returns every tag in use across all beans with its usage
-// count. Order is unspecified (it iterates a map); callers that need a
-// stable order must sort the result themselves.
+// count, sorted by count descending, then by tag ascending.
 func TagCandidates(ctx context.Context, resolver *beangraph.CoreResolver) ([]TagCount, error) {
 	beans, err := resolver.Beans(ctx, nil)
 	if err != nil {
@@ -158,6 +157,13 @@ func TagCandidates(ctx context.Context, resolver *beangraph.CoreResolver) ([]Tag
 	for tag, count := range tagCounts {
 		tags = append(tags, TagCount{Tag: tag, Count: count})
 	}
+
+	sort.Slice(tags, func(i, j int) bool {
+		if tags[i].Count != tags[j].Count {
+			return tags[i].Count > tags[j].Count
+		}
+		return tags[i].Tag < tags[j].Tag
+	})
 
 	return tags, nil
 }

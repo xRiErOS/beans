@@ -3,7 +3,6 @@ package tui
 import (
 	"fmt"
 	"io"
-	"sort"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -62,14 +61,6 @@ type tagPickerModel struct {
 }
 
 func newTagPickerModel(tags []tagWithCount, width, height int) tagPickerModel {
-	// Sort by count descending, then alphabetically
-	sort.Slice(tags, func(i, j int) bool {
-		if tags[i].count != tags[j].count {
-			return tags[i].count > tags[j].count
-		}
-		return tags[i].tag < tags[j].tag
-	})
-
 	delegate := tagItemDelegate{}
 
 	items := make([]list.Item, len(tags))
