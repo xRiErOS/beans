@@ -32,11 +32,11 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "beans-completion-bin mkdtemp:", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(binDir)
 
 	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "resolve repo root:", err)
+		os.RemoveAll(binDir)
 		os.Exit(1)
 	}
 
@@ -45,10 +45,16 @@ func TestMain(m *testing.M) {
 	build.Dir = repoRoot
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "building beans binary: %v\n%s", err, out)
+		os.RemoveAll(binDir)
 		os.Exit(1)
 	}
 
-	os.Exit(m.Run())
+	// os.Exit below never runs deferred calls, so the build dir is
+	// removed explicitly on every path out of this function instead of
+	// relying on a defer that m.Run()'s exit code would skip.
+	code := m.Run()
+	os.RemoveAll(binDir)
+	os.Exit(code)
 }
 
 // writeFixtureStore creates a real .beans store on disk (not the
@@ -81,14 +87,27 @@ func writeFixtureStore(t *testing.T, beansDir string, idPrefix string) {
 	}
 }
 
-// runBeansCompletion runs the compiled binary with cwd and args, returning
-// its stdout and its exit error (nil on success). Only stdout is used for
+// runBeansCompletion runs the compiled binary with cwd, args, and any
+// extraEnv entries ("KEY=value") appended to a copy of the current
+// environment with any inherited BEANS_PATH stripped first -- so a
+// developer's real BEANS_PATH can never leak into a result, and a test
+// that wants BEANS_PATH set does so explicitly via extraEnv. Returns
+// stdout and the exit error (nil on success). Only stdout is used for
 // assertions: cobra's __complete Run prints candidates and the trailing
 // ":<directive>" line there, never on stderr.
-func runBeansCompletion(t *testing.T, cwd string, args []string) (string, error) {
+func runBeansCompletion(t *testing.T, cwd string, extraEnv []string, args []string) (string, error) {
 	t.Helper()
 	cmd := exec.Command(completionTestBinary, args...)
 	cmd.Dir = cwd
+	baseEnv := os.Environ()
+	filtered := make([]string, 0, len(baseEnv)+len(extraEnv))
+	for _, kv := range baseEnv {
+		if strings.HasPrefix(kv, "BEANS_PATH=") {
+			continue
+		}
+		filtered = append(filtered, kv)
+	}
+	cmd.Env = append(filtered, extraEnv...)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
@@ -116,7 +135,7 @@ func TestCompletionBeansPathOverridesForeignCwdDiscovery(t *testing.T) {
 		t.Fatalf("writing foreign .beans.yml: %v", err)
 	}
 
-	out, err := runBeansCompletion(t, foreignCwd, []string{"--beans-path", flagStoreBeans, "__complete", "show", ""})
+	out, err := runBeansCompletion(t, foreignCwd, nil, []string{"--beans-path", flagStoreBeans, "__complete", "show", ""})
 	if err != nil {
 		t.Fatalf("__complete show \"\" failed: %v\nstdout: %s", err, out)
 	}
@@ -140,12 +159,80 @@ func TestCompletionUnresolvableStoreYieldsNoCandidates(t *testing.T) {
 	}
 
 	missingStore := filepath.Join(t.TempDir(), "does-not-exist")
-	out, err := runBeansCompletion(t, foreignCwd, []string{"--beans-path", missingStore, "__complete", "show", ""})
+	out, err := runBeansCompletion(t, foreignCwd, nil, []string{"--beans-path", missingStore, "__complete", "show", ""})
 	if err == nil {
 		t.Fatalf("__complete show \"\" with an unresolvable --beans-path succeeded, want failure; stdout = %q", out)
 	}
 	if strings.Contains(out, "cwdstore-only") {
 		t.Errorf("completion output = %q, must not fall back to the foreign cwd's own store when --beans-path is unresolvable", out)
+	}
+}
+
+// SC-01/AC-01's second required measurement point: a foreign cwd with NO
+// .beans.yml at all, so directory discovery has nothing of its own to find
+// there except BEANS_PATH. The flag must win over that divergence too, not
+// only over a discovered .beans.yml (TestCompletionBeansPathOverridesForeignCwdDiscovery
+// above covers that first axis).
+func TestCompletionBeansPathOverridesEnvWithNoConfigFile(t *testing.T) {
+	flagStoreBeans := filepath.Join(t.TempDir(), ".beans")
+	writeFixtureStore(t, flagStoreBeans, "flagstore2")
+
+	envStoreBeans := filepath.Join(t.TempDir(), ".beans")
+	writeFixtureStore(t, envStoreBeans, "envstore")
+
+	// A bare foreign cwd: no .beans.yml, no .beans/ of its own, so the
+	// only thing directory-based discovery could ever fall back to here
+	// is BEANS_PATH.
+	foreignCwd := t.TempDir()
+
+	out, err := runBeansCompletion(t, foreignCwd, []string{"BEANS_PATH=" + envStoreBeans},
+		[]string{"--beans-path", flagStoreBeans, "__complete", "show", ""})
+	if err != nil {
+		t.Fatalf("__complete show \"\" failed: %v\nstdout: %s", err, out)
+	}
+
+	if !strings.Contains(out, "flagstore2-only") {
+		t.Errorf("completion output = %q, want the --beans-path store's candidate (flagstore2-only)", out)
+	}
+	if strings.Contains(out, "envstore-only") {
+		t.Errorf("completion output = %q, must not contain BEANS_PATH's candidate (envstore-only) -- the flag must win", out)
+	}
+}
+
+// SC-02: --config is the second raw-arg-recovered flag alongside
+// --beans-path (root.go's completionAwareRootFlags handles both). Without
+// it, __complete would resolve a .beans.yml named explicitly via --config
+// only for the regular command path, silently falling back to directory
+// discovery for completion -- offering a third store's config (and
+// through it, its beans.path) while --beans-path/--config both point
+// elsewhere. Measured from a foreign cwd with its own unrelated
+// .beans.yml, so directory discovery and --config cannot coincide.
+func TestCompletionConfigFlagOverridesForeignCwdDiscovery(t *testing.T) {
+	configStoreBeans := filepath.Join(t.TempDir(), ".beans")
+	writeFixtureStore(t, configStoreBeans, "configstore")
+	configDir := t.TempDir()
+	configPath := filepath.Join(configDir, "third.beans.yml")
+	configYAML := "beans:\n  path: " + configStoreBeans + "\n"
+	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+		t.Fatalf("writing --config file: %v", err)
+	}
+
+	foreignCwd := t.TempDir()
+	writeFixtureStore(t, filepath.Join(foreignCwd, ".beans"), "cwdstore2")
+	if err := os.WriteFile(filepath.Join(foreignCwd, ".beans.yml"), []byte("beans:\n  path: .beans\n"), 0644); err != nil {
+		t.Fatalf("writing foreign .beans.yml: %v", err)
+	}
+
+	out, err := runBeansCompletion(t, foreignCwd, nil, []string{"--config", configPath, "__complete", "show", ""})
+	if err != nil {
+		t.Fatalf("__complete show \"\" failed: %v\nstdout: %s", err, out)
+	}
+
+	if !strings.Contains(out, "configstore-only") {
+		t.Errorf("completion output = %q, want the --config store's candidate (configstore-only)", out)
+	}
+	if strings.Contains(out, "cwdstore2-only") {
+		t.Errorf("completion output = %q, must not contain the foreign cwd's own store's candidate (cwdstore2-only) -- --config must win", out)
 	}
 }
 

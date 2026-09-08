@@ -44,11 +44,13 @@ a full view of your project.`,
 
 			var err error
 
+			effectiveBeansPath, effectiveConfigPath := completionAwareRootFlags(cmd, args)
+
 			// Load configuration
-			if configPath != "" {
-				cfg, err = config.Load(configPath)
+			if effectiveConfigPath != "" {
+				cfg, err = config.Load(effectiveConfigPath)
 				if err != nil {
-					return fmt.Errorf("loading config from %s: %w", configPath, err)
+					return fmt.Errorf("loading config from %s: %w", effectiveConfigPath, err)
 				}
 			} else {
 				cwd, err := os.Getwd()
@@ -68,7 +70,7 @@ a full view of your project.`,
 			feedTypeTables(cfg)
 			feedStatusPriorityTables(cfg)
 
-			root, err := resolveBeansPath(completionAwareBeansPath(cmd, args), cfg)
+			root, err := resolveBeansPath(effectiveBeansPath, cfg)
 			if err != nil {
 				return err
 			}
@@ -127,33 +129,37 @@ func feedStatusPriorityTables(c *config.Config) {
 	ui.SetPrioritySymbols(symbols)
 }
 
-// completionAwareBeansPath returns the --beans-path value PersistentPreRunE
-// should resolve against, accounting for cobra's __complete request.
+// completionAwareRootFlags returns the --beans-path and --config values
+// PersistentPreRunE should resolve against, accounting for cobra's
+// __complete request.
 //
 // completeCmd (cobra's hidden "__complete" command) sets
 // DisableFlagParsing: true, because it must forward the untouched
 // command-line words to its own getCompletions logic rather than have
 // cobra's normal Command.execute consume them. That means Command.execute
 // skips ParseFlags for it (command.go's execute: "if c.DisableFlagParsing {
-// return nil }"), so the beansPath package var bound to the --beans-path
-// flag is never populated by the time PersistentPreRunE runs here -- even
-// though the raw args this hook receives still contain "--beans-path X"
-// verbatim (cobra's Find only strips flags for command-name matching; it
-// never discards them from the args it hands back). Left alone,
-// resolveBeansPath falls back to directory discovery, silently returning
-// another store's candidates (beans-9jtq).
+// return nil }"), so neither the beansPath nor the configPath package var
+// -- both bound to their flags via pflag.StringVar -- is populated by the
+// time PersistentPreRunE runs here, even though the raw args this hook
+// receives still contain "--beans-path X" / "--config Y" verbatim (cobra's
+// Find only strips flags for command-name matching; it never discards them
+// from the args it hands back). Left alone, both the beans-path resolution
+// and the config lookup fall back to directory discovery, silently
+// resolving another store's/config's candidates (beans-9jtq).
 //
-// Outside a __complete request cobra has already parsed --beans-path
-// normally, so beansPath is authoritative and is returned unchanged.
-func completionAwareBeansPath(cmd *cobra.Command, args []string) string {
+// Outside a __complete request cobra has already parsed both flags
+// normally, so beansPath/configPath are authoritative and are returned
+// unchanged.
+func completionAwareRootFlags(cmd *cobra.Command, args []string) (beansPathVal, configPathVal string) {
 	if cmd.Name() != cobra.ShellCompRequestCmd {
-		return beansPath
+		return beansPath, configPath
 	}
-	fs := pflag.NewFlagSet("completion-beans-path", pflag.ContinueOnError)
+	fs := pflag.NewFlagSet("completion-root-flags", pflag.ContinueOnError)
 	fs.ParseErrorsAllowlist = pflag.ParseErrorsAllowlist{UnknownFlags: true}
-	path := fs.String("beans-path", "", "")
+	bp := fs.String("beans-path", "", "")
+	cp := fs.String("config", "", "")
 	_ = fs.Parse(args)
-	return *path
+	return *bp, *cp
 }
 
 // resolveBeansPath determines the beans data directory path.

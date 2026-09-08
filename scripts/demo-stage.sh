@@ -45,8 +45,10 @@ mkdir -p "$HOME"
 # lassen: nur dann schreibt es eine eigene .beans.yml und der Store wird
 # selbstständig. Mit --beans-path aus dem Repo heraus käme der Store aus dem
 # Flag, die KONFIGURATION aber weiter aus der .beans.yml des Repos — die
-# Beans hießen dann `beans-…` und lägen auf `draft` statt `todo`. Genau die
-# Auseinanderentwicklung, die beans-9jtq für die Vervollständigung beschreibt.
+# Beans hießen dann `beans-…` und lägen auf `draft` statt `todo`. Dieselbe
+# Art Auseinanderentwicklung zwischen Store- und Config-Auflösung hat
+# beans-9jtq für den `__complete`-Pfad synchronisiert (--beans-path UND
+# --config folgen dort jetzt derselben Präzedenz wie im regulären Pfad).
 cd "$root"
 store="$root/.beans"
 
@@ -111,11 +113,6 @@ cat <<'BANNER'
     beans complete <id> <TAB>       Kandidaten auch auf Position 2
     beans list junk                 Fehlbedienung: Exit 1
     beans archive <id>              Fehlbedienung: bricht ab, archiviert nichts
-
-  Bekannte Abweichung (beans-9jtq): TAB-Kandidaten folgen dem
-  Arbeitsverzeichnis, nicht --beans-path. In diesem Verzeichnis stimmen
-  beide; nach einem cd woandershin zeigt TAB fremde IDs, waehrend die
-  Kommandos weiter auf dem Wegwerf-Store arbeiten.
 
 BANNER
 EOF
