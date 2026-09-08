@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xRiErOS/beans/pkg/candidates"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/xRiErOS/beans/internal/ui"
 )
@@ -83,8 +84,8 @@ type priorityPickerModel struct {
 }
 
 func newPriorityPickerModel(beanIDs []string, beanTitle, currentPriority string, cfg *config.Config, width, height int) priorityPickerModel {
-	// Get all priorities (hardcoded in config package)
-	priorities := config.DefaultPriorities
+	// Get all priorities
+	priorities := candidates.PriorityCandidates()
 
 	delegate := priorityItemDelegate{}
 
