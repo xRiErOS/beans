@@ -71,6 +71,9 @@ func TestOpen_AbsentIndexRebuildsTransparently(t *testing.T) {
 	}
 
 	idx2 := mustOpen(t, dir)
+	if !idx2.persistent {
+		t.Fatal("Open() after deletion fell back to in-memory instead of rebuilding the persisted index")
+	}
 	results, err := idx2.Search("Gone", 0)
 	if err != nil {
 		t.Fatalf("Search() after deletion error = %v", err)
@@ -105,6 +108,9 @@ func TestOpen_CorruptIndexRebuildsTransparently(t *testing.T) {
 	}
 
 	idx := mustOpen(t, dir)
+	if !idx.persistent {
+		t.Fatal("Open() on a corrupt directory fell back to in-memory instead of rebuilding the persisted index")
+	}
 	if err := idx.IndexBean(beanWith("aaa1", "Healed", "x")); err != nil {
 		t.Fatalf("IndexBean() on healed index error = %v", err)
 	}
