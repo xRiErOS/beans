@@ -13,6 +13,7 @@ import (
 	"github.com/xRiErOS/beans/pkg/beangraph/model"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var (
@@ -191,5 +192,49 @@ func RegisterCreateCmd(root *cobra.Command) {
 	createCmd.Flags().StringVar(&createOrder, "order", "", "Explicit fractional-index order value")
 	createCmd.Flags().BoolVar(&createJSON, "json", false, "Output as JSON")
 	createCmd.MarkFlagsMutuallyExclusive("body", "body-file")
+	createCmd.ValidArgsFunction = createValidArgs
+	createFlagNames = nil
+	createCmd.Flags().VisitAll(func(f *pflag.Flag) {
+		createFlagNames = append(createFlagNames, "--"+f.Name)
+	})
 	root.AddCommand(createCmd)
+}
+
+// createFlagNames holds the names of create's own registered flags,
+// captured once by RegisterCreateCmd right after it defines them (before
+// cobra ever merges root's persistent flags -- --config, --beans-path,
+// --help -- into createCmd's flag set). createHint reads this slice
+// instead of re-deriving it at completion time, which is what keeps
+// those unrelated global/help flags out of the hint (beans-u93j
+// Integration point 1's "primary flags" are create's own, not root's).
+var createFlagNames []string
+
+// createHint names create's expected title and its primary flags for
+// display as cobra ActiveHelp when the user presses TAB after
+// `beans create ` with no argument yet (beans-u93j AC-01). It is derived
+// from createFlagNames -- itself pulled live from createCmd's flag
+// definitions via VisitAll, not hand-copied -- so a newly added flag
+// shows up here automatically and a removed one can't linger (AC-03).
+func createHint() string {
+	return `provide a title, e.g. beans create "Fix the login bug" -- flags: ` + strings.Join(createFlagNames, ", ")
+}
+
+// createValidArgs is create's ValidArgsFunction. create's sole positional
+// argument is free-form title text (completionNoFileComp's rationale
+// applies: no bean-ID or file-path meaning), so once any word of the title
+// is already typed there is nothing further to suggest. With zero args --
+// the `beans create ` + TAB case the PO asked for -- it surfaces createHint
+// as ActiveHelp instead of staying silent. cobra.AppendActiveHelp encodes
+// the hint as a "_activeHelp_ "-prefixed pseudo-candidate; the shipped zsh
+// script (zsh_completions.go) renders such lines via `compadd -x`, zsh's
+// display-only/non-inserting form, so pressing TAB shows the text but
+// leaves the command line as typed (AC-02) -- unlike a candidate with an
+// empty value, which that same script drops outright (only non-empty
+// comps reach compadd). ShellCompDirectiveNoFileComp still blocks the
+// filename fallback beans-12cb fixed.
+func createValidArgs(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) > 0 {
+		return nil, cobra.ShellCompDirectiveNoFileComp
+	}
+	return cobra.AppendActiveHelp(nil, createHint()), cobra.ShellCompDirectiveNoFileComp
 }
