@@ -64,6 +64,9 @@ func TestArchiveRejectsPositionalArgumentEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("finding archive: %v", err)
 	}
+	if archiveCmd.Args == nil {
+		t.Fatal("archive has no declared Args policy")
+	}
 	wantErr := archiveCmd.Args(archiveCmd, []string{"beans-nope"})
 	if wantErr == nil {
 		t.Fatal("archive's own Args policy accepted the argument; nothing to compare the end-to-end failure against")
