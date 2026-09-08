@@ -17,6 +17,7 @@ import (
 
 func setupTestCore(t *testing.T) (*Core, string) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // keep the persisted search index out of the real ~/.beans
 	tmpDir := t.TempDir()
 	beansDir := filepath.Join(tmpDir, BeansDir)
 	if err := os.MkdirAll(beansDir, 0755); err != nil {
@@ -35,6 +36,7 @@ func setupTestCore(t *testing.T) (*Core, string) {
 
 func setupTestCoreWithRequireIfMatch(t *testing.T) (*Core, string) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // keep the persisted search index out of the real ~/.beans
 	tmpDir := t.TempDir()
 	beansDir := filepath.Join(tmpDir, BeansDir)
 	if err := os.MkdirAll(beansDir, 0755); err != nil {
@@ -2436,6 +2438,7 @@ Bean content.
 // beans.require_fields_on policy.
 func setupTestCoreWithRequireFieldsOn(t *testing.T, fields map[string][]string) (*Core, string) {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // keep the persisted search index out of the real ~/.beans
 	tmpDir := t.TempDir()
 	beansDir := filepath.Join(tmpDir, BeansDir)
 	if err := os.MkdirAll(beansDir, 0755); err != nil {
