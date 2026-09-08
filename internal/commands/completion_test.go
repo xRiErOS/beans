@@ -174,7 +174,7 @@ func TestCompletionUnboundedNeverStops(t *testing.T) {
 // AC-05: a bounded verb stops offering candidates once its declared arity
 // is satisfied. Measured at the three points that matter for each n -- one
 // position under the boundary, at it, and one past it -- because only the
-// boundary itself proves anything (BOUNDARIES evidence cited in the bean).
+// boundary itself proves anything.
 // n=1 is the value every wired verb actually ships (order, update, graph,
 // progress, roadmap, rename all call completionUpTo(1)); n=2 is measured
 // too, on the same shared primitive, to show the logic generalizes rather
