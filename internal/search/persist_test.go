@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/blevesearch/bleve/v2"
 	"github.com/xRiErOS/beans/pkg/bean"
 )
 
@@ -346,6 +347,27 @@ func TestSync_SidecarPersistsAcrossReopen(t *testing.T) {
 	}
 }
 
+// storedSlug reads a document's stored "slug" field directly via a doc-ID
+// query with SearchRequest.Fields, bypassing a text-query Search: a
+// query-string search is unreliable here because bleve's standard analyzer
+// tokenizes a hyphenated slug into parts ("old-slug" -> "old", "slug"), so a
+// query for "new-slug" can spuriously match a stale document that still
+// contains the shared "slug" token.
+func storedSlug(t *testing.T, idx *Index, id string) string {
+	t.Helper()
+	req := bleve.NewSearchRequest(bleve.NewDocIDQuery([]string{id}))
+	req.Fields = []string{"slug"}
+	result, err := idx.index.Search(req)
+	if err != nil {
+		t.Fatalf("Search(docID=%q) error = %v", id, err)
+	}
+	if len(result.Hits) != 1 {
+		t.Fatalf("Search(docID=%q) returned %d hits, want 1", id, len(result.Hits))
+	}
+	slug, _ := result.Hits[0].Fields["slug"].(string)
+	return slug
+}
+
 // TestSync_ReindexesOnPathChangeEvenWithUnchangedETag proves the fix for the
 // rename hole in AC-02: Slug/Path are excluded from the rendered front
 // matter (`yaml:"-"` in bean.Bean), so a rename alone -- same bytes, new
@@ -365,6 +387,9 @@ func TestSync_ReindexesOnPathChangeEvenWithUnchangedETag(t *testing.T) {
 	if err := idx.Sync([]*bean.Bean{before}); err != nil {
 		t.Fatalf("Sync() #1 error = %v", err)
 	}
+	if got := storedSlug(t, idx, "aaa1"); got != "old-slug" {
+		t.Fatalf("test precondition failed: stored slug = %q, want %q", got, "old-slug")
+	}
 
 	after := beanWith("aaa1", "Same Title", "same body")
 	after.Path = "new-slug--aaa1.md"
@@ -378,11 +403,7 @@ func TestSync_ReindexesOnPathChangeEvenWithUnchangedETag(t *testing.T) {
 		t.Fatalf("Sync() #2 error = %v", err)
 	}
 
-	results, err := idx.Search("new-slug", 0)
-	if err != nil {
-		t.Fatalf("Search() error = %v", err)
-	}
-	if len(results) != 1 || results[0] != "aaa1" {
-		t.Fatalf("Search(new-slug) = %v, want [aaa1]: rename was not reflected despite an unchanged ETag", results)
+	if got := storedSlug(t, idx, "aaa1"); got != "new-slug" {
+		t.Fatalf("stored slug after rename = %q, want %q: rename was not reflected despite an unchanged ETag", got, "new-slug")
 	}
 }
