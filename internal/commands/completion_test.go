@@ -387,8 +387,10 @@ func TestCompletionUnboundedNeverStops(t *testing.T) {
 		if len(got) != 2 {
 			t.Errorf("argc=%d: got %d candidates, want 2", argc, len(got))
 		}
-		if directive != cobra.ShellCompDirectiveNoFileComp {
-			t.Errorf("argc=%d: directive = %v, want ShellCompDirectiveNoFileComp", argc, directive)
+		// beans-sfle AC-01: the directive must also request KeepOrder so
+		// the shell preserves beanIDCandidates' actionable-first ordering.
+		if directive != completionDirective {
+			t.Errorf("argc=%d: directive = %v, want %v", argc, directive, completionDirective)
 		}
 	}
 }
@@ -423,8 +425,10 @@ func TestCompletionUpToStopsAtBoundary(t *testing.T) {
 			if !tc.wantEmpty && len(got) == 0 {
 				t.Errorf("n=%d argc=%d: got 0 candidates, want > 0", n, tc.argc)
 			}
-			if directive != cobra.ShellCompDirectiveNoFileComp {
-				t.Errorf("n=%d argc=%d: directive = %v, want ShellCompDirectiveNoFileComp", n, tc.argc, directive)
+			// beans-sfle AC-01: KeepOrder must survive both the
+			// candidate-producing and the exhausted-position branch.
+			if directive != completionDirective {
+				t.Errorf("n=%d argc=%d: directive = %v, want %v", n, tc.argc, directive, completionDirective)
 			}
 		}
 	}
@@ -513,5 +517,119 @@ func TestRenameSecondPositionOffersNoCandidates(t *testing.T) {
 	got, _ := cmd.ValidArgsFunction(cmd, []string{"beans-existing"}, "")
 	if len(got) != 0 {
 		t.Errorf("rename position 2: got %d candidates, want 0 (new-id is not an existing bean)", len(got))
+	}
+}
+
+// setupCompletionTestWithStatuses installs a throwaway core with one bean
+// per entry in statuses, mirroring setupCompletionTest but letting the
+// caller control each bean's status instead of hardcoding "todo" -- needed
+// to fixture the actionable/non-actionable status boundary beans-sfle
+// AC-01 sorts across.
+func setupCompletionTestWithStatuses(t *testing.T, ids, statuses []string) []*bean.Bean {
+	t.Helper()
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	testCfg := config.Default()
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	beans := make([]*bean.Bean, 0, len(statuses))
+	for i, status := range statuses {
+		b := &bean.Bean{
+			ID:     ids[i],
+			Title:  ids[i],
+			Status: status,
+			Type:   "task",
+		}
+		if err := testCore.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", ids[i], err)
+		}
+		beans = append(beans, b)
+	}
+	return beans
+}
+
+// TestBeanIDCandidatesActionableFirstOrder pins beans-sfle AC-01:
+// todo/in-progress candidates must precede draft, and draft must precede
+// completed/scrapped.
+//
+// Fixture shape justification (Fehlklasse B54): the coordinator's own
+// measurement found that with only 3 pairwise-distinct elements the
+// expected actionable-first order occurred by chance in 47/60 (78%) runs
+// with NO sorting at all, and a "comparator always returns false" mutation
+// was only red in 8/10 runs. With 5 pairwise-distinct-enough entries
+// spanning the actionable/non-actionable boundary, the same measurement
+// found the chance rate drop to 62% and the mutation red 10/10. This
+// fixture uses all 5 statuses (todo, in-progress, draft, completed,
+// scrapped) and inserts them in the OPPOSITE of the required order --
+// completed/scrapped first, actionable last -- so core.All()'s natural
+// insertion order is the worst case for an accidental pass: a passing
+// assertion below can only be explained by the sort actually running.
+func TestBeanIDCandidatesActionableFirstOrder(t *testing.T) {
+	ids := []string{"beans-zzscr1", "beans-zzcmp1", "beans-zzdrf1", "beans-zzip01", "beans-zztd01"}
+	statuses := []string{"scrapped", "completed", "draft", "in-progress", "todo"}
+	setupCompletionTestWithStatuses(t, ids, statuses)
+
+	candidates := beanIDCandidates()
+
+	rankOf := func(id string) int {
+		for i, cand := range candidates {
+			if strings.SplitN(cand, "\t", 2)[0] == id {
+				return i
+			}
+		}
+		t.Fatalf("candidate %s not found in %v", id, candidates)
+		return -1
+	}
+
+	scrappedRank := rankOf("beans-zzscr1")
+	completedRank := rankOf("beans-zzcmp1")
+	draftRank := rankOf("beans-zzdrf1")
+	inProgressRank := rankOf("beans-zzip01")
+	todoRank := rankOf("beans-zztd01")
+
+	for _, actionable := range []int{todoRank, inProgressRank} {
+		if actionable >= draftRank {
+			t.Errorf("actionable rank %d must precede draft rank %d", actionable, draftRank)
+		}
+		if actionable >= completedRank || actionable >= scrappedRank {
+			t.Errorf("actionable rank %d must precede completed/scrapped ranks %d/%d", actionable, completedRank, scrappedRank)
+		}
+	}
+	if draftRank >= completedRank {
+		t.Errorf("draft rank %d must precede completed rank %d", draftRank, completedRank)
+	}
+	if draftRank >= scrappedRank {
+		t.Errorf("draft rank %d must precede scrapped rank %d", draftRank, scrappedRank)
+	}
+
+	// AC-02, restated for this fixture: sorting must not drop a candidate.
+	if len(candidates) != len(ids) {
+		t.Fatalf("got %d candidates, want %d (a candidate was dropped): %v", len(candidates), len(ids), candidates)
+	}
+	for _, id := range ids {
+		rankOf(id) // fails the test via t.Fatalf if id is missing
+	}
+}
+
+// TestCompletionUnboundedKeepsOrderDirective proves the ValidArgsFunctions
+// request ShellCompDirectiveKeepOrder, without which a shell would discard
+// beanIDCandidates' actionable-first ordering by re-sorting alphabetically.
+func TestCompletionUnboundedKeepsOrderDirective(t *testing.T) {
+	setupCompletionTest(t, 1)
+
+	_, directive := completionUnbounded(nil, nil, "")
+	if directive&cobra.ShellCompDirectiveKeepOrder == 0 {
+		t.Errorf("completionUnbounded directive %v missing ShellCompDirectiveKeepOrder", directive)
 	}
 }
