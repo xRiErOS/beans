@@ -35,8 +35,9 @@ func TestCobraBuiltinsArePresentAndPlumbing(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%q is missing from the command tree: %v", name, err)
 		}
-		if IsUserFacing(cmd) {
-			t.Errorf("%q classified user-facing, want plumbing", name)
+		if got := cmd.Annotations[audienceAnnotationKey]; got != audiencePlumbing {
+			t.Errorf("%q carries audience marker %q, want explicit %q (not merely unmarked)",
+				name, got, audiencePlumbing)
 		}
 	}
 }
