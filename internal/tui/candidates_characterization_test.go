@@ -26,6 +26,9 @@ import (
 //	                        beans-f1 whose type would otherwise be a valid
 //	                        parent candidate, so it can only be kept out of
 //	                        ParentCandidates by the descendant exclusion)
+//	                        tags: bravo (brings bravo's count to 3, ahead
+//	                        of alpha's 2, so the expected tag order
+//	                        depends on count, not just alphabetical luck)
 func candidateFixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 	t.Helper()
 	beansDir := filepath.Join(t.TempDir(), ".beans")
@@ -46,7 +49,7 @@ func candidateFixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 		{ID: "beans-f1", Slug: bean.Slugify("Feature A"), Title: "Feature A", Status: "todo", Type: "feature", Parent: "beans-e1", Tags: []string{"alpha", "bravo"}},
 		{ID: "beans-f2", Slug: bean.Slugify("Feature B"), Title: "Feature B", Status: "todo", Type: "feature", Parent: "beans-e2", Tags: []string{"alpha"}},
 		{ID: "beans-t1", Slug: bean.Slugify("Task A"), Title: "Task A", Status: "todo", Type: "task", Parent: "beans-f1", Tags: []string{"bravo", "charlie"}},
-		{ID: "beans-m3", Slug: bean.Slugify("Milestone C"), Title: "Milestone C", Status: "todo", Type: "milestone", Parent: "beans-t1"},
+		{ID: "beans-m3", Slug: bean.Slugify("Milestone C"), Title: "Milestone C", Status: "todo", Type: "milestone", Parent: "beans-t1", Tags: []string{"bravo"}},
 	}
 	for _, b := range beans {
 		if err := core.Create(b); err != nil {
@@ -221,8 +224,11 @@ func TestPriorityPickerCandidates(t *testing.T) {
 	}
 }
 
-// TestCollectTagsWithCounts pins the tag producer's content: every tag in
-// use across all beans, with an accurate usage count.
+// TestCollectTagsWithCounts pins the tag producer's content and order:
+// every tag in use across all beans, with an accurate usage count,
+// rendered in the count-desc/tag-asc order the tag picker relies on
+// (internal/tui no longer sorts locally; the order comes straight from
+// pkg/candidates.TagCandidates).
 func TestCollectTagsWithCounts(t *testing.T) {
 	resolver, cfg := candidateFixture(t)
 
@@ -231,17 +237,17 @@ func TestCollectTagsWithCounts(t *testing.T) {
 
 	tags := a.collectTagsWithCounts()
 
-	got := make(map[string]int, len(tags))
-	for _, tc := range tags {
-		got[tc.tag] = tc.count
+	wantOrder := []string{"bravo", "alpha", "charlie"}
+	wantCounts := map[string]int{"alpha": 2, "bravo": 3, "charlie": 1}
+	if len(tags) != len(wantOrder) {
+		t.Fatalf("got %v, want tags %v", tags, wantOrder)
 	}
-	want := map[string]int{"alpha": 2, "bravo": 2, "charlie": 1}
-	if len(got) != len(want) {
-		t.Fatalf("got %v, want %v", got, want)
-	}
-	for tag, count := range want {
-		if got[tag] != count {
-			t.Fatalf("tag %q count = %d, want %d", tag, got[tag], count)
+	for i, tc := range tags {
+		if tc.tag != wantOrder[i] {
+			t.Fatalf("tag %d = %q, want %q (got order %v)", i, tc.tag, wantOrder[i], tags)
+		}
+		if tc.count != wantCounts[tc.tag] {
+			t.Fatalf("tag %q count = %d, want %d", tc.tag, tc.count, wantCounts[tc.tag])
 		}
 	}
 }

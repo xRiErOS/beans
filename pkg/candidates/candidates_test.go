@@ -25,6 +25,9 @@ import (
 //	                        beans-f1 whose type would otherwise be a valid
 //	                        parent candidate, so it can only be kept out of
 //	                        ParentCandidates by the descendant exclusion)
+//	                        tags: bravo (brings bravo's count to 3, ahead
+//	                        of alpha's 2, so the expected tag order
+//	                        depends on count, not just alphabetical luck)
 func fixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 	t.Helper()
 	beansDir := filepath.Join(t.TempDir(), ".beans")
@@ -45,7 +48,7 @@ func fixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 		{ID: "beans-f1", Slug: bean.Slugify("Feature A"), Title: "Feature A", Status: "todo", Type: "feature", Parent: "beans-e1", Tags: []string{"alpha", "bravo"}},
 		{ID: "beans-f2", Slug: bean.Slugify("Feature B"), Title: "Feature B", Status: "todo", Type: "feature", Parent: "beans-e2", Tags: []string{"alpha"}},
 		{ID: "beans-t1", Slug: bean.Slugify("Task A"), Title: "Task A", Status: "todo", Type: "task", Parent: "beans-f1", Tags: []string{"bravo", "charlie"}},
-		{ID: "beans-m3", Slug: bean.Slugify("Milestone C"), Title: "Milestone C", Status: "todo", Type: "milestone", Parent: "beans-t1"},
+		{ID: "beans-m3", Slug: bean.Slugify("Milestone C"), Title: "Milestone C", Status: "todo", Type: "milestone", Parent: "beans-t1", Tags: []string{"bravo"}},
 	}
 	for _, b := range beans {
 		if err := core.Create(b); err != nil {
@@ -152,16 +155,23 @@ func TestPriorityCandidates(t *testing.T) {
 
 // TestTagCandidates pins TagCandidates' content and order: every tag in
 // use across all beans with an accurate usage count, sorted by count
-// descending then tag ascending. It calls TagCandidates repeatedly
-// because Go randomizes map iteration order per call: if the sort were
-// ever removed, at least one of the repeated calls would very likely
-// surface an unsorted order, whereas a single call could occasionally
-// pass by coincidence on this small fixture.
+// descending then tag ascending. The fixture gives every tag a distinct
+// count (bravo=3, alpha=2, charlie=1) specifically so the expected order
+// [bravo, alpha, charlie] can only be produced by actually comparing
+// counts — a comparator that fell back to pure alphabetical order (e.g.
+// count-desc silently dropped) would deterministically produce
+// [alpha, bravo, charlie] instead, which already differs on a single
+// run. The 10x repeated-call loop additionally guards against a broken
+// comparator (e.g. one that never orders anything, leaving the result at
+// the mercy of Go's per-call-randomized map iteration): since [bravo,
+// alpha, charlie] would then have to arise by chance identically on all
+// 10 independently randomized iterations, an accidental pass is
+// astronomically unlikely rather than merely "possible on this fixture".
 func TestTagCandidates(t *testing.T) {
 	resolver, _ := fixture(t)
 
-	wantTags := []string{"alpha", "bravo", "charlie"}
-	wantCounts := map[string]int{"alpha": 2, "bravo": 2, "charlie": 1}
+	wantTags := []string{"bravo", "alpha", "charlie"}
+	wantCounts := map[string]int{"alpha": 2, "bravo": 3, "charlie": 1}
 
 	for run := range 10 {
 		got, err := TagCandidates(context.Background(), resolver)
