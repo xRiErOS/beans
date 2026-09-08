@@ -22,6 +22,10 @@ import (
 //	beans-f1 "Feature A"   (feature, parent beans-e1) tags: alpha, bravo
 //	beans-f2 "Feature B"   (feature, parent beans-e2) tags: alpha
 //	beans-t1 "Task A"      (task, parent beans-f1)    tags: bravo, charlie
+//	beans-m3 "Milestone C" (milestone, parent beans-t1; a descendant of
+//	                        beans-f1 whose type would otherwise be a valid
+//	                        parent candidate, so it can only be kept out of
+//	                        ParentCandidates by the descendant exclusion)
 func candidateFixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 	t.Helper()
 	beansDir := filepath.Join(t.TempDir(), ".beans")
@@ -42,6 +46,7 @@ func candidateFixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 		{ID: "beans-f1", Slug: bean.Slugify("Feature A"), Title: "Feature A", Status: "todo", Type: "feature", Parent: "beans-e1", Tags: []string{"alpha", "bravo"}},
 		{ID: "beans-f2", Slug: bean.Slugify("Feature B"), Title: "Feature B", Status: "todo", Type: "feature", Parent: "beans-e2", Tags: []string{"alpha"}},
 		{ID: "beans-t1", Slug: bean.Slugify("Task A"), Title: "Task A", Status: "todo", Type: "task", Parent: "beans-f1", Tags: []string{"bravo", "charlie"}},
+		{ID: "beans-m3", Slug: bean.Slugify("Milestone C"), Title: "Milestone C", Status: "todo", Type: "milestone", Parent: "beans-t1"},
 	}
 	for _, b := range beans {
 		if err := core.Create(b); err != nil {
@@ -86,11 +91,14 @@ func mustEqual(t *testing.T, got, want []string) {
 	}
 }
 
-// TestParentPickerCandidates_ExcludesSelfAndDescendants pins the parent
+// TestParentPickerCandidates_ExcludesDescendants pins the parent
 // producer's content, order and exclusions: it must offer only valid
-// parent types, sorted by type rank then title, excluding the edited bean
-// itself and all of its descendants.
-func TestParentPickerCandidates_ExcludesSelfAndDescendants(t *testing.T) {
+// parent types, sorted by type rank then title, excluding the edited
+// bean's descendants. (Self-exclusion is not independently observable
+// here: under the strict type-rank hierarchy a bean's own type is never a
+// valid parent type for itself, so the selected-bean skip never changes
+// the result and cannot be pinned by a passing/failing assertion.)
+func TestParentPickerCandidates_ExcludesDescendants(t *testing.T) {
 	resolver, cfg := candidateFixture(t)
 
 	m := newParentPickerModel([]string{"beans-f1"}, "Feature A", []string{"feature"}, "", resolver, cfg, 100, 40)
@@ -99,7 +107,7 @@ func TestParentPickerCandidates_ExcludesSelfAndDescendants(t *testing.T) {
 	want := []string{"beans-m1", "beans-m2", "beans-e1", "beans-e2"}
 	mustEqual(t, got, want)
 
-	for _, excluded := range []string{"beans-f1", "beans-t1", "beans-f2"} {
+	for _, excluded := range []string{"beans-f1", "beans-t1", "beans-f2", "beans-m3"} {
 		for _, id := range got {
 			if id == excluded {
 				t.Fatalf("expected %s to be excluded from parent candidates, got %v", excluded, got)
@@ -117,7 +125,7 @@ func TestBlockingPickerCandidates_IncludesDescendants(t *testing.T) {
 	m := newBlockingPickerModel("beans-f1", "Feature A", nil, resolver, cfg, 100, 40)
 
 	got := blockingPickerBeanIDs(t, m)
-	want := []string{"beans-m1", "beans-m2", "beans-e1", "beans-e2", "beans-f2", "beans-t1"}
+	want := []string{"beans-m1", "beans-m2", "beans-m3", "beans-e1", "beans-e2", "beans-f2", "beans-t1"}
 	mustEqual(t, got, want)
 
 	for _, id := range got {
@@ -125,14 +133,16 @@ func TestBlockingPickerCandidates_IncludesDescendants(t *testing.T) {
 			t.Fatalf("expected beans-f1 (self) to be excluded, got %v", got)
 		}
 	}
-	found := false
-	for _, id := range got {
-		if id == "beans-t1" {
-			found = true
+	for _, descendant := range []string{"beans-t1", "beans-m3"} {
+		found := false
+		for _, id := range got {
+			if id == descendant {
+				found = true
+			}
 		}
-	}
-	if !found {
-		t.Fatalf("expected beans-t1 (descendant) to remain, unlike the parent picker: %v", got)
+		if !found {
+			t.Fatalf("expected %s (descendant) to remain, unlike the parent picker: %v", descendant, got)
+		}
 	}
 }
 
