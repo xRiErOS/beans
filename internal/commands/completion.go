@@ -22,6 +22,18 @@ func completionUnbounded(cmd *cobra.Command, args []string, toComplete string) (
 	return beanIDCandidates(), completionDirective
 }
 
+// completionNoFileComp is the ValidArgsFunction for verbs whose first
+// positional argument is free-form text with no bean-ID or file-path
+// meaning -- create's title, graphql's query string. Without a
+// ValidArgsFunction at all, cobra answers with ShellCompDirectiveDefault,
+// which makes the shell fall back to file-name completion in the cwd
+// (beans-12cb). This returns no candidates and blocks that fallback,
+// without offering bean-ID candidates that would never be a correct
+// answer for either verb's first position.
+func completionNoFileComp(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return nil, cobra.ShellCompDirectiveNoFileComp
+}
+
 // completionUpTo returns a ValidArgsFunction that offers bean-ID candidates
 // only while fewer than n positions are already filled, then stops (R-04
 // AC-05). n is the number of positions that actually name an existing bean,

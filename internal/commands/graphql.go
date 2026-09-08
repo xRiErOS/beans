@@ -207,5 +207,6 @@ func RegisterGraphqlCmd(root *cobra.Command) {
 	graphqlCmd.Flags().StringVarP(&queryVariables, "variables", "v", "", "Query variables as JSON string")
 	graphqlCmd.Flags().StringVarP(&queryOperation, "operation", "o", "", "Operation name (for multi-operation documents)")
 	graphqlCmd.Flags().BoolVar(&querySchemaOnly, "schema", false, "Print the GraphQL schema and exit")
+	graphqlCmd.ValidArgsFunction = completionNoFileComp
 	root.AddCommand(graphqlCmd)
 }

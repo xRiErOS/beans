@@ -9,6 +9,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"sort"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -631,5 +634,95 @@ func TestCompletionUnboundedKeepsOrderDirective(t *testing.T) {
 	_, directive := completionUnbounded(nil, nil, "")
 	if directive&cobra.ShellCompDirectiveKeepOrder == 0 {
 		t.Errorf("completionUnbounded directive %v missing ShellCompDirectiveKeepOrder", directive)
+	}
+}
+
+// acceptsPositionalArg reports whether cmd's own cobra.Args validator
+// allows at least one positional argument, probed by calling it with
+// increasing argument counts (a command's minimum arity is not otherwise
+// knowable from the outside: promote.go declares MinimumNArgs(2), so a
+// single-argument probe alone would wrongly call it argument-less). A nil
+// Args validator is cobra's own "no restriction" default and always
+// accepts. This is the sole scoping applied before the directive walk
+// below: a verb that never accepts an argument (list, version, init, ...)
+// can never trigger the shell's file-name completion fallback at all, so
+// whether it nominally reports ShellCompDirectiveDefault is not this
+// bug's domain.
+func acceptsPositionalArg(cmd *cobra.Command) bool {
+	if cmd.Args == nil {
+		return true
+	}
+	for n := 1; n <= 5; n++ {
+		probe := make([]string, n)
+		for i := range probe {
+			probe[i] = "x"
+		}
+		if cmd.Args(cmd, probe) == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// lastDirectiveLine finds cobra's trailing ":<directive>" line in
+// __complete output and parses the numeric directive it names.
+func lastDirectiveLine(out string) (int, bool) {
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.HasPrefix(line, ":") {
+			continue
+		}
+		if n, err := strconv.Atoi(strings.TrimPrefix(line, ":")); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// TestOnlyPromoteFallsToDefaultDirective is beans-12cb AC-03: it derives
+// the verb set mechanically by walking the actual command tree
+// (sharedTestRoot(t).Commands()), never from a hand-maintained verb list
+// -- a second such list would itself violate the guard beans-t7sv SC-03
+// exists to enforce. For every verb whose own Args validator accepts at
+// least one positional argument (acceptsPositionalArg above), it runs the
+// real compiled binary's `beans __complete <verb> ""` and reads the
+// trailing ":<directive>" line cobra always prints. Numeric 0 is
+// ShellCompDirectiveDefault, the value that makes a shell fall back to
+// file-name completion in the cwd -- the beans-12cb bug. The set of verbs
+// still answering it after this leaf's fix must be exactly {promote}:
+// promote's first positional is a real file path (promote.go:44, read
+// via os.ReadFile at :53), where file-name completion is CORRECT, and
+// Wave 1 already excluded it from its own coverage for the same reason
+// (TestEachIDVerbRegistersValidArgsFunction's promote exclusion above).
+// Any other verb appearing here is a regression to fix, not a gap to
+// document.
+func TestOnlyPromoteFallsToDefaultDirective(t *testing.T) {
+	root := sharedTestRoot(t)
+
+	storeDir := t.TempDir()
+	writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "verbscan")
+
+	var defaulted []string
+	for _, cmd := range root.Commands() {
+		if !acceptsPositionalArg(cmd) {
+			continue
+		}
+		name := cmd.Name()
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", name, ""})
+		if err != nil {
+			t.Fatalf("__complete %s \"\": %v\nstdout: %s", name, err, out)
+		}
+		directive, ok := lastDirectiveLine(out)
+		if !ok {
+			t.Fatalf("__complete %s \"\": no \":<directive>\" line in output %q", name, out)
+		}
+		if directive == 0 {
+			defaulted = append(defaulted, name)
+		}
+	}
+
+	sort.Strings(defaulted)
+	want := []string{"promote"}
+	if !reflect.DeepEqual(defaulted, want) {
+		t.Fatalf("verbs falling to ShellCompDirectiveDefault = %v, want exactly %v", defaulted, want)
 	}
 }

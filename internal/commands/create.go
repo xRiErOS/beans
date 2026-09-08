@@ -191,5 +191,6 @@ func RegisterCreateCmd(root *cobra.Command) {
 	createCmd.Flags().StringVar(&createOrder, "order", "", "Explicit fractional-index order value")
 	createCmd.Flags().BoolVar(&createJSON, "json", false, "Output as JSON")
 	createCmd.MarkFlagsMutuallyExclusive("body", "body-file")
+	createCmd.ValidArgsFunction = completionNoFileComp
 	root.AddCommand(createCmd)
 }
