@@ -152,26 +152,32 @@ func TestPriorityCandidates(t *testing.T) {
 
 // TestTagCandidates pins TagCandidates' content and order: every tag in
 // use across all beans with an accurate usage count, sorted by count
-// descending then tag ascending.
+// descending then tag ascending. It calls TagCandidates repeatedly
+// because Go randomizes map iteration order per call: if the sort were
+// ever removed, at least one of the repeated calls would very likely
+// surface an unsorted order, whereas a single call could occasionally
+// pass by coincidence on this small fixture.
 func TestTagCandidates(t *testing.T) {
 	resolver, _ := fixture(t)
 
-	got, err := TagCandidates(context.Background(), resolver)
-	if err != nil {
-		t.Fatalf("TagCandidates: %v", err)
-	}
-
 	wantTags := []string{"alpha", "bravo", "charlie"}
 	wantCounts := map[string]int{"alpha": 2, "bravo": 2, "charlie": 1}
-	if len(got) != len(wantTags) {
-		t.Fatalf("got %v, want tags %v", got, wantTags)
-	}
-	for i, tc := range got {
-		if tc.Tag != wantTags[i] {
-			t.Fatalf("tag %d = %q, want %q (got order %v)", i, tc.Tag, wantTags[i], got)
+
+	for run := range 10 {
+		got, err := TagCandidates(context.Background(), resolver)
+		if err != nil {
+			t.Fatalf("run %d: TagCandidates: %v", run, err)
 		}
-		if tc.Count != wantCounts[tc.Tag] {
-			t.Fatalf("tag %q count = %d, want %d", tc.Tag, tc.Count, wantCounts[tc.Tag])
+		if len(got) != len(wantTags) {
+			t.Fatalf("run %d: got %v, want tags %v", run, got, wantTags)
+		}
+		for i, tc := range got {
+			if tc.Tag != wantTags[i] {
+				t.Fatalf("run %d: tag %d = %q, want %q (got order %v)", run, i, tc.Tag, wantTags[i], got)
+			}
+			if tc.Count != wantCounts[tc.Tag] {
+				t.Fatalf("run %d: tag %q count = %d, want %d", run, tc.Tag, tc.Count, wantCounts[tc.Tag])
+			}
 		}
 	}
 }
@@ -182,20 +188,31 @@ func TestTagCandidates(t *testing.T) {
 // valid parent types must be the intersection of each bean's own valid
 // parent types (epic -> {milestone}, feature -> {milestone, epic}),
 // leaving only milestone. Without the intersection, epic-typed beans
-// (e.g. beans-e2) would leak in as candidates too.
+// (e.g. beans-e2) would leak in as candidates too. Checked in both
+// argument orders since intersection is commutative.
 func TestParentCandidates_IntersectsValidTypesAcrossMultipleSelectedBeans(t *testing.T) {
 	resolver, cfg := fixture(t)
 
-	got, err := ParentCandidates(context.Background(), resolver, cfg, []string{"beans-e1", "beans-f1"}, []string{"epic", "feature"})
-	if err != nil {
-		t.Fatalf("ParentCandidates: %v", err)
-	}
+	for _, beanIDs := range [][]string{
+		{"beans-e1", "beans-f1"},
+		{"beans-f1", "beans-e1"},
+	} {
+		beanTypes := []string{"epic", "feature"}
+		if beanIDs[0] == "beans-f1" {
+			beanTypes = []string{"feature", "epic"}
+		}
 
-	mustEqual(t, ids(got), []string{"beans-m1", "beans-m2"})
+		got, err := ParentCandidates(context.Background(), resolver, cfg, beanIDs, beanTypes)
+		if err != nil {
+			t.Fatalf("ParentCandidates(%v, %v): %v", beanIDs, beanTypes, err)
+		}
 
-	for _, id := range ids(got) {
-		if id == "beans-e2" {
-			t.Fatalf("expected beans-e2 (epic, outside the type intersection) to be excluded, got %v", ids(got))
+		mustEqual(t, ids(got), []string{"beans-m1", "beans-m2"})
+
+		for _, id := range ids(got) {
+			if id == "beans-e2" {
+				t.Fatalf("beanIDs=%v: expected beans-e2 (epic, outside the type intersection) to be excluded, got %v", beanIDs, ids(got))
+			}
 		}
 	}
 }
