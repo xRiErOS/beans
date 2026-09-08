@@ -109,6 +109,7 @@ func TestBeanIDCandidatesSourceNeverCallsBodyLoader(t *testing.T) {
 		"Render":           true,
 		"ReadFile":         true,
 		"loadFromDisk":     true,
+		"loadBean":         true,
 		"Load":             true,
 		"parseFrontMatter": true,
 	}
@@ -219,18 +220,59 @@ func TestCompletionUpToStopsAtBoundary(t *testing.T) {
 // order.go and roadmap.go carry one). sharedTestRoot (error_shape_test.go)
 // is this package's one process-wide RegisterCoreCommands call; every test
 // that needs a fully wired root reuses it instead of registering again.
+//
+// A bare "ValidArgsFunction != nil" check observes only that something got
+// registered -- a function that always returned (nil, ShellCompDirectiveError)
+// would pass it. This calls the REGISTERED function through root.Find, at
+// zero args (must offer candidates) and at one arg (must match the verb's
+// declared binding: unbounded verbs keep offering, arity-1 verbs stop), so
+// a swapped wiring -- completionUnbounded on a verb that ships
+// completionUpTo(1), or vice versa -- turns exactly that verb's subtest red.
+var idVerbCases = []struct {
+	name      string
+	unbounded bool
+}{
+	{"complete", true},
+	{"delete", true},
+	{"order", false},
+	{"scrap", true},
+	{"show", true},
+	{"start", true},
+	{"tag", true},
+	{"update", false},
+	{"graph", false},
+	{"progress", false},
+	{"roadmap", false},
+	{"rename", false},
+}
+
 func TestEachIDVerbRegistersValidArgsFunction(t *testing.T) {
+	setupCompletionTest(t, 3)
 	root := sharedTestRoot(t)
 
-	names := []string{"complete", "delete", "order", "scrap", "show", "start", "tag", "update", "graph", "progress", "roadmap", "rename"}
-	for _, name := range names {
-		cmd, _, err := root.Find([]string{name})
-		if err != nil {
-			t.Fatalf("root.Find(%q): %v", name, err)
-		}
-		if cmd.ValidArgsFunction == nil {
-			t.Errorf("verb %q has no ValidArgsFunction registered", name)
-		}
+	for _, tc := range idVerbCases {
+		t.Run(tc.name, func(t *testing.T) {
+			cmd, _, err := root.Find([]string{tc.name})
+			if err != nil {
+				t.Fatalf("root.Find(%q): %v", tc.name, err)
+			}
+			if cmd.ValidArgsFunction == nil {
+				t.Fatalf("verb %q has no ValidArgsFunction registered", tc.name)
+			}
+
+			atZero, _ := cmd.ValidArgsFunction(cmd, nil, "")
+			if len(atZero) == 0 {
+				t.Errorf("verb %q: ValidArgsFunction(0 args) returned no candidates", tc.name)
+			}
+
+			atOne, _ := cmd.ValidArgsFunction(cmd, []string{"beans-existing"}, "")
+			switch {
+			case tc.unbounded && len(atOne) == 0:
+				t.Errorf("verb %q is unbounded: ValidArgsFunction(1 arg) returned no candidates, want more", tc.name)
+			case !tc.unbounded && len(atOne) != 0:
+				t.Errorf("verb %q stops at arity 1: ValidArgsFunction(1 arg) returned %d candidates, want 0", tc.name, len(atOne))
+			}
+		})
 	}
 }
 
