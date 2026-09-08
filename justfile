@@ -64,7 +64,7 @@ uninstall-wip:
 
 # Run the Go test suite, e.g. `just test ./internal/bean/...`
 test ARGS='./...':
-    go test {{ARGS}}
+    go test -count=1 {{ARGS}}
 
 # Run the frontend unit tests, e.g. `just test-web --project server`
 test-web ARGS='':
@@ -81,7 +81,7 @@ test-e2e ARGS='':
 
 # Run the Go test suite under the race detector
 test-race ARGS='./...':
-    go test -race {{ARGS}}
+    go test -race -count=1 {{ARGS}}
 
 # Validate .goreleaser.yaml (schema, templates) without building anything
 release-check:
