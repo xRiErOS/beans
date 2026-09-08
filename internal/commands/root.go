@@ -11,6 +11,7 @@ import (
 	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/spf13/cobra"
+	"github.com/spf13/pflag"
 )
 
 var core *beancore.Core
@@ -67,7 +68,7 @@ a full view of your project.`,
 			feedTypeTables(cfg)
 			feedStatusPriorityTables(cfg)
 
-			root, err := resolveBeansPath(beansPath, cfg)
+			root, err := resolveBeansPath(completionAwareBeansPath(cmd, args), cfg)
 			if err != nil {
 				return err
 			}
@@ -124,6 +125,35 @@ func feedStatusPriorityTables(c *config.Config) {
 		symbols[p.Name] = p.Symbol
 	}
 	ui.SetPrioritySymbols(symbols)
+}
+
+// completionAwareBeansPath returns the --beans-path value PersistentPreRunE
+// should resolve against, accounting for cobra's __complete request.
+//
+// completeCmd (cobra's hidden "__complete" command) sets
+// DisableFlagParsing: true, because it must forward the untouched
+// command-line words to its own getCompletions logic rather than have
+// cobra's normal Command.execute consume them. That means Command.execute
+// skips ParseFlags for it (command.go's execute: "if c.DisableFlagParsing {
+// return nil }"), so the beansPath package var bound to the --beans-path
+// flag is never populated by the time PersistentPreRunE runs here -- even
+// though the raw args this hook receives still contain "--beans-path X"
+// verbatim (cobra's Find only strips flags for command-name matching; it
+// never discards them from the args it hands back). Left alone,
+// resolveBeansPath falls back to directory discovery, silently returning
+// another store's candidates (beans-9jtq).
+//
+// Outside a __complete request cobra has already parsed --beans-path
+// normally, so beansPath is authoritative and is returned unchanged.
+func completionAwareBeansPath(cmd *cobra.Command, args []string) string {
+	if cmd.Name() != cobra.ShellCompRequestCmd {
+		return beansPath
+	}
+	fs := pflag.NewFlagSet("completion-beans-path", pflag.ContinueOnError)
+	fs.ParseErrorsAllowlist = pflag.ParseErrorsAllowlist{UnknownFlags: true}
+	path := fs.String("beans-path", "", "")
+	_ = fs.Parse(args)
+	return *path
 }
 
 // resolveBeansPath determines the beans data directory path.

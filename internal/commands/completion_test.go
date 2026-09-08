@@ -1,10 +1,13 @@
 package commands
 
 import (
+	"bytes"
+	"fmt"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -14,6 +17,137 @@ import (
 	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/xRiErOS/beans/pkg/config"
 )
+
+// completionTestBinary is the compiled cmd/beans binary, built once in
+// TestMain. Reaching the beans-9jtq bug requires cobra's real __complete
+// request (completions.go's DisableFlagParsing path) driven through
+// Execute()/ExecuteC(), which sharedTestRoot's in-process root.Find +
+// ValidArgsFunction calls never exercise -- those skip straight past
+// PersistentPreRunE's flag handling entirely.
+var completionTestBinary string
+
+func TestMain(m *testing.M) {
+	binDir, err := os.MkdirTemp("", "beans-completion-bin")
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "beans-completion-bin mkdtemp:", err)
+		os.Exit(1)
+	}
+	defer os.RemoveAll(binDir)
+
+	repoRoot, err := filepath.Abs(filepath.Join("..", ".."))
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "resolve repo root:", err)
+		os.Exit(1)
+	}
+
+	completionTestBinary = filepath.Join(binDir, "beans")
+	build := exec.Command("go", "build", "-o", completionTestBinary, "./cmd/beans")
+	build.Dir = repoRoot
+	if out, err := build.CombinedOutput(); err != nil {
+		fmt.Fprintf(os.Stderr, "building beans binary: %v\n%s", err, out)
+		os.Exit(1)
+	}
+
+	os.Exit(m.Run())
+}
+
+// writeFixtureStore creates a real .beans store on disk (not the
+// package-global core setupCompletionTest swaps in) with a single bean
+// named "<idPrefix>-only", so a completion test driven through a
+// subprocess can tell which store answered by grepping its stdout. The
+// explicit Slug forces BuildFilename's double-dash "id--slug.md" form;
+// without it, an ID containing a dash and no slug round-trips through
+// ParseFilename's single-dash legacy fallback and gets cut at the first
+// dash on reload -- a filename-format quirk unrelated to this bug that
+// would otherwise corrupt the fixture IDs this test greps for.
+func writeFixtureStore(t *testing.T, beansDir string, idPrefix string) {
+	t.Helper()
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating fixture store dir: %v", err)
+	}
+	c := beancore.New(beansDir, config.Default())
+	if err := c.Load(); err != nil {
+		t.Fatalf("loading fixture core: %v", err)
+	}
+	b := &bean.Bean{
+		ID:     idPrefix + "-only",
+		Slug:   "fixture",
+		Title:  "Fixture bean",
+		Status: "todo",
+		Type:   "task",
+	}
+	if err := c.Create(b); err != nil {
+		t.Fatalf("creating fixture bean: %v", err)
+	}
+}
+
+// runBeansCompletion runs the compiled binary with cwd and args, returning
+// its stdout and its exit error (nil on success). Only stdout is used for
+// assertions: cobra's __complete Run prints candidates and the trailing
+// ":<directive>" line there, never on stderr.
+func runBeansCompletion(t *testing.T, cwd string, args []string) (string, error) {
+	t.Helper()
+	cmd := exec.Command(completionTestBinary, args...)
+	cmd.Dir = cwd
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	if testing.Verbose() {
+		t.Logf("stderr: %s", stderr.String())
+	}
+	return stdout.String(), err
+}
+
+// AC-01/AC-02: beans --beans-path <X> __complete show "" must yield
+// candidates from <X>, not from a store discovered via cwd -- even when
+// that foreign cwd carries its own .beans.yml. A foreign .beans.yml is the
+// case that matters (see beans-9jtq "Known failure mode"): directory
+// discovery and the flag coincide when the test runs from inside the
+// flag's own store, so a test that never leaves that store's directory
+// cannot observe this bug (the mistake beans-hh5z SC-01 made).
+func TestCompletionBeansPathOverridesForeignCwdDiscovery(t *testing.T) {
+	flagStoreBeans := filepath.Join(t.TempDir(), ".beans")
+	writeFixtureStore(t, flagStoreBeans, "flagstore")
+
+	foreignCwd := t.TempDir()
+	writeFixtureStore(t, filepath.Join(foreignCwd, ".beans"), "cwdstore")
+	if err := os.WriteFile(filepath.Join(foreignCwd, ".beans.yml"), []byte("beans:\n  path: .beans\n"), 0644); err != nil {
+		t.Fatalf("writing foreign .beans.yml: %v", err)
+	}
+
+	out, err := runBeansCompletion(t, foreignCwd, []string{"--beans-path", flagStoreBeans, "__complete", "show", ""})
+	if err != nil {
+		t.Fatalf("__complete show \"\" failed: %v\nstdout: %s", err, out)
+	}
+
+	if !strings.Contains(out, "flagstore-only") {
+		t.Errorf("completion output = %q, want the --beans-path store's candidate (flagstore-only)", out)
+	}
+	if strings.Contains(out, "cwdstore-only") {
+		t.Errorf("completion output = %q, must not contain the foreign cwd's own store's candidate (cwdstore-only) -- the flag must win", out)
+	}
+}
+
+// The store-unresolvable half of the same contract: an invalid
+// --beans-path must never fall back to the foreign cwd's perfectly valid
+// store. "No candidates" is the only acceptable outcome.
+func TestCompletionUnresolvableStoreYieldsNoCandidates(t *testing.T) {
+	foreignCwd := t.TempDir()
+	writeFixtureStore(t, filepath.Join(foreignCwd, ".beans"), "cwdstore")
+	if err := os.WriteFile(filepath.Join(foreignCwd, ".beans.yml"), []byte("beans:\n  path: .beans\n"), 0644); err != nil {
+		t.Fatalf("writing foreign .beans.yml: %v", err)
+	}
+
+	missingStore := filepath.Join(t.TempDir(), "does-not-exist")
+	out, err := runBeansCompletion(t, foreignCwd, []string{"--beans-path", missingStore, "__complete", "show", ""})
+	if err == nil {
+		t.Fatalf("__complete show \"\" with an unresolvable --beans-path succeeded, want failure; stdout = %q", out)
+	}
+	if strings.Contains(out, "cwdstore-only") {
+		t.Errorf("completion output = %q, must not fall back to the foreign cwd's own store when --beans-path is unresolvable", out)
+	}
+}
 
 // setupCompletionTest installs a throwaway core with n beans into the
 // package globals the completion functions read, mirroring
