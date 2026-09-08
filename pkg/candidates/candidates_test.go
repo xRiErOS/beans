@@ -150,6 +150,9 @@ func TestPriorityCandidates(t *testing.T) {
 	}
 }
 
+// TestTagCandidates pins TagCandidates' content and order: every tag in
+// use across all beans with an accurate usage count, sorted by count
+// descending then tag ascending.
 func TestTagCandidates(t *testing.T) {
 	resolver, _ := fixture(t)
 
@@ -158,17 +161,41 @@ func TestTagCandidates(t *testing.T) {
 		t.Fatalf("TagCandidates: %v", err)
 	}
 
-	counts := make(map[string]int, len(got))
-	for _, tc := range got {
-		counts[tc.Tag] = tc.Count
+	wantTags := []string{"alpha", "bravo", "charlie"}
+	wantCounts := map[string]int{"alpha": 2, "bravo": 2, "charlie": 1}
+	if len(got) != len(wantTags) {
+		t.Fatalf("got %v, want tags %v", got, wantTags)
 	}
-	want := map[string]int{"alpha": 2, "bravo": 2, "charlie": 1}
-	if len(counts) != len(want) {
-		t.Fatalf("got %v, want %v", counts, want)
+	for i, tc := range got {
+		if tc.Tag != wantTags[i] {
+			t.Fatalf("tag %d = %q, want %q (got order %v)", i, tc.Tag, wantTags[i], got)
+		}
+		if tc.Count != wantCounts[tc.Tag] {
+			t.Fatalf("tag %q count = %d, want %d", tc.Tag, tc.Count, wantCounts[tc.Tag])
+		}
 	}
-	for tag, count := range want {
-		if counts[tag] != count {
-			t.Fatalf("tag %q count = %d, want %d", tag, counts[tag], count)
+}
+
+// TestParentCandidates_IntersectsValidTypesAcrossMultipleSelectedBeans
+// pins intersectStrings' role in a multi-select ParentCandidates call:
+// with beans-e1 (epic) and beans-f1 (feature) selected together, the
+// valid parent types must be the intersection of each bean's own valid
+// parent types (epic -> {milestone}, feature -> {milestone, epic}),
+// leaving only milestone. Without the intersection, epic-typed beans
+// (e.g. beans-e2) would leak in as candidates too.
+func TestParentCandidates_IntersectsValidTypesAcrossMultipleSelectedBeans(t *testing.T) {
+	resolver, cfg := fixture(t)
+
+	got, err := ParentCandidates(context.Background(), resolver, cfg, []string{"beans-e1", "beans-f1"}, []string{"epic", "feature"})
+	if err != nil {
+		t.Fatalf("ParentCandidates: %v", err)
+	}
+
+	mustEqual(t, ids(got), []string{"beans-m1", "beans-m2"})
+
+	for _, id := range ids(got) {
+		if id == "beans-e2" {
+			t.Fatalf("expected beans-e2 (epic, outside the type intersection) to be excluded, got %v", ids(got))
 		}
 	}
 }
