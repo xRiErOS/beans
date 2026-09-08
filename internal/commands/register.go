@@ -77,20 +77,29 @@ func RegisterCoreCommands(root *cobra.Command) {
 	registerDeprecatedCmd(root, "tui", "beans-tui")
 
 	// Cobra's own help and completion commands are plumbing exactly like
-	// init/path/version (AC2). Materialise them now — idempotent, and the
-	// standard way a cobra app gets a handle on its own built-ins before
-	// Execute() — so they carry the marker before any caller inspects the
-	// tree, the same as every verb this package registers explicitly.
+	// init/path/version (AC2), but classifying them by name would itself
+	// be the curated verb-name list SC-03 forbids — just spelled as two
+	// `cmd.Name() ==` comparisons instead of a slice. Classify them by
+	// origin instead: snapshot every command already on the root (the 24
+	// core verbs plus the 2 stubs), materialise cobra's built-ins, then
+	// mark plumbing whatever is new. "Added by cobra's own bootstrap,
+	// not by an explicit Register*Cmd call above" is a structural fact,
+	// not a name literal, and survives cobra renaming or adding a third
+	// built-in.
+	preBuiltin := make(map[*cobra.Command]bool, len(root.Commands()))
+	for _, cmd := range root.Commands() {
+		preBuiltin[cmd] = true
+	}
 	root.InitDefaultHelpCmd()
 	root.InitDefaultCompletionCmd()
 	for _, cmd := range root.Commands() {
-		if cmd.Name() == "help" || cmd.Name() == "completion" {
+		if !preBuiltin[cmd] {
 			markPlumbing(cmd)
 		}
 	}
 
 	// Every verb this loop has not already marked plumbing above —
-	// including the 22 real commands and the serve/tui stubs — is
+	// including the 24 real commands and the serve/tui stubs — is
 	// user-facing per AC2's "every other registered verb" default.
 	for _, cmd := range root.Commands() {
 		if cmd.Annotations[audienceAnnotationKey] == "" {

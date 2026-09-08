@@ -1,6 +1,22 @@
 package commands
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/spf13/cobra"
+)
+
+// TestIsUserFacingDefaultsClosed pins the direction R-07 exists for: a
+// command with no audience marker at all (e.g. one a future verb forgets to
+// classify) must read as plumbing, not silently fall through to
+// user-facing. beans pick (beans-tatz) trusts an unmarked verb to be
+// filtered out, not shown.
+func TestIsUserFacingDefaultsClosed(t *testing.T) {
+	bare := &cobra.Command{Use: "unclassified"}
+	if IsUserFacing(bare) {
+		t.Error("a command with no audience annotation reported user-facing, want plumbing-by-default")
+	}
+}
 
 // TestAudienceMarkerCoversEveryRegisteredVerb pins AC1: every command in the
 // tree carries a queryable audience classification, readable without
