@@ -329,13 +329,16 @@ func (c *Core) loadFromDisk() error {
 		return err
 	}
 
-	// Reinitialize search index if it was active: close and re-create (best-effort, don't fail load)
+	// Resync the search index if it was active: diff against the freshly
+	// reloaded beans instead of closing and rebuilding from scratch, so a
+	// reload only reindexes what actually changed (AC-02).
 	if c.searchIndex != nil {
-		c.searchIndex.Close()
-		c.searchIndex = nil
-
-		if err := c.ensureSearchIndexLocked(); err != nil {
-			c.logWarn("failed to reinitialize search index after reload: %v", err)
+		allBeans := make([]*bean.Bean, 0, len(c.beans))
+		for _, b := range c.beans {
+			allBeans = append(allBeans, b)
+		}
+		if err := c.searchIndex.Sync(allBeans); err != nil {
+			c.logWarn("failed to resync search index after reload: %v", err)
 		}
 	}
 
@@ -398,29 +401,45 @@ func (c *Core) loadBean(path string) (*bean.Bean, error) {
 	return b, nil
 }
 
-// ensureSearchIndexLocked initializes the in-memory search index if not already created.
-// Must be called with lock held or from a method that holds the lock.
+// ensureSearchIndexLocked initializes the search index if not already created.
+// Must be called with lock held or from a method that holds the lock. It
+// prefers a persisted, cross-process index at c.indexDir() (AC-01, AC-04);
+// on any error resolving that location, opening it, or acquiring its lock,
+// it falls back to a private in-memory index rather than fail (AC-05,
+// AC-07). Either way, the index is then synced to the current in-memory
+// beans (AC-02, AC-03).
 func (c *Core) ensureSearchIndexLocked() error {
 	if c.searchIndex != nil {
 		return nil
 	}
 
-	idx, err := search.NewIndex()
-	if err != nil {
-		return fmt.Errorf("initializing search index: %w", err)
+	var idx *search.Index
+	if dir, err := c.indexDir(); err != nil {
+		c.logWarn("resolving persisted search index location: %v", err)
+	} else if pidx, err := search.Open(dir); err != nil {
+		c.logWarn("opening persisted search index: %v", err)
+	} else {
+		idx = pidx
 	}
 
-	c.searchIndex = idx
+	if idx == nil {
+		memIdx, err := search.NewIndex()
+		if err != nil {
+			return fmt.Errorf("initializing search index: %w", err)
+		}
+		idx = memIdx
+	}
 
-	// Populate the in-memory index with existing beans
 	allBeans := make([]*bean.Bean, 0, len(c.beans))
 	for _, b := range c.beans {
 		allBeans = append(allBeans, b)
 	}
-	if err := c.searchIndex.IndexBeans(allBeans); err != nil {
+	if err := idx.Sync(allBeans); err != nil {
+		idx.Close()
 		return fmt.Errorf("populating search index: %w", err)
 	}
 
+	c.searchIndex = idx
 	return nil
 }
 

@@ -16,6 +16,7 @@ import (
 // helpers, so both tests and benchmarks can use it.
 func benchCore(tb testing.TB, n int) *Core {
 	tb.Helper()
+	tb.Setenv("HOME", tb.TempDir()) // keep the persisted search index out of the real ~/.beans
 	beansDir := filepath.Join(tb.TempDir(), BeansDir)
 	if err := os.MkdirAll(beansDir, 0755); err != nil {
 		tb.Fatalf("creating test .beans dir: %v", err)
