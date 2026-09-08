@@ -136,7 +136,6 @@ func runChild(t *testing.T, dir string) {
 
 	cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^TestHelperChildIndexUnderLock$", "-test.v", "-test.timeout=25s")
 	cmd.Env = append(os.Environ(),
-		"BEANS_SEARCH_CHILD_MODE=1",
 		"BEANS_SEARCH_CHILD_DIR="+dir,
 	)
 	output, err := cmd.CombinedOutput()
