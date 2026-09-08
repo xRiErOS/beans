@@ -14,20 +14,23 @@ import (
 
 // fixture builds a small bean tree:
 //
-//	beans-m1 "Milestone A" (milestone)
-//	beans-m2 "Milestone B" (milestone)
-//	beans-e1 "Epic A"      (epic, parent beans-m1)
-//	beans-e2 "Epic B"      (epic)
-//	beans-f1 "Feature A"   (feature, parent beans-e1) tags: alpha, bravo
+//	beans-m1 "Milestone A" (milestone)                                tags: echo, delta
+//	beans-m2 "Milestone B" (milestone)                                tags: echo, delta
+//	beans-e1 "Epic A"      (epic, parent beans-m1)                    tags: echo, delta
+//	beans-e2 "Epic B"      (epic)                                     tags: echo, delta
+//	beans-f1 "Feature A"   (feature, parent beans-e1) tags: alpha, bravo, echo
 //	beans-f2 "Feature B"   (feature, parent beans-e2) tags: alpha
 //	beans-t1 "Task A"      (task, parent beans-f1)    tags: bravo, charlie
 //	beans-m3 "Milestone C" (milestone, parent beans-t1; a descendant of
 //	                        beans-f1 whose type would otherwise be a valid
 //	                        parent candidate, so it can only be kept out of
 //	                        ParentCandidates by the descendant exclusion)
-//	                        tags: bravo (brings bravo's count to 3, ahead
-//	                        of alpha's 2, so the expected tag order
-//	                        depends on count, not just alphabetical luck)
+//	                        tags: bravo
+//
+// Tag counts: echo=5, delta=4, bravo=3, alpha=2, charlie=1 — five
+// pairwise-distinct counts, so the expected tag order [echo, delta,
+// bravo, alpha, charlie] can only be produced by a comparator that
+// actually orders by count; see the rationale on TestTagCandidates.
 func fixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 	t.Helper()
 	beansDir := filepath.Join(t.TempDir(), ".beans")
@@ -41,11 +44,11 @@ func fixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
 	}
 
 	beans := []*bean.Bean{
-		{ID: "beans-m1", Slug: bean.Slugify("Milestone A"), Title: "Milestone A", Status: "todo", Type: "milestone"},
-		{ID: "beans-m2", Slug: bean.Slugify("Milestone B"), Title: "Milestone B", Status: "todo", Type: "milestone"},
-		{ID: "beans-e1", Slug: bean.Slugify("Epic A"), Title: "Epic A", Status: "todo", Type: "epic", Parent: "beans-m1"},
-		{ID: "beans-e2", Slug: bean.Slugify("Epic B"), Title: "Epic B", Status: "todo", Type: "epic"},
-		{ID: "beans-f1", Slug: bean.Slugify("Feature A"), Title: "Feature A", Status: "todo", Type: "feature", Parent: "beans-e1", Tags: []string{"alpha", "bravo"}},
+		{ID: "beans-m1", Slug: bean.Slugify("Milestone A"), Title: "Milestone A", Status: "todo", Type: "milestone", Tags: []string{"echo", "delta"}},
+		{ID: "beans-m2", Slug: bean.Slugify("Milestone B"), Title: "Milestone B", Status: "todo", Type: "milestone", Tags: []string{"echo", "delta"}},
+		{ID: "beans-e1", Slug: bean.Slugify("Epic A"), Title: "Epic A", Status: "todo", Type: "epic", Parent: "beans-m1", Tags: []string{"echo", "delta"}},
+		{ID: "beans-e2", Slug: bean.Slugify("Epic B"), Title: "Epic B", Status: "todo", Type: "epic", Tags: []string{"echo", "delta"}},
+		{ID: "beans-f1", Slug: bean.Slugify("Feature A"), Title: "Feature A", Status: "todo", Type: "feature", Parent: "beans-e1", Tags: []string{"alpha", "bravo", "echo"}},
 		{ID: "beans-f2", Slug: bean.Slugify("Feature B"), Title: "Feature B", Status: "todo", Type: "feature", Parent: "beans-e2", Tags: []string{"alpha"}},
 		{ID: "beans-t1", Slug: bean.Slugify("Task A"), Title: "Task A", Status: "todo", Type: "task", Parent: "beans-f1", Tags: []string{"bravo", "charlie"}},
 		{ID: "beans-m3", Slug: bean.Slugify("Milestone C"), Title: "Milestone C", Status: "todo", Type: "milestone", Parent: "beans-t1", Tags: []string{"bravo"}},
@@ -155,23 +158,27 @@ func TestPriorityCandidates(t *testing.T) {
 
 // TestTagCandidates pins TagCandidates' content and order: every tag in
 // use across all beans with an accurate usage count, sorted by count
-// descending then tag ascending. The fixture gives every tag a distinct
-// count (bravo=3, alpha=2, charlie=1) specifically so the expected order
-// [bravo, alpha, charlie] can only be produced by actually comparing
-// counts — a comparator that fell back to pure alphabetical order (e.g.
-// count-desc silently dropped) would deterministically produce
-// [alpha, bravo, charlie] instead, which already differs on a single
-// run. The 10x repeated-call loop additionally guards against a broken
-// comparator (e.g. one that never orders anything, leaving the result at
-// the mercy of Go's per-call-randomized map iteration): since [bravo,
-// alpha, charlie] would then have to arise by chance identically on all
-// 10 independently randomized iterations, an accidental pass is
-// astronomically unlikely rather than merely "possible on this fixture".
+// descending then tag ascending. The fixture gives five tags five
+// pairwise-distinct counts (echo=5, delta=4, bravo=3, alpha=2,
+// charlie=1), so the expected order [echo, delta, bravo, alpha,
+// charlie] is neither alphabetical nor any other structurally simple
+// permutation of the tag set: it is reachable only by a comparator that
+// actually orders by count. A comparator that dropped the count
+// comparison (falling back to pure tag order) would deterministically
+// produce [alpha, bravo, charlie, delta, echo] instead, differing on a
+// single run. A comparator that ordered nothing at all leaves the
+// result at the mercy of Go's per-call-randomized map iteration, whose
+// reachable orders (rotations of one process-wide hash-bucket layout)
+// are a small, fixed subset of all 5! permutations; the 10x repeated
+// -call loop requires the exact expected order on all 10 independently
+// randomized iterations, which the widened, non-trivial target makes an
+// accidental full pass vanishingly unlikely without claiming it is
+// mathematically impossible.
 func TestTagCandidates(t *testing.T) {
 	resolver, _ := fixture(t)
 
-	wantTags := []string{"bravo", "alpha", "charlie"}
-	wantCounts := map[string]int{"alpha": 2, "bravo": 3, "charlie": 1}
+	wantTags := []string{"echo", "delta", "bravo", "alpha", "charlie"}
+	wantCounts := map[string]int{"echo": 5, "delta": 4, "bravo": 3, "alpha": 2, "charlie": 1}
 
 	for run := range 10 {
 		got, err := TagCandidates(context.Background(), resolver)
