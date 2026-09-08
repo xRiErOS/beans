@@ -1,0 +1,238 @@
+package commands
+
+import (
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/spf13/cobra"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/config"
+)
+
+// setupCompletionTest installs a throwaway core with n beans into the
+// package globals the completion functions read, mirroring
+// setupStartTest's pattern (start_test.go).
+func setupCompletionTest(t *testing.T, n int) []*bean.Bean {
+	t.Helper()
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+
+	testCfg := config.Default()
+	testCore := beancore.New(beansDir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	beans := make([]*bean.Bean, 0, n)
+	for i := range n {
+		b := &bean.Bean{
+			ID:     bean.Slugify("fixture") + "-" + string(rune('a'+i)),
+			Title:  "Fixture bean",
+			Status: "todo",
+			Type:   "task",
+			// A poison Body: SC-03 requires the candidate source never
+			// reads it. If beanIDCandidates ever grows a Body reference,
+			// this string would leak into a candidate and TestBeanIDCandidatesNeverExposeBody
+			// below would catch it.
+			Body: "POISON-BODY-MUST-NEVER-APPEAR-IN-COMPLETION-OUTPUT",
+		}
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create() error = %v", err)
+		}
+		beans = append(beans, b)
+	}
+	return beans
+}
+
+// AC-02/SC-01: candidates come from the store, not an empty list.
+func TestBeanIDCandidatesReturnsEveryBean(t *testing.T) {
+	beans := setupCompletionTest(t, 5)
+
+	got := beanIDCandidates()
+	if len(got) != 5 {
+		t.Fatalf("beanIDCandidates() returned %d candidates, want 5", len(got))
+	}
+
+	seen := make(map[string]bool, len(got))
+	for _, c := range got {
+		id := strings.SplitN(c, "\t", 2)[0]
+		seen[id] = true
+	}
+	for _, b := range beans {
+		if !seen[b.ID] {
+			t.Errorf("candidate list missing bean id %q", b.ID)
+		}
+	}
+}
+
+// AC-03/SC-03 (substring class): the formatted candidate text never contains
+// a bean's body content.
+func TestBeanIDCandidatesNeverExposeBody(t *testing.T) {
+	setupCompletionTest(t, 3)
+
+	for _, c := range beanIDCandidates() {
+		if strings.Contains(c, "POISON-BODY-MUST-NEVER-APPEAR-IN-COMPLETION-OUTPUT") {
+			t.Fatalf("candidate %q leaks bean Body content", c)
+		}
+	}
+}
+
+// AC-03/SC-03 (structural class): a substring grep is undergoverned for an
+// absence criterion, so this parses completion.go's AST and asserts that no
+// call inside beanIDCandidates names a body-loading/parsing operation
+// (Get, GetFromArchive, Render, ReadFile, loadFromDisk) -- it may only walk
+// the already-resident core.All() slice.
+func TestBeanIDCandidatesSourceNeverCallsBodyLoader(t *testing.T) {
+	disallowed := map[string]bool{
+		"Get":              true,
+		"GetFromArchive":   true,
+		"Render":           true,
+		"ReadFile":         true,
+		"loadFromDisk":     true,
+		"Load":             true,
+		"parseFrontMatter": true,
+	}
+
+	fset := token.NewFileSet()
+	file, err := parser.ParseFile(fset, "completion.go", nil, parser.AllErrors)
+	if err != nil {
+		t.Fatalf("parsing completion.go: %v", err)
+	}
+
+	var found *ast.FuncDecl
+	for _, decl := range file.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if ok && fn.Name.Name == "beanIDCandidates" {
+			found = fn
+			break
+		}
+	}
+	if found == nil {
+		t.Fatal("completion.go declares no beanIDCandidates function")
+	}
+
+	ast.Inspect(found.Body, func(n ast.Node) bool {
+		call, ok := n.(*ast.CallExpr)
+		if !ok {
+			return true
+		}
+		var name string
+		switch fn := call.Fun.(type) {
+		case *ast.SelectorExpr:
+			name = fn.Sel.Name
+		case *ast.Ident:
+			name = fn.Name
+		}
+		if disallowed[name] {
+			t.Errorf("beanIDCandidates calls disallowed body-loading function %q", name)
+		}
+		return true
+	})
+}
+
+// AC-04 (unbounded verbs): complete/delete/scrap/show/start/tag declare
+// cobra.MinimumNArgs(1) with no ceiling, so candidates keep coming no matter
+// how many positions are already filled.
+func TestCompletionUnboundedNeverStops(t *testing.T) {
+	setupCompletionTest(t, 2)
+
+	for _, argc := range []int{0, 1, 5} {
+		args := make([]string, argc)
+		got, directive := completionUnbounded(nil, args, "")
+		if len(got) != 2 {
+			t.Errorf("argc=%d: got %d candidates, want 2", argc, len(got))
+		}
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("argc=%d: directive = %v, want ShellCompDirectiveNoFileComp", argc, directive)
+		}
+	}
+}
+
+// AC-05: a bounded verb stops offering candidates once its declared arity
+// is satisfied. Measured at the three points that matter -- one position
+// under the boundary, at it, and one past it -- because only the boundary
+// itself proves anything (BOUNDARIES evidence cited in the bean).
+func TestCompletionUpToStopsAtBoundary(t *testing.T) {
+	setupCompletionTest(t, 4)
+
+	fn := completionUpTo(2)
+	cases := []struct {
+		argc      int
+		wantEmpty bool
+	}{
+		{argc: 1, wantEmpty: false}, // under the boundary: still offering
+		{argc: 2, wantEmpty: true},  // at the boundary: arity satisfied
+		{argc: 3, wantEmpty: true},  // past the boundary: stays stopped
+	}
+	for _, tc := range cases {
+		args := make([]string, tc.argc)
+		got, directive := fn(nil, args, "")
+		if tc.wantEmpty && len(got) != 0 {
+			t.Errorf("argc=%d: got %d candidates, want 0", tc.argc, len(got))
+		}
+		if !tc.wantEmpty && len(got) == 0 {
+			t.Errorf("argc=%d: got 0 candidates, want > 0", tc.argc)
+		}
+		if directive != cobra.ShellCompDirectiveNoFileComp {
+			t.Errorf("argc=%d: directive = %v, want ShellCompDirectiveNoFileComp", tc.argc, directive)
+		}
+	}
+}
+
+// AC-01: each of the twelve verbs registers a ValidArgsFunction. promote is
+// deliberately excluded -- neither of its positions names an existing bean
+// (see the coordinator question posted 2026-09-08: promote.go:44,51 takes
+// an artifact path and finding-ids, not bean IDs).
+//
+// Register funcs bind package-level singleton command/flag vars, so a
+// second ad hoc Register call in this test binary panics in pflag with
+// "flag redefined" for any verb lacking its own idempotency guard (only
+// order.go and roadmap.go carry one). sharedTestRoot (error_shape_test.go)
+// is this package's one process-wide RegisterCoreCommands call; every test
+// that needs a fully wired root reuses it instead of registering again.
+func TestEachIDVerbRegistersValidArgsFunction(t *testing.T) {
+	root := sharedTestRoot(t)
+
+	names := []string{"complete", "delete", "order", "scrap", "show", "start", "tag", "update", "graph", "progress", "roadmap", "rename"}
+	for _, name := range names {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("root.Find(%q): %v", name, err)
+		}
+		if cmd.ValidArgsFunction == nil {
+			t.Errorf("verb %q has no ValidArgsFunction registered", name)
+		}
+	}
+}
+
+// rename's second position is a new, not-yet-existing identifier (rename.go
+// Long: "beans rename <id> <new-id> full new ID"), so it must not offer
+// existing bean IDs even though cobra.MaximumNArgs(2) allows a second
+// position at all.
+func TestRenameSecondPositionOffersNoCandidates(t *testing.T) {
+	setupCompletionTest(t, 3)
+
+	root := sharedTestRoot(t)
+	cmd, _, err := root.Find([]string{"rename"})
+	if err != nil {
+		t.Fatalf("root.Find(rename): %v", err)
+	}
+
+	got, _ := cmd.ValidArgsFunction(cmd, []string{"beans-existing"}, "")
+	if len(got) != 0 {
+		t.Errorf("rename position 2: got %d candidates, want 0 (new-id is not an existing bean)", len(got))
+	}
+}

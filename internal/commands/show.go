@@ -270,5 +270,6 @@ func RegisterShowCmd(root *cobra.Command) {
 	showCmd.Flags().BoolVar(&showBodyOnly, "body-only", false, "Output only the body content")
 	showCmd.Flags().BoolVar(&showETagOnly, "etag-only", false, "Output only the etag")
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only")
+	showCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(showCmd)
 }

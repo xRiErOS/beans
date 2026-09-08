@@ -75,5 +75,6 @@ ID is resolved before the first bean is written.`,
 
 func RegisterStartCmd(root *cobra.Command) {
 	startCmd.Flags().BoolVar(&startJSON, "json", false, "Output as JSON")
+	startCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(startCmd)
 }

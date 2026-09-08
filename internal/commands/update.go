@@ -338,5 +338,6 @@ func RegisterUpdateCmd(root *cobra.Command) {
 	updateCmd.MarkFlagsMutuallyExclusive("body", "body-file", "body-append")
 	// body-replace-old and body-append can now be used together!
 	updateCmd.MarkFlagsRequiredTogether("body-replace-old", "body-replace-new")
+	updateCmd.ValidArgsFunction = completionUpTo(1)
 	root.AddCommand(updateCmd)
 }
