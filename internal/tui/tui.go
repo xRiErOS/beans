@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/candidates"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/xRiErOS/beans/pkg/safepath"
 	"github.com/xRiErOS/beans/pkg/beangraph"
@@ -621,19 +622,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // collectTagsWithCounts returns all tags with their usage counts
 func (a *App) collectTagsWithCounts() []tagWithCount {
-	beans, _ := a.resolver.Beans(context.Background(), nil)
-	tagCounts := make(map[string]int)
-	for _, b := range beans {
-		for _, tag := range b.Tags {
-			tagCounts[tag]++
-		}
+	tagCounts, _ := candidates.TagCandidates(context.Background(), a.resolver)
+	tags := make([]tagWithCount, len(tagCounts))
+	for i, tc := range tagCounts {
+		tags[i] = tagWithCount{tag: tc.Tag, count: tc.Count}
 	}
-
-	tags := make([]tagWithCount, 0, len(tagCounts))
-	for tag, count := range tagCounts {
-		tags = append(tags, tagWithCount{tag: tag, count: count})
-	}
-
 	return tags
 }
 

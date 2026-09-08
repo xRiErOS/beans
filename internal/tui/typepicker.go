@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xRiErOS/beans/pkg/candidates"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/xRiErOS/beans/internal/ui"
 )
@@ -82,8 +83,8 @@ type typePickerModel struct {
 }
 
 func newTypePickerModel(beanIDs []string, beanTitle, currentType string, cfg *config.Config, width, height int) typePickerModel {
-	// Get all types (hardcoded in config package)
-	types := config.DefaultTypes
+	// Get all types
+	types := candidates.TypeCandidates()
 
 	delegate := typeItemDelegate{}
 

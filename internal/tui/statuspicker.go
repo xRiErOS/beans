@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/xRiErOS/beans/pkg/candidates"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/xRiErOS/beans/internal/ui"
 )
@@ -83,8 +84,8 @@ type statusPickerModel struct {
 }
 
 func newStatusPickerModel(beanIDs []string, beanTitle, currentStatus string, cfg *config.Config, width, height int) statusPickerModel {
-	// Get all statuses (hardcoded in config package)
-	statuses := config.DefaultStatuses
+	// Get all statuses
+	statuses := candidates.StatusCandidates()
 
 	delegate := statusItemDelegate{}
 

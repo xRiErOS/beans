@@ -1,0 +1,153 @@
+package candidates
+
+import (
+	"context"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/config"
+)
+
+// fixture builds a small bean tree:
+//
+//	beans-m1 "Milestone A" (milestone)
+//	beans-m2 "Milestone B" (milestone)
+//	beans-e1 "Epic A"      (epic, parent beans-m1)
+//	beans-e2 "Epic B"      (epic)
+//	beans-f1 "Feature A"   (feature, parent beans-e1) tags: alpha, bravo
+//	beans-f2 "Feature B"   (feature, parent beans-e2) tags: alpha
+//	beans-t1 "Task A"      (task, parent beans-f1)    tags: bravo, charlie
+func fixture(t *testing.T) (*beangraph.CoreResolver, *config.Config) {
+	t.Helper()
+	beansDir := filepath.Join(t.TempDir(), ".beans")
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating test .beans dir: %v", err)
+	}
+	cfg := config.Default()
+	core := beancore.New(beansDir, cfg)
+	if err := core.Load(); err != nil {
+		t.Fatalf("loading core: %v", err)
+	}
+
+	beans := []*bean.Bean{
+		{ID: "beans-m1", Slug: bean.Slugify("Milestone A"), Title: "Milestone A", Status: "todo", Type: "milestone"},
+		{ID: "beans-m2", Slug: bean.Slugify("Milestone B"), Title: "Milestone B", Status: "todo", Type: "milestone"},
+		{ID: "beans-e1", Slug: bean.Slugify("Epic A"), Title: "Epic A", Status: "todo", Type: "epic", Parent: "beans-m1"},
+		{ID: "beans-e2", Slug: bean.Slugify("Epic B"), Title: "Epic B", Status: "todo", Type: "epic"},
+		{ID: "beans-f1", Slug: bean.Slugify("Feature A"), Title: "Feature A", Status: "todo", Type: "feature", Parent: "beans-e1", Tags: []string{"alpha", "bravo"}},
+		{ID: "beans-f2", Slug: bean.Slugify("Feature B"), Title: "Feature B", Status: "todo", Type: "feature", Parent: "beans-e2", Tags: []string{"alpha"}},
+		{ID: "beans-t1", Slug: bean.Slugify("Task A"), Title: "Task A", Status: "todo", Type: "task", Parent: "beans-f1", Tags: []string{"bravo", "charlie"}},
+	}
+	for _, b := range beans {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s): %v", b.ID, err)
+		}
+	}
+
+	return &beangraph.CoreResolver{Core: core}, cfg
+}
+
+func ids(beans []*bean.Bean) []string {
+	out := make([]string, len(beans))
+	for i, b := range beans {
+		out[i] = b.ID
+	}
+	return out
+}
+
+func mustEqual(t *testing.T, got, want []string) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("got %v, want %v", got, want)
+		}
+	}
+}
+
+func TestParentCandidates_ExcludesSelfAndDescendants(t *testing.T) {
+	resolver, cfg := fixture(t)
+
+	got, err := ParentCandidates(context.Background(), resolver, cfg, []string{"beans-f1"}, []string{"feature"})
+	if err != nil {
+		t.Fatalf("ParentCandidates: %v", err)
+	}
+
+	mustEqual(t, ids(got), []string{"beans-m1", "beans-m2", "beans-e1", "beans-e2"})
+}
+
+func TestBlockingCandidates_IncludesDescendants(t *testing.T) {
+	resolver, cfg := fixture(t)
+
+	got, err := BlockingCandidates(context.Background(), resolver, cfg, "beans-f1")
+	if err != nil {
+		t.Fatalf("BlockingCandidates: %v", err)
+	}
+
+	mustEqual(t, ids(got), []string{"beans-m1", "beans-m2", "beans-e1", "beans-e2", "beans-f2", "beans-t1"})
+}
+
+func TestStatusCandidates(t *testing.T) {
+	got := StatusCandidates()
+	if len(got) != len(config.DefaultStatuses) {
+		t.Fatalf("got %d statuses, want %d", len(got), len(config.DefaultStatuses))
+	}
+	for i, s := range config.DefaultStatuses {
+		if got[i].Name != s.Name {
+			t.Fatalf("status %d = %q, want %q", i, got[i].Name, s.Name)
+		}
+	}
+}
+
+func TestTypeCandidates(t *testing.T) {
+	got := TypeCandidates()
+	if len(got) != len(config.DefaultTypes) {
+		t.Fatalf("got %d types, want %d", len(got), len(config.DefaultTypes))
+	}
+	for i, ty := range config.DefaultTypes {
+		if got[i].Name != ty.Name {
+			t.Fatalf("type %d = %q, want %q", i, got[i].Name, ty.Name)
+		}
+	}
+}
+
+func TestPriorityCandidates(t *testing.T) {
+	got := PriorityCandidates()
+	if len(got) != len(config.DefaultPriorities) {
+		t.Fatalf("got %d priorities, want %d", len(got), len(config.DefaultPriorities))
+	}
+	for i, p := range config.DefaultPriorities {
+		if got[i].Name != p.Name {
+			t.Fatalf("priority %d = %q, want %q", i, got[i].Name, p.Name)
+		}
+	}
+}
+
+func TestTagCandidates(t *testing.T) {
+	resolver, _ := fixture(t)
+
+	got, err := TagCandidates(context.Background(), resolver)
+	if err != nil {
+		t.Fatalf("TagCandidates: %v", err)
+	}
+
+	counts := make(map[string]int, len(got))
+	for _, tc := range got {
+		counts[tc.Tag] = tc.Count
+	}
+	want := map[string]int{"alpha": 2, "bravo": 2, "charlie": 1}
+	if len(counts) != len(want) {
+		t.Fatalf("got %v, want %v", counts, want)
+	}
+	for tag, count := range want {
+		if counts[tag] != count {
+			t.Fatalf("tag %q count = %d, want %d", tag, counts[tag], count)
+		}
+	}
+}

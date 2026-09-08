@@ -4,17 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/xRiErOS/beans/pkg/bean"
-	"github.com/xRiErOS/beans/pkg/beancore"
-	"github.com/xRiErOS/beans/pkg/config"
-	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/candidates"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // parentSelectedMsg is sent when a parent is selected from the picker
@@ -93,78 +91,7 @@ type parentPickerModel struct {
 }
 
 func newParentPickerModel(beanIDs []string, beanTitle string, beanTypes []string, currentParent string, resolver *beangraph.CoreResolver, cfg *config.Config, width, height int) parentPickerModel {
-	// Get valid parent types - for multi-select, find types valid for ALL beans
-	var validParentTypes []string
-	for i, beanType := range beanTypes {
-		typeParents := beancore.ValidParentTypes(cfg, beanType)
-		if i == 0 {
-			validParentTypes = typeParents
-		} else {
-			// Intersect with existing valid types
-			validParentTypes = intersectStrings(validParentTypes, typeParents)
-		}
-	}
-
-	// Fetch all beans and filter to eligible parents
-	allBeans, _ := resolver.Beans(context.Background(), nil)
-
-	// Collect all descendants of all selected beans (to prevent cycles)
-	allDescendants := make(map[string]bool)
-	for _, beanID := range beanIDs {
-		for descID := range collectDescendants(beanID, allBeans) {
-			allDescendants[descID] = true
-		}
-	}
-
-	// Create set of selected bean IDs for quick lookup
-	selectedSet := make(map[string]bool)
-	for _, id := range beanIDs {
-		selectedSet[id] = true
-	}
-
-	// Filter to eligible parents:
-	// 1. Must be of a valid parent type for ALL selected beans
-	// 2. Must not be any of the selected beans
-	// 3. Must not be a descendant of any selected bean (to prevent cycles)
-	var eligibleBeans []*bean.Bean
-	for _, b := range allBeans {
-		// Skip selected beans
-		if selectedSet[b.ID] {
-			continue
-		}
-		// Skip descendants (would create cycle)
-		if allDescendants[b.ID] {
-			continue
-		}
-		// Check if type is valid
-		isValidType := false
-		for _, validType := range validParentTypes {
-			if b.Type == validType {
-				isValidType = true
-				break
-			}
-		}
-		if !isValidType {
-			continue
-		}
-		eligibleBeans = append(eligibleBeans, b)
-	}
-
-	// Sort by type order (milestone > epic > feature), then by title
-	typeNames := cfg.TypeNames()
-	typeOrder := make(map[string]int)
-	for i, t := range typeNames {
-		typeOrder[t] = i
-	}
-	sort.Slice(eligibleBeans, func(i, j int) bool {
-		// Primary: type order
-		ti, tj := typeOrder[eligibleBeans[i].Type], typeOrder[eligibleBeans[j].Type]
-		if ti != tj {
-			return ti < tj
-		}
-		// Secondary: title (case-insensitive)
-		return strings.ToLower(eligibleBeans[i].Title) < strings.ToLower(eligibleBeans[j].Title)
-	})
+	eligibleBeans, _ := candidates.ParentCandidates(context.Background(), resolver, cfg, beanIDs, beanTypes)
 
 	delegate := parentItemDelegate{cfg: cfg}
 
@@ -213,47 +140,6 @@ func newParentPickerModel(beanIDs []string, beanTitle string, beanTypes []string
 		width:         width,
 		height:        height,
 	}
-}
-
-// intersectStrings returns the intersection of two string slices
-func intersectStrings(a, b []string) []string {
-	set := make(map[string]bool)
-	for _, s := range a {
-		set[s] = true
-	}
-	var result []string
-	for _, s := range b {
-		if set[s] {
-			result = append(result, s)
-		}
-	}
-	return result
-}
-
-// collectDescendants returns a set of all bean IDs that are descendants of the given bean
-func collectDescendants(beanID string, allBeans []*bean.Bean) map[string]bool {
-	descendants := make(map[string]bool)
-
-	// Build parent->children map
-	children := make(map[string][]string)
-	for _, b := range allBeans {
-		if b.Parent != "" {
-			children[b.Parent] = append(children[b.Parent], b.ID)
-		}
-	}
-
-	// BFS to collect all descendants
-	queue := children[beanID]
-	for len(queue) > 0 {
-		childID := queue[0]
-		queue = queue[1:]
-		if !descendants[childID] {
-			descendants[childID] = true
-			queue = append(queue, children[childID]...)
-		}
-	}
-
-	return descendants
 }
 
 func (m parentPickerModel) Init() tea.Cmd {
