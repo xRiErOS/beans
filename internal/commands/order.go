@@ -201,5 +201,6 @@ func RegisterOrderCmd(root *cobra.Command) {
 		orderCmd.Flags().BoolVar(&orderJSON, "json", false, "Output as JSON")
 		orderCmd.MarkFlagsMutuallyExclusive("after", "before", "first", "last")
 	}
+	orderCmd.ValidArgsFunction = completionUpTo(1)
 	root.AddCommand(orderCmd)
 }

@@ -87,5 +87,6 @@ func RegisterScrapCmd(root *cobra.Command) {
 	scrapCmd.Flags().StringVar(&scrapReason, "reason", "", "Reason for scrapping, applied to every bean in the call (required)")
 	scrapCmd.MarkFlagRequired("reason")
 	scrapCmd.Flags().BoolVar(&scrapJSON, "json", false, "Output as JSON")
+	scrapCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(scrapCmd)
 }

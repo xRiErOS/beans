@@ -1064,6 +1064,7 @@ func firstParagraph(body string) string {
 }
 
 func RegisterRoadmapCmd(root *cobra.Command) {
+	roadmapCmd.ValidArgsFunction = completionUpTo(1)
 	// Registration is idempotent: the command is a package-level singleton,
 	// so a second Register call in the same process (tests build several
 	// roots) would panic in pflag with "flag redefined". list.go carries the

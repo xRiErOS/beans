@@ -160,5 +160,6 @@ func progressBarSegments(percent int) (filled, empty string) {
 
 func RegisterProgressCmd(root *cobra.Command) {
 	progressCmd.Flags().BoolVar(&progressJSON, "json", false, "Output as JSON")
+	progressCmd.ValidArgsFunction = completionUpTo(1)
 	root.AddCommand(progressCmd)
 }

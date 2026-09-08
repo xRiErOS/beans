@@ -121,5 +121,6 @@ func RegisterCompleteCmd(root *cobra.Command) {
 	completeCmd.Flags().StringVar(&completeCommit, "commit", "", "Git ref (HEAD, branch, tag, SHA) recorded in the configured commit field of every bean in the call")
 	completeCmd.Flags().StringArrayVar(&completeSet, "set", nil, "Set an extra front matter key as key=value on every bean in the call (can be repeated)")
 	completeCmd.Flags().BoolVar(&completeJSON, "json", false, "Output as JSON")
+	completeCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(completeCmd)
 }

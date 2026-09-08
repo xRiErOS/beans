@@ -142,5 +142,6 @@ func confirmDeleteMultiple(targets []beanWithLinks) bool {
 func RegisterDeleteCmd(root *cobra.Command) {
 	deleteCmd.Flags().BoolVarP(&forceDelete, "force", "f", false, "Skip confirmation and warnings")
 	deleteCmd.Flags().BoolVar(&deleteJSON, "json", false, "Output as JSON (implies --force)")
+	deleteCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(deleteCmd)
 }

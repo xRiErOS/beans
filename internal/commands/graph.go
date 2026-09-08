@@ -333,5 +333,6 @@ func RegisterGraphCmd(root *cobra.Command) {
 		graphCmd.Flags().StringArrayVar(&graphRelation, "relation", nil, `Only this relation kind: "parent" or "blocks" (can be repeated)`)
 		graphCmd.Flags().IntVar(&graphDepth, "depth", 1, "Hops from the named bean; 0 walks the whole connected component (requires a bean id)")
 	}
+	graphCmd.ValidArgsFunction = completionUpTo(1)
 	root.AddCommand(graphCmd)
 }
