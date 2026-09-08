@@ -12,6 +12,7 @@ var archiveJSON bool
 
 var archiveCmd = &cobra.Command{
 	Use:   "archive",
+	Args:  cobra.NoArgs,
 	Short: "Move completed/scrapped beans to the archive",
 	Long: `Moves all beans with status "completed" or "scrapped" to the archive directory (.beans/archive/).
 Archived beans are preserved for project memory and remain visible in all queries.

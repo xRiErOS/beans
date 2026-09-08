@@ -45,6 +45,7 @@ var (
 
 var listCmd = &cobra.Command{
 	Use:     "list",
+	Args:    cobra.NoArgs,
 	Aliases: []string{"ls"},
 	Short:   "List all beans",
 	Long: `Lists all beans in the .beans directory.

@@ -7,6 +7,41 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// audienceAnnotationKey carries the R-07 audience marker in a command's
+// Annotations map: whether a verb is meant for direct human/interactive use
+// (audienceUserFacing) or is plumbing consumed by scripts, shell completion,
+// or the CLI's own bootstrap (audiencePlumbing). It is the single source of
+// truth an interactive caller (e.g. `beans pick`) queries through
+// IsUserFacing — no second, driftable verb-name list may exist anywhere
+// else in the codebase (SC-03).
+const (
+	audienceAnnotationKey = "beans.audience"
+	audienceUserFacing    = "user-facing"
+	audiencePlumbing      = "plumbing"
+)
+
+func markPlumbing(cmd *cobra.Command) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[audienceAnnotationKey] = audiencePlumbing
+}
+
+func markUserFacing(cmd *cobra.Command) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[audienceAnnotationKey] = audienceUserFacing
+}
+
+// IsUserFacing reports whether cmd was classified as a verb meant for a
+// human to type directly, as opposed to plumbing (AC1/AC4). Every command
+// under the root carries the marker once RegisterCoreCommands returns, so a
+// caller needs no verb-name literal of its own to filter by audience.
+func IsUserFacing(cmd *cobra.Command) bool {
+	return cmd.Annotations[audienceAnnotationKey] == audienceUserFacing
+}
+
 // RegisterCoreCommands adds all core CLI commands to the root command.
 func RegisterCoreCommands(root *cobra.Command) {
 	RegisterArchiveCmd(root)
@@ -17,11 +52,13 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterGraphCmd(root)
 	RegisterGraphqlCmd(root)
 	RegisterInitCmd(root)
+	markPlumbing(initCmd)
 	RegisterListCmd(root)
 	RegisterMilestonesCmd(root)
 	RegisterNextCmd(root)
 	RegisterOrderCmd(root)
 	RegisterPathCmd(root)
+	markPlumbing(pathCmd)
 	RegisterPrimeCmd(root)
 	RegisterProgressCmd(root)
 	RegisterPromoteCmd(root)
@@ -33,15 +70,48 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterTagCmd(root)
 	RegisterUpdateCmd(root)
 	RegisterVersionCmd(root)
+	markPlumbing(versionCmd)
 
 	// Deprecated placeholders for commands that moved to separate binaries
 	registerDeprecatedCmd(root, "serve", "beans-serve")
 	registerDeprecatedCmd(root, "tui", "beans-tui")
+
+	// Cobra's own help and completion commands are plumbing exactly like
+	// init/path/version (AC2), but classifying them by name would itself
+	// be the curated verb-name list SC-03 forbids — just spelled as two
+	// `cmd.Name() ==` comparisons instead of a slice. Classify them by
+	// origin instead: snapshot every command already on the root (the 24
+	// core verbs plus the 2 stubs), materialise cobra's built-ins, then
+	// mark plumbing whatever is new. "Added by cobra's own bootstrap,
+	// not by an explicit Register*Cmd call above" is a structural fact,
+	// not a name literal, and survives cobra renaming or adding a third
+	// built-in.
+	preBuiltin := make(map[*cobra.Command]bool, len(root.Commands()))
+	for _, cmd := range root.Commands() {
+		preBuiltin[cmd] = true
+	}
+	root.InitDefaultHelpCmd()
+	root.InitDefaultCompletionCmd()
+	for _, cmd := range root.Commands() {
+		if !preBuiltin[cmd] {
+			markPlumbing(cmd)
+		}
+	}
+
+	// Every verb this loop has not already marked plumbing above —
+	// including the 24 real commands and the serve/tui stubs — is
+	// user-facing per AC2's "every other registered verb" default.
+	for _, cmd := range root.Commands() {
+		if cmd.Annotations[audienceAnnotationKey] == "" {
+			markUserFacing(cmd)
+		}
+	}
 }
 
 func registerDeprecatedCmd(root *cobra.Command, name, binary string) {
 	root.AddCommand(&cobra.Command{
 		Use:    name,
+		Args:   cobra.NoArgs,
 		Short:  fmt.Sprintf("(moved to %s)", binary),
 		Hidden: true,
 		Run: func(cmd *cobra.Command, args []string) {
