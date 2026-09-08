@@ -34,6 +34,7 @@ var (
 
 var createCmd = &cobra.Command{
 	Use:     "create [title]",
+	Args:    cobra.ArbitraryArgs,
 	Aliases: []string{"c", "new"},
 	Short:   "Create a new bean",
 	Long:    `Creates a new bean (issue) with a generated ID and optional title.`,

@@ -66,6 +66,7 @@ func attachmentOrphanIssues(c *beancore.Core) []string {
 
 var checkCmd = &cobra.Command{
 	Use:   "check",
+	Args:  cobra.NoArgs,
 	Short: "Validate configuration and bean integrity",
 	Long: `Checks configuration and bean integrity, including:
 - Configuration settings (colors, default type)

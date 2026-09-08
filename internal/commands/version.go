@@ -12,6 +12,7 @@ var versionJSON bool
 
 var versionCmd = &cobra.Command{
 	Use:   "version",
+	Args:  cobra.NoArgs,
 	Short: "Show version information",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		if versionJSON {
