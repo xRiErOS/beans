@@ -6,15 +6,38 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// TestIsUserFacingDefaultsClosed pins the direction R-07 exists for: a
-// command with no audience marker at all (e.g. one a future verb forgets to
-// classify) must read as plumbing, not silently fall through to
-// user-facing. beans pick (beans-tatz) trusts an unmarked verb to be
-// filtered out, not shown.
+// TestIsUserFacingDefaultsClosed pins the direction IsUserFacing itself
+// takes if the wiring invariant below were ever violated. In the running
+// tree an unmarked command cannot occur: RegisterCoreCommands's final pass
+// explicitly marks every not-yet-plumbing command user-facing, so
+// "unmarked" is not a live state, not a silent fallthrough. This test
+// exercises IsUserFacing directly on a bare command that never went
+// through that wiring, and requires it to read as plumbing rather than
+// defaulting open.
 func TestIsUserFacingDefaultsClosed(t *testing.T) {
 	bare := &cobra.Command{Use: "unclassified"}
 	if IsUserFacing(bare) {
 		t.Error("a command with no audience annotation reported user-facing, want plumbing-by-default")
+	}
+}
+
+// TestCobraBuiltinsArePresentAndPlumbing guards against the marker becoming
+// vacuous. TestAudienceClassifiesThePlumbingSet only classifies whatever is
+// already in root.Commands(): if the InitDefaultHelpCmd/
+// InitDefaultCompletionCmd calls in RegisterCoreCommands were ever deleted,
+// "completion" and "help" would simply be absent from the tree, and that
+// test would stay green over a smaller set. This test finds them by name
+// and requires both that they exist and that they are plumbing.
+func TestCobraBuiltinsArePresentAndPlumbing(t *testing.T) {
+	root := sharedTestRoot(t)
+	for _, name := range []string{"completion", "help"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("%q is missing from the command tree: %v", name, err)
+		}
+		if IsUserFacing(cmd) {
+			t.Errorf("%q classified user-facing, want plumbing", name)
+		}
 	}
 }
 
