@@ -19,15 +19,22 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 widget="$repo/extras/zsh/beans-pick.zsh"
 
-if ! command -v zsh >/dev/null 2>&1; then
-	echo "zsh not installed, skipping beans-pick-widget test"
+# A missing interpreter must not turn this guard into a silent pass on the
+# path that gates merges: locally a skip is a convenience, on a runner it is
+# the same no-op class the guard exists to prevent.
+require() {
+	local tool="$1" why="$2"
+	command -v "$tool" >/dev/null 2>&1 && return 0
+	if [[ -n "${CI:-}" ]]; then
+		echo "FAIL: $tool missing on CI ($why) -- the widget guard cannot be skipped here" >&2
+		exit 1
+	fi
+	echo "$tool not installed ($why), skipping beans-pick-widget test"
 	exit 0
-fi
+}
 
-if ! command -v python3 >/dev/null 2>&1; then
-	echo "python3 not installed (needed for the pty), skipping beans-pick-widget test"
-	exit 0
-fi
+require zsh "the widget under test is zsh"
+require python3 "needed for the pty the widget's /dev/tty redirect requires"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
@@ -58,8 +65,10 @@ failures=0
 # The pty comes from python3's stdlib pty.spawn rather than script(1): the
 # BSD/macOS and util-linux dialects of script(1) take their arguments in
 # incompatible orders, and picking the wrong one degrades to a silent no-op
-# on the very platform (CI) that cannot be rehearsed locally. python3 is
-# already a hard dependency of the toolchain and behaves identically on both.
+# on the very platform (CI) that cannot be rehearsed locally. python3 is not
+# a declared tool in mise.toml, but it ships with both macOS and the CI
+# runner image and behaves identically on both; the require() guard above
+# turns its absence into a hard CI failure rather than a skipped guard.
 run_case() {
 	local name="$1" buffer="$2" cursor="$3" lbuffer="$4" rbuffer="$5"
 	local case_script="$tmp/$name.zsh"
