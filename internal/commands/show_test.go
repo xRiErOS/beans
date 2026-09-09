@@ -745,8 +745,13 @@ func TestTablePairsShareOneRow(t *testing.T) {
 // TestTableRasterIsIdenticalAcrossBeans is the whole promise of the view: two
 // beans with wildly different content produce the same column geometry, so a
 // reader scans down one column instead of reading every line. A renderer that
-// sized its columns from the data it happens to hold would fail here while
+// sized its columns from the values it happens to hold would fail here while
 // looking perfectly fine on a single bean.
+//
+// The promise holds for beans whose labels stay inside the vocabulary, which
+// is what the width is floored at. A longer custom front matter key widens
+// the column on purpose -- see TestTableLongCustomKeyWidensTheColumn -- so
+// the claim here is stability across ordinary beans, not a fixed width.
 func TestTableRasterIsIdenticalAcrossBeans(t *testing.T) {
 	setupShowTest(t)
 
@@ -1696,5 +1701,39 @@ func TestShowParentDoesNotRepeatAGivenChild(t *testing.T) {
 			t.Errorf("shown ids = %v, want %v", got, want)
 			break
 		}
+	}
+}
+
+
+// TestTableLongCustomKeyWidensTheColumn pins the one case where the column is
+// not the vocabulary's width. Truncating a front matter key a user chose
+// would hide which field a row is, so the column grows instead, and the two
+// tests together say exactly how far the raster promise reaches.
+func TestTableLongCustomKeyWidensTheColumn(t *testing.T) {
+	setupShowTest(t)
+
+	plain := &bean.Bean{ID: "beans-vocb1", Title: "Plain", Status: "todo", Type: "task"}
+	longKey := "acceptance_criteria_reference"
+	wide := &bean.Bean{
+		ID: "beans-vocb2", Title: "Wide", Status: "todo", Type: "task",
+		Extra: map[string]any{longKey: "yes"},
+	}
+
+	vocabulary := beanTableLabelWidth([]*bean.Bean{plain}, cfg)
+	widened := beanTableLabelWidth([]*bean.Bean{wide}, cfg)
+
+	if widened <= vocabulary {
+		t.Errorf("label width %d did not grow past the vocabulary width %d for key %q",
+			widened, vocabulary, longKey)
+	}
+	if widened < len(longKey+":") {
+		t.Errorf("label width %d cannot hold %q in full", widened, longKey+":")
+	}
+	if got := beanTableLabelWidth([]*bean.Bean{plain, wide}, cfg); got != widened {
+		t.Errorf("shared width %d for both beans, want the widened %d", got, widened)
+	}
+	rendered := renderBeanTable(wide, cfg, 110, widened)
+	if !strings.Contains(stripANSI(rendered), longKey+":") {
+		t.Errorf("grid does not show the long key in full:\n%s", rendered)
 	}
 }
