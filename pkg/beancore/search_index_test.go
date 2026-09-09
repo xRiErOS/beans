@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // TestIndexDir_OutsideStoreRoot proves AC-04: the persisted index location is
@@ -271,5 +272,216 @@ func TestSearch_SurvivesDeletedPersistedIndex(t *testing.T) {
 	}
 	if len(results) != 1 || results[0].ID != "aaa1" {
 		t.Fatalf("Search() after deletion = %v, want [aaa1]", results)
+	}
+}
+
+// setupTestCoreWithHome is setupTestCore's shape but with the caller
+// choosing HOME explicitly, so several stores in one test can share the
+// same ~/.beans/index/ parent directory (setupTestCore always points HOME
+// at a fresh t.TempDir() per call, which would give each store its own,
+// unrelated index tree and make the prune-on-open tests below vacuous).
+func setupTestCoreWithHome(t *testing.T, home string) (*Core, string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	tmpDir := t.TempDir()
+	beansDir := filepath.Join(tmpDir, BeansDir)
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("failed to create test .beans dir: %v", err)
+	}
+	core := New(beansDir, config.Default())
+	core.SetWarnWriter(nil)
+	if err := core.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+	return core, beansDir
+}
+
+// TestIndexDir_Marker proves AC-01/AC-02/SC-03: opening a persisted index
+// writes a marker recording the store's absolute root, and reopening the
+// same store later leaves that marker untouched rather than rewriting
+// identical content on every open.
+func TestIndexDir_Marker(t *testing.T) {
+	home := t.TempDir()
+	coreA, beansDir := setupTestCoreWithHome(t, home)
+	if _, err := coreA.Search("x"); err != nil {
+		t.Fatalf("Search() #1 error = %v", err)
+	}
+
+	dir, err := coreA.indexDir()
+	if err != nil {
+		t.Fatalf("indexDir() error = %v", err)
+	}
+	markerPath := filepath.Join(dir, indexMarkerFileName)
+	wantRoot, err := filepath.Abs(beansDir)
+	if err != nil {
+		t.Fatalf("Abs() error = %v", err)
+	}
+	content, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("reading marker after first open: %v", err)
+	}
+	if string(content) != wantRoot {
+		t.Fatalf("marker content = %q, want %q", content, wantRoot)
+	}
+	before, err := os.Stat(markerPath)
+	if err != nil {
+		t.Fatalf("stat marker after first open: %v", err)
+	}
+	if err := coreA.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	coreB := New(beansDir, coreA.Config())
+	coreB.SetWarnWriter(nil)
+	if err := coreB.Load(); err != nil {
+		t.Fatalf("Load() (reopen) error = %v", err)
+	}
+	defer coreB.Close()
+	if _, err := coreB.Search("x"); err != nil {
+		t.Fatalf("Search() #2 (reopen) error = %v", err)
+	}
+
+	after, err := os.Stat(markerPath)
+	if err != nil {
+		t.Fatalf("stat marker after reopen: %v", err)
+	}
+	if !before.ModTime().Equal(after.ModTime()) {
+		t.Fatalf("marker was rewritten on reopen: mtime before = %v, after = %v", before.ModTime(), after.ModTime())
+	}
+	content2, err := os.ReadFile(markerPath)
+	if err != nil {
+		t.Fatalf("reading marker after reopen: %v", err)
+	}
+	if string(content2) != wantRoot {
+		t.Fatalf("marker content after reopen = %q, want %q (should be unchanged)", content2, wantRoot)
+	}
+}
+
+// TestIndexDir_PruneOnOpen_RemovesOrphan proves AC-03/SC-01: a sibling
+// index directory whose marker points at a store root that no longer
+// exists on disk is removed the next time any store under the same HOME
+// opens its index.
+func TestIndexDir_PruneOnOpen_RemovesOrphan(t *testing.T) {
+	home := t.TempDir()
+	tmpA := t.TempDir()
+	beansDirA := filepath.Join(tmpA, BeansDir)
+	if err := os.MkdirAll(beansDirA, 0755); err != nil {
+		t.Fatalf("failed to create store A .beans dir: %v", err)
+	}
+	t.Setenv("HOME", home)
+	coreA := New(beansDirA, config.Default())
+	coreA.SetWarnWriter(nil)
+	if err := coreA.Load(); err != nil {
+		t.Fatalf("Load() (store A) error = %v", err)
+	}
+	if _, err := coreA.Search("x"); err != nil {
+		t.Fatalf("Search() (store A) error = %v", err)
+	}
+	dirA, err := coreA.indexDir()
+	if err != nil {
+		t.Fatalf("indexDir() (store A) error = %v", err)
+	}
+	if err := coreA.Close(); err != nil {
+		t.Fatalf("Close() (store A) error = %v", err)
+	}
+
+	// Store A's root is gone: its index directory is now an orphan.
+	if err := os.RemoveAll(tmpA); err != nil {
+		t.Fatalf("RemoveAll(tmpA) error = %v", err)
+	}
+
+	indexRoot := filepath.Dir(dirA)
+	before, err := os.ReadDir(indexRoot)
+	if err != nil {
+		t.Fatalf("ReadDir(indexRoot) before error = %v", err)
+	}
+	nBefore := len(before)
+
+	// Store B, a second, unrelated store under the same HOME: opening it
+	// creates its own sibling directory (indexRoot now holds {A, B}) and
+	// triggers the prune-on-open pass in the same call, which should
+	// remove A and leave only B -- so the net count from nBefore (which
+	// only saw A) is unchanged, but the *survivor* must be B, not A.
+	coreB, _ := setupTestCoreWithHome(t, home)
+	defer coreB.Close()
+	if _, err := coreB.Search("y"); err != nil {
+		t.Fatalf("Search() (store B) error = %v", err)
+	}
+	dirB, err := coreB.indexDir()
+	if err != nil {
+		t.Fatalf("indexDir() (store B) error = %v", err)
+	}
+
+	after, err := os.ReadDir(indexRoot)
+	if err != nil {
+		t.Fatalf("ReadDir(indexRoot) after error = %v", err)
+	}
+	if len(after) != nBefore {
+		t.Fatalf("index dir entries after = %d, want %d (A pruned, B added: net unchanged from nBefore)", len(after), nBefore)
+	}
+	if _, err := os.Stat(dirA); !os.IsNotExist(err) {
+		t.Fatalf("orphaned index dir %s still present after prune (stat err = %v)", dirA, err)
+	}
+	if _, err := os.Stat(dirB); err != nil {
+		t.Fatalf("store B's own index dir %s missing after its own open: %v", dirB, err)
+	}
+}
+
+// TestIndexDir_PruneOnOpen_IgnoresUnparseableMarker guards the AC-04 edge
+// case an early version of pruneOrphanIndexDirs got wrong: os.Stat("")
+// reports ENOENT just like a genuinely deleted store root, so a truncated
+// or empty marker must never be read as "verified gone" -- only a marker
+// whose content actually resolves to an absolute, now-missing path counts
+// as evidence of an orphan.
+func TestIndexDir_PruneOnOpen_IgnoresUnparseableMarker(t *testing.T) {
+	home := t.TempDir()
+	indexRoot := filepath.Join(home, ".beans", "index")
+	staleDir := filepath.Join(indexRoot, "not-a-real-hash")
+	if err := os.MkdirAll(staleDir, 0755); err != nil {
+		t.Fatalf("MkdirAll(staleDir) error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(staleDir, indexMarkerFileName), []byte(""), 0o644); err != nil {
+		t.Fatalf("WriteFile(marker) error = %v", err)
+	}
+
+	coreB, _ := setupTestCoreWithHome(t, home)
+	defer coreB.Close()
+	if _, err := coreB.Search("y"); err != nil {
+		t.Fatalf("Search() (store B) error = %v", err)
+	}
+
+	if _, err := os.Stat(staleDir); err != nil {
+		t.Fatalf("directory with an empty/unparseable marker was pruned: stat err = %v", err)
+	}
+}
+
+// TestIndexDir_PruneOnOpen_KeepsLiveStore proves AC-06: a store whose root
+// still exists on disk keeps its index directory across a sibling's
+// prune-on-open pass.
+func TestIndexDir_PruneOnOpen_KeepsLiveStore(t *testing.T) {
+	home := t.TempDir()
+	coreA, _ := setupTestCoreWithHome(t, home)
+	if _, err := coreA.Search("x"); err != nil {
+		t.Fatalf("Search() (store A) error = %v", err)
+	}
+	dirA, err := coreA.indexDir()
+	if err != nil {
+		t.Fatalf("indexDir() (store A) error = %v", err)
+	}
+	if err := coreA.Close(); err != nil {
+		t.Fatalf("Close() (store A) error = %v", err)
+	}
+	if _, err := os.Stat(dirA); err != nil {
+		t.Fatalf("test precondition failed: index dir %s missing before prune pass: %v", dirA, err)
+	}
+
+	coreB, _ := setupTestCoreWithHome(t, home)
+	defer coreB.Close()
+	if _, err := coreB.Search("y"); err != nil {
+		t.Fatalf("Search() (store B) error = %v", err)
+	}
+
+	if _, err := os.Stat(dirA); err != nil {
+		t.Fatalf("live store's index dir %s was pruned: stat err = %v", dirA, err)
 	}
 }
