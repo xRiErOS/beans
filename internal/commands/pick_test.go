@@ -692,3 +692,50 @@ func TestPickPartialLineToleratesLeadingProgramName(t *testing.T) {
 		}
 	}
 }
+
+// TestPickWidgetLineWithUnmappedVerbErrors pins beans-eeej: the zsh
+// widget's non-empty-buffer branch forwards --line/--cursor exactly as
+// beans-pick.zsh now does ("beans <buffer>" with the cursor at the
+// buffer's end). An unmapped verb (only roadmap carries scope semantics)
+// must still surface AC5's visible error, never a silent fallback to the
+// full, unscoped candidate set -- this is what a widget invocation typed
+// mid "beans show ..." now gets instead of the previously-conflated
+// unconstrained result.
+func TestPickWidgetLineWithUnmappedVerbErrors(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	buffer := "beans show beans-uq10"
+	if err := pick.Flags().Set("line", buffer); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(buffer))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for a widget-shaped --line with an unmapped verb")
+	}
+	if !strings.Contains(err.Error(), "no known scope-derivation mapping") {
+		t.Errorf("error = %q, want it to mention the missing scope-derivation mapping", err)
+	}
+}
+
+// TestPickWidgetEmptyBufferStaysUnconstrained pins beans-eeej: the
+// widget's empty-buffer branch calls flag-less `beans pick` (neither
+// --line nor --cursor set), which resolvePickCandidates's default case
+// still resolves to the full, unscoped store -- a legitimate outcome for
+// starting a line from nothing, not an AC5 "not understood" failure.
+func TestPickWidgetEmptyBufferStaysUnconstrained(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	got, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() with no --line/--cursor error = %v, want the unscoped set", err)
+	}
+	if len(got) != 12 {
+		t.Errorf("len(got) = %d, want all 12 fixture beans", len(got))
+	}
+}
