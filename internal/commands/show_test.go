@@ -1503,3 +1503,198 @@ func TestTableCommandSharesTheColumnAcrossIDs(t *testing.T) {
 		}
 	}
 }
+
+// showParentTestFamily creates a parent with three children and one
+// unrelated bean, and returns the parent.
+func showParentTestFamily(t *testing.T) *bean.Bean {
+	t.Helper()
+	parent := &bean.Bean{ID: "beans-fam01", Slug: "family", Title: "Family", Status: "todo", Type: "epic"}
+	if err := core.Create(parent); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+	for _, id := range []string{"beans-kid01", "beans-kid02", "beans-kid03"} {
+		child := &bean.Bean{ID: id, Slug: id, Title: id, Status: "todo", Type: "task", Parent: parent.ID}
+		if err := core.Create(child); err != nil {
+			t.Fatalf("core.Create() error = %v", err)
+		}
+	}
+	stranger := &bean.Bean{ID: "beans-out01", Slug: "outsider", Title: "Outsider", Status: "todo", Type: "task"}
+	if err := core.Create(stranger); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+	return parent
+}
+
+// showIDsInOutput returns the bean IDs the rendered output shows, in order,
+// read off the id: cell so it counts beans shown rather than mentions.
+func showIDsInOutput(out string) []string {
+	var ids []string
+	for _, line := range strings.Split(out, "\n") {
+		plain := stripANSI(line)
+		if i := strings.Index(plain, "id: "); i >= 0 && strings.HasPrefix(strings.TrimSpace(plain), "│ id:") {
+			rest := strings.Fields(plain[i+len("id: "):])
+			if len(rest) > 0 {
+				ids = append(ids, rest[0])
+			}
+		}
+	}
+	return ids
+}
+
+// TestShowParentResolvesChildren is the feature: the shell substitution over
+// `list --parent --json` moves into the tool. --parent alone selects the
+// children of that bean, mirroring `list --parent`, and takes no ids.
+func TestShowParentResolvesChildren(t *testing.T) {
+	setupShowTest(t)
+	parent := showParentTestFamily(t)
+
+	out := runShowCommand(t, []string{}, func() {
+		showTable, showMeta, showParent = true, true, parent.ID
+	})
+
+	got := showIDsInOutput(out)
+	want := []string{"beans-kid01", "beans-kid02", "beans-kid03"}
+	if len(got) != len(want) {
+		t.Fatalf("showed %v, want the three children %v\n%s", got, want, out)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("shown ids = %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+// TestShowParentAppendsToGivenIDs keeps the case the feature was asked for:
+// a milestone and its children on one page, without naming the milestone
+// twice. Given ids come first, then the children, and the parent is not
+// repeated when it is both an argument and the --parent bean.
+func TestShowParentAppendsToGivenIDs(t *testing.T) {
+	setupShowTest(t)
+	parent := showParentTestFamily(t)
+
+	out := runShowCommand(t, []string{parent.ID}, func() {
+		showTable, showMeta, showParent = true, true, parent.ID
+	})
+
+	got := showIDsInOutput(out)
+	want := []string{parent.ID, "beans-kid01", "beans-kid02", "beans-kid03"}
+	if len(got) != len(want) {
+		t.Fatalf("showed %v, want the parent then its children %v\n%s", got, want, out)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("shown ids = %v, want %v", got, want)
+			break
+		}
+	}
+}
+
+// TestShowParentRejectsUnknownBean keeps --parent as loud as a bad id: a typo
+// must not silently render nothing.
+func TestShowParentRejectsUnknownBean(t *testing.T) {
+	setupShowTest(t)
+	showParentTestFamily(t)
+
+	oldParent := showParent
+	showParent = "beans-nope1"
+	t.Cleanup(func() { showParent = oldParent })
+
+	err := showCmd.RunE(showCmd, []string{})
+	if err == nil {
+		t.Fatal("showCmd.RunE() error = nil, want a not-found error for an unknown --parent")
+	}
+	if !strings.Contains(err.Error(), "beans-nope1") {
+		t.Errorf("error %q does not name the missing bean", err)
+	}
+}
+
+// TestShowParentWithoutChildrenIsAnError distinguishes "no children" from
+// "nothing to say": an empty page looks like a broken command.
+func TestShowParentWithoutChildrenIsAnError(t *testing.T) {
+	setupShowTest(t)
+	showParentTestFamily(t)
+
+	oldParent := showParent
+	showParent = "beans-kid01"
+	t.Cleanup(func() { showParent = oldParent })
+
+	err := showCmd.RunE(showCmd, []string{})
+	if err == nil {
+		t.Fatal("showCmd.RunE() error = nil, want an error when --parent has no children")
+	}
+	if !strings.Contains(err.Error(), "beans-kid01") {
+		t.Errorf("error %q does not name the childless bean", err)
+	}
+}
+
+// TestShowRequiresIDsWithoutParent guards the other half of the arity change:
+// dropping MinimumNArgs(1) must not make a bare `beans show` legal.
+func TestShowRequiresIDsWithoutParent(t *testing.T) {
+	setupShowTest(t)
+
+	oldParent := showParent
+	showParent = ""
+	t.Cleanup(func() { showParent = oldParent })
+
+	if err := showCmd.Args(showCmd, []string{}); err == nil {
+		t.Error("showCmd.Args() error = nil for a bare `show`, want a usage error")
+	}
+	if err := showCmd.Args(showCmd, []string{"beans-kid01"}); err != nil {
+		t.Errorf("showCmd.Args() error = %v for one id, want nil", err)
+	}
+	showParent = "beans-fam01"
+	if err := showCmd.Args(showCmd, []string{}); err != nil {
+		t.Errorf("showCmd.Args() error = %v with --parent and no ids, want nil", err)
+	}
+}
+
+// runShowCommand runs show's RunE with stdout captured, applying setFlags
+// after saving every show flag the suite mutates.
+func runShowCommand(t *testing.T, args []string, setFlags func()) string {
+	t.Helper()
+	oldTable, oldMeta, oldParent := showTable, showMeta, showParent
+	t.Cleanup(func() { showTable, showMeta, showParent = oldTable, oldMeta, oldParent })
+	setFlags()
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	runErr := showCmd.RunE(showCmd, args)
+	os.Stdout = oldStdout
+	w.Close()
+	captured, _ := io.ReadAll(r)
+	if runErr != nil {
+		t.Fatalf("showCmd.RunE() error = %v", runErr)
+	}
+	return string(captured)
+}
+
+// TestShowParentDoesNotRepeatAGivenChild is the collision --parent actually
+// produces: naming one child explicitly and asking for the family would
+// otherwise render that child twice, once from args and once from the
+// resolver. The parent can never collide with its own children, so this is
+// the case that earns the deduplication.
+func TestShowParentDoesNotRepeatAGivenChild(t *testing.T) {
+	setupShowTest(t)
+	parent := showParentTestFamily(t)
+
+	out := runShowCommand(t, []string{"beans-kid02"}, func() {
+		showTable, showMeta, showParent = true, true, parent.ID
+	})
+
+	got := showIDsInOutput(out)
+	want := []string{"beans-kid02", "beans-kid01", "beans-kid03"}
+	if len(got) != len(want) {
+		t.Fatalf("showed %v, want each bean once %v\n%s", got, want, out)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("shown ids = %v, want %v", got, want)
+			break
+		}
+	}
+}
