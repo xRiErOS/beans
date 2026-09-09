@@ -941,24 +941,35 @@ func TestTableRelationsNameTypeAndTitle(t *testing.T) {
 		t.Errorf("unresolvable id was dropped instead of shown bare:\n%s", out)
 	}
 
-	// The id sits at the cell's right edge, not inline: that puts it in the
-	// same column in every relation row, so comparing two relations is
-	// reading one column rather than two phrases of different length. It
-	// also settles where the id goes when the value wraps -- inline it
-	// interrupted type and title, trailing it landed alone on the
-	// continuation line looking like a truncated remnant.
+	// The id sits in the label column on the row beneath its label, not
+	// inside the value cell: the label column is where a reader looks for
+	// what a row is, and keeping the id out of the value column leaves
+	// type and title the full width. Right-aligning it in the value cell,
+	// which this replaced, made every relation cell a dozen cells narrower
+	// than every other cell in the grid.
+	labelCell := func(line string) string {
+		cells := strings.Split(stripANSI(line), "│")
+		if len(cells) != 4 {
+			return ""
+		}
+		return strings.TrimSpace(cells[1])
+	}
+
+	lines := strings.Split(out, "\n")
 	var checked bool
-	for _, line := range strings.Split(out, "\n") {
-		plain := stripANSI(line)
-		if !strings.Contains(plain, "parent:") {
+	for i, line := range lines {
+		if labelCell(line) != "parent:" {
 			continue
 		}
 		checked = true
-		if want := parent.ID + " │"; !strings.HasSuffix(strings.TrimRight(plain, " "), want) {
-			t.Errorf("parent row does not end with the id at the right edge: %q", plain)
+		if i+1 >= len(lines) {
+			t.Fatalf("parent row has no continuation row to carry the id:\n%s", out)
 		}
-		if idAt, titleAt := strings.Index(plain, parent.ID), strings.Index(plain, "The parent epic"); idAt < titleAt {
-			t.Errorf("id precedes the title instead of being right-aligned: %q", plain)
+		if got := labelCell(lines[i+1]); got != parent.ID {
+			t.Errorf("label column beneath parent: is %q, want the id %q:\n%s", got, parent.ID, out)
+		}
+		if strings.Contains(stripANSI(line), parent.ID) {
+			t.Errorf("id is still inside the value cell: %q", stripANSI(line))
 		}
 	}
 	if !checked {

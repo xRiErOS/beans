@@ -101,10 +101,13 @@ func renderBeanTable(b *bean.Bean, cfg *config.Config, width int) string {
 			sb.WriteString(bar + " " + padVisible(packBand(bl, bandWidth), bandWidth) + " " + bar + "\n")
 			continue
 		}
-		for j, line := range wrapFieldValue(bl, valueWidth) {
+		for j, line := range fieldValueLines(bl, valueWidth) {
 			label := ""
-			if j == 0 {
+			switch {
+			case j == 0:
 				label = bl.label
+			case j == 1 && bl.right != "":
+				label = bl.right
 			}
 			sb.WriteString(bar + " " + ui.Muted.Render(ui.PadRight(label, labelWidth)) +
 				" " + bar + " " + padVisible(line, valueWidth) + " " + bar + "\n")
@@ -135,55 +138,22 @@ func packBand(bl tableBlock, bandWidth int) string {
 	return left + strings.Repeat(" ", gap) + bl.right
 }
 
-// wrapFieldValue folds a field's value and pushes its trailer -- the related
-// bean's id -- against the right edge of the first line.
+// fieldValueLines folds a field's value, guaranteeing a second line when the
+// row carries a trailer -- the related bean's id, which is rendered in the
+// label column beneath the label.
 //
-// Right-aligning the id is what makes a relation scannable: it lands in the
-// same column in every row, so comparing two relations is reading one column
-// rather than two phrases of different length. It also settles where the id
-// goes when the cell wraps, which neither leading nor trailing it did: a
-// leading id interrupted the type and title, a trailing one ended up alone
-// on the continuation line looking like a truncated remnant.
-func wrapFieldValue(bl tableBlock, valueWidth int) []string {
-	if bl.right == "" {
-		return wrapVisible(bl.value, valueWidth)
+// The id belongs under its label rather than beside the text: it identifies
+// the row, the label column is where a reader looks for what a row *is*, and
+// putting it there leaves the value column undivided, so type and title get
+// the full width instead of surrendering a dozen cells on every relation
+// row. Right-aligning it inside the value column, which this replaced, made
+// every relation cell narrower than every other cell in the grid.
+func fieldValueLines(bl tableBlock, valueWidth int) []string {
+	lines := wrapVisible(bl.value, valueWidth)
+	if bl.right != "" && len(lines) < 2 {
+		lines = append(lines, "")
 	}
-
-	trailer := visibleWidth(bl.right)
-	first := valueWidth - trailer - 2
-	if first < 1 {
-		// No room to share the line: the id keeps its own, since it is
-		// the part that identifies the row.
-		return append([]string{padLeftVisible(bl.right, valueWidth)},
-			wrapVisible(bl.value, valueWidth)...)
-	}
-
-	lines := wrapVisibleFirst(bl.value, first, valueWidth)
-	gap := valueWidth - visibleWidth(lines[0]) - trailer
-	lines[0] = lines[0] + strings.Repeat(" ", gap) + bl.right
 	return lines
-}
-
-// padLeftVisible right-aligns s in width cells, counting visible cells only.
-func padLeftVisible(s string, width int) string {
-	if pad := width - visibleWidth(s); pad > 0 {
-		return strings.Repeat(" ", pad) + s
-	}
-	return s
-}
-
-// wrapVisibleFirst wraps s with a narrower budget for the first line, which
-// is what leaves room for a right-aligned trailer beside it.
-func wrapVisibleFirst(s string, firstWidth, width int) []string {
-	lines := wrapVisible(s, firstWidth)
-	if len(lines) < 2 {
-		return lines
-	}
-	// Re-flow everything after the first line at the full width, so the
-	// narrowing costs one line's worth of words rather than the whole
-	// cell's.
-	rest := strings.Join(lines[1:], " ")
-	return append(lines[:1], wrapVisible(rest, width)...)
 }
 
 // wrapVisible wraps s to width *visible* cells, leaving the ANSI sequences a
