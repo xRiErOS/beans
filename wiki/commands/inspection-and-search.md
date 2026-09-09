@@ -26,10 +26,16 @@ beans list --json --status in-progress --sort updated --desc
 
 `beans show <id> [id...]` displays the full contents of one or more beans, including front matter and body, and accepts multiple IDs in a single call. Output follows stdout: on a terminal it is styled and the body is rendered as markdown, while piped or redirected output falls back to the raw markdown of the source file, unpadded and unwrapped, so downstream parsers get exactly the file content.
 
-Flags: `--raw` forces raw Markdown output even on a terminal; `--json` returns the bean's front matter and body as JSON instead of Markdown; `--body-only` prints only the body content; `--etag-only` prints only the etag, which is useful for detecting whether a bean changed between two reads. These four output-mode flags are mutually exclusive.
+The styled header carries the whole front matter, not a selection of it: type and id, title, status and priority (plus an inherited status, if one applies), tags, `parent`, `blocking` and `blocked by`, any unknown ("extra") keys such as `branch` or `release` in alphabetical order, and finally the created/updated timestamps and `order`. Tags sit in the header rather than after the body, where a long bean pushed them off the first screen.
+
+Flags: `--raw` forces raw Markdown output even on a terminal; `--json` returns the bean's front matter and body as JSON instead of Markdown; `--body-only` prints only the body content; `--meta` prints only the front matter without the body — the styled header on a terminal, and the source YAML block off one, which still parses as a bean file with an empty body; `--etag-only` prints only the etag, which is useful for detecting whether a bean changed between two reads. These five output-mode flags are mutually exclusive.
 
 ```
 beans show beans-vvat beans-gng9
+```
+
+```
+beans show --meta beans-vvat
 ```
 
 ```
