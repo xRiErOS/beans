@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -26,6 +28,71 @@ func setupPickTest(t *testing.T) {
 
 func pickTestBean(id, title string) *bean.Bean {
 	return &bean.Bean{ID: id, Title: title, Type: "task", Status: "open"}
+}
+
+// TestRunPickReflectsStoreResolvedPerInvocation pins SC-03/AC2.1: pick's
+// candidate set comes from whatever store resolveBeansPath resolved for
+// this invocation via NewRootCmd's PersistentPreRunE, not from a second,
+// independent resolution path. It distinguishes "store A" from "store B"
+// by which of runPick's two early error branches fires -- the empty-store
+// branch for an empty directory, the non-tty branch (reached only once
+// core.All() found candidates) for a populated one -- without needing a
+// real controlling terminal.
+func TestRunPickReflectsStoreResolvedPerInvocation(t *testing.T) {
+	root := sharedTestRoot(t)
+
+	emptyDir := filepath.Join(t.TempDir(), ".beans")
+	if err := os.MkdirAll(emptyDir, 0755); err != nil {
+		t.Fatalf("creating empty store dir: %v", err)
+	}
+
+	populatedDir := filepath.Join(t.TempDir(), ".beans")
+	if err := os.MkdirAll(populatedDir, 0755); err != nil {
+		t.Fatalf("creating populated store dir: %v", err)
+	}
+	seedCore := beancore.New(populatedDir, config.Default())
+	if err := seedCore.Create(pickTestBean("beans-zzzz", "Populated")); err != nil {
+		t.Fatalf("seeding populated store: %v", err)
+	}
+
+	// A closed-read-end pipe is non-terminal stdin, held constant across
+	// both runs so the only variable between them is --beans-path.
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("closing pipe write end: %v", err)
+	}
+	oldStdin := os.Stdin
+	os.Stdin = r
+	t.Cleanup(func() {
+		os.Stdin = oldStdin
+		_ = r.Close()
+	})
+
+	runWith := func(dir string) string {
+		resetFlags(root)
+		var errBuf bytes.Buffer
+		root.SetOut(io.Discard)
+		root.SetErr(&errBuf)
+		root.SetArgs([]string{"--beans-path", dir, "pick"})
+		_, execErr := root.ExecuteC()
+		if execErr == nil {
+			t.Fatalf("expected pick to fail for non-terminal stdin against %s", dir)
+		}
+		return execErr.Error()
+	}
+
+	emptyErr := runWith(emptyDir)
+	populatedErr := runWith(populatedDir)
+
+	if !strings.Contains(emptyErr, "no beans to pick from") {
+		t.Errorf("empty store: got error %q, want the empty-candidates branch", emptyErr)
+	}
+	if !strings.Contains(populatedErr, "not a terminal") {
+		t.Errorf("populated store: got error %q, want the non-tty branch", populatedErr)
+	}
 }
 
 // TestPickCmdIsRegistered pins that RegisterPickCmd actually joins the tree,
