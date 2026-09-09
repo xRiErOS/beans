@@ -65,7 +65,7 @@ func TestShowOutputSwitchesOnTTY(t *testing.T) {
 	b := showTestBean("beans-test1", "A test bean", "# Heading\n\nSome body text.\n")
 
 	t.Run("non-tty is byte-identical to raw", func(t *testing.T) {
-		got, err := showOutput(b, false, false)
+		got, err := showOutput(b, false, false, 110)
 		if err != nil {
 			t.Fatalf("showOutput() error = %v", err)
 		}
@@ -80,7 +80,7 @@ func TestShowOutputSwitchesOnTTY(t *testing.T) {
 	// terminal, so lipgloss and glamour degrade their colour profile and emit
 	// no escape sequences. The horizontal rule is the stable marker.
 	t.Run("tty renders the styled representation", func(t *testing.T) {
-		got, err := showOutput(b, true, false)
+		got, err := showOutput(b, true, false, 110)
 		if err != nil {
 			t.Fatalf("showOutput() error = %v", err)
 		}
@@ -104,7 +104,7 @@ func TestShowOutputAllSeparatorNonTTY(t *testing.T) {
 	b1 := showTestBean("beans-test4", "First bean", "First body.\n")
 	b2 := showTestBean("beans-test5", "Second bean", "Second body.\n")
 
-	got, err := showOutputAll([]*bean.Bean{b1, b2}, false, false)
+	got, err := showOutputAll([]*bean.Bean{b1, b2}, false, false, 110)
 	if err != nil {
 		t.Fatalf("showOutputAll() error = %v", err)
 	}
@@ -123,7 +123,7 @@ func TestShowOutputAllSeparatorTTY(t *testing.T) {
 	b1 := showTestBean("beans-test6", "First bean", "First body.\n")
 	b2 := showTestBean("beans-test7", "Second bean", "Second body.\n")
 
-	got, err := showOutputAll([]*bean.Bean{b1, b2}, true, false)
+	got, err := showOutputAll([]*bean.Bean{b1, b2}, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutputAll() error = %v", err)
 	}
@@ -133,11 +133,11 @@ func TestShowOutputAllSeparatorTTY(t *testing.T) {
 		t.Errorf("expected exactly 1 occurrence of the TTY separator, got %d", n)
 	}
 
-	first, err := showOutput(b1, true, false)
+	first, err := showOutput(b1, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
-	second, err := showOutput(b2, true, false)
+	second, err := showOutput(b2, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -153,7 +153,7 @@ func TestShowOutputEmptyBodyNonTTY(t *testing.T) {
 	setupShowTest(t)
 	b := showTestBean("beans-test2", "Bean without body", "")
 
-	got, err := showOutput(b, false, false)
+	got, err := showOutput(b, false, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -222,7 +222,7 @@ func TestShowNonTTYPreservesLineStructure(t *testing.T) {
 	longLine := strings.Repeat("lorem ipsum dolor sit amet ", 12) // 324 chars
 	b := showTestBean("beans-test3", "Bean with a long paragraph", longLine+"\n")
 
-	got, err := showOutput(b, false, false)
+	got, err := showOutput(b, false, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -247,7 +247,7 @@ func runShowInTestStore(t *testing.T, body string) string {
 	t.Helper()
 	setupShowTest(t)
 	b := showTestBean("beans-detail1", "A detail bean", body)
-	out, err := showOutput(b, true, false)
+	out, err := showOutput(b, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -334,7 +334,7 @@ func TestShowHeaderCarriesCreatedAndUpdatedTimestamps(t *testing.T) {
 	b.CreatedAt = &created
 	b.UpdatedAt = &updated
 
-	out, err := showOutput(b, true, false)
+	out, err := showOutput(b, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -362,7 +362,7 @@ func TestShowDetailShowsNormalPriority(t *testing.T) {
 	b := showTestBean("beans-detail3", "Detail priority bean", "body text")
 	b.Priority = "normal"
 
-	out, err := showOutput(b, true, false)
+	out, err := showOutput(b, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -383,7 +383,7 @@ func TestShowDetailShowsUnknownStatus(t *testing.T) {
 	b := showTestBean("beans-detail5", "Bean with an odd status", "body text")
 	b.Status = "wibble"
 
-	out, err := showOutput(b, true, false)
+	out, err := showOutput(b, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -434,7 +434,7 @@ func TestShowHeaderCarriesWholeFrontMatter(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Body text that mentions nothing else.\n")
 
-	out, err := showOutput(b, true, false)
+	out, err := showOutput(b, true, false, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -470,7 +470,7 @@ func TestShowMetaDropsBodyOnATerminal(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Distinctive body sentinel.\n")
 
-	out, err := showOutput(b, true, true)
+	out, err := showOutput(b, true, true, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -497,7 +497,7 @@ func TestShowMetaOffATerminalParsesAsABean(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Distinctive body sentinel.\n")
 
-	out, err := showOutput(b, false, true)
+	out, err := showOutput(b, false, true, 110)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -537,7 +537,7 @@ func TestShowMetaOffATerminalEmitsNoEmptyDocument(t *testing.T) {
 	b1 := showFullBean("First body.\n")
 	b2 := showTestBean("beans-second", "A second bean", "Second body.\n")
 
-	got, err := showOutputAll([]*bean.Bean{b1, b2}, false, true)
+	got, err := showOutputAll([]*bean.Bean{b1, b2}, false, true, 110)
 	if err != nil {
 		t.Fatalf("showOutputAll() error = %v", err)
 	}
@@ -908,6 +908,13 @@ func TestTableRelationsNameTypeAndTitle(t *testing.T) {
 	if !strings.Contains(out, "beans-gone1") {
 		t.Errorf("unresolvable id was dropped instead of shown bare:\n%s", out)
 	}
+
+	// The id precedes the title: the cell wraps, and an id pushed behind a
+	// long title lands alone on the continuation line looking like a
+	// truncated remnant rather than the bean's name.
+	if idAt, titleAt := strings.Index(out, parent.ID), strings.Index(out, "The parent epic"); idAt > titleAt {
+		t.Errorf("id %q follows the title instead of preceding it:\n%s", parent.ID, out)
+	}
 }
 
 // TestTableWrapsStyledValuesAtVisibleWidth is the defect the first TTY run
@@ -947,6 +954,40 @@ func TestTableWrapsStyledValuesAtVisibleWidth(t *testing.T) {
 	for i, line := range styledLines {
 		if opens, closes := strings.Count(line, "\x1b[38"), strings.Count(line, "\x1b[0m"); opens != closes {
 			t.Errorf("line %d has %d colour starts and %d resets: %q", i, opens, closes, line)
+		}
+	}
+}
+
+// TestShowMaxWidthAppliesWithoutTable pins that --max-width is a property of
+// the command, not of --table. styledBeanOutput hard-wired resolveWidth(0,
+// false, cfg), so `beans show --max-width 60` silently rendered at the
+// default while `beans show --table --max-width 60` obeyed -- a flag that
+// works in one combination and is ignored in another is worse than no flag.
+//
+// The horizontal rule between header and body is the measurement, because
+// its width *is* the resolved width.
+func TestShowMaxWidthAppliesWithoutTable(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body text.\n")
+
+	for _, width := range []int{60, 80} {
+		out, err := showOutput(b, true, false, width)
+		if err != nil {
+			t.Fatalf("showOutput() error = %v", err)
+		}
+		var found bool
+		for _, line := range strings.Split(out, "\n") {
+			plain := stripANSI(line)
+			if strings.Count(plain, "─") < 3 {
+				continue
+			}
+			found = true
+			if got := ui.DisplayWidth(plain); got != width {
+				t.Errorf("at --max-width %d the rule is %d cells wide", width, got)
+			}
+		}
+		if !found {
+			t.Fatalf("no horizontal rule in output:\n%s", out)
 		}
 	}
 }
