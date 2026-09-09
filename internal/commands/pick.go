@@ -383,6 +383,13 @@ func deriveParentContext(toks []lineToken, flagIdx int) (beanIDs, beanTypes []st
 // carries a known type-subset constraint (AC2/AC4), the candidate set is
 // narrowed to it. Any position this does not understand is a visible
 // error (AC5), never a silent unscoped fallback.
+//
+// A live shell buffer's partial line carries the program name as its
+// first token (e.g. "beans roadmap "); a bare verb-first line ("roadmap
+// ") is also accepted directly. A leading token is tolerated as the
+// program name by comparing it against the resolved root command's own
+// Name() -- never against a literal like "beans" (AC4) -- so both forms
+// resolve to the same scope.
 func partialLineCandidates(cmd *cobra.Command, line string, cursor int) ([]*bean.Bean, error) {
 	if cursor < 0 || cursor > len(line) {
 		return nil, fmt.Errorf("beans pick: --cursor %d is out of range for a %d-byte --line", cursor, len(line))
@@ -391,8 +398,19 @@ func partialLineCandidates(cmd *cobra.Command, line string, cursor int) ([]*bean
 	if len(toks) == 0 {
 		return nil, errors.New("beans pick: --line has no verb to resolve")
 	}
-
 	idx := cursorTokenIndex(toks, cursor)
+
+	if toks[0].text == cmd.Root().Name() {
+		toks = toks[1:]
+		idx--
+		if len(toks) == 0 {
+			return nil, errors.New("beans pick: --line has no verb after the program name")
+		}
+		if idx < 0 {
+			return nil, errors.New("beans pick: cursor position is not understood by scope derivation (it sits on the program name)")
+		}
+	}
+
 	if flagIdx, ok := atParentValue(toks, idx); ok {
 		beanIDs, beanTypes, err := deriveParentContext(toks, flagIdx)
 		if err != nil {

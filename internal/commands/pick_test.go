@@ -613,3 +613,82 @@ func TestPickLineRequiresCursorInRange(t *testing.T) {
 		t.Errorf("error = %q, want it to mention the out-of-range cursor", err)
 	}
 }
+
+// TestPickPartialLineVerbWithoutScopeSemanticsErrors pins AC5's coverage
+// of the resolvedCmd-but-unmapped branch: a verb that resolves, and is
+// user-facing, but carries no known type-subset mapping (only roadmap
+// does) must still be a visible error -- never a silent fallback to the
+// full, unscoped candidate set. Coordinator fix-round (2026-09-09):
+// mutating that branch to fall back silently previously left every
+// existing test green.
+func TestPickPartialLineVerbWithoutScopeSemanticsErrors(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	line := "list"
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for a resolved, user-facing verb with no known scope mapping")
+	}
+	if !strings.Contains(err.Error(), "no known scope-derivation mapping") {
+		t.Errorf("error = %q, want it to mention the missing scope-derivation mapping", err)
+	}
+}
+
+// TestPickPartialLineToleratesLeadingProgramName pins the fix-round
+// correction to AC2/SC-02: a live shell buffer's partial line carries the
+// program name as its first token ("beans roadmap "), not just the bare
+// verb ("roadmap "). Both forms must resolve to the identical candidate
+// set, and the program name is recognized via cmd.Root().Name(), never a
+// literal "beans" comparison (AC4).
+func TestPickPartialLineToleratesLeadingProgramName(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	bareLine := "roadmap"
+	if err := pick.Flags().Set("line", bareLine); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(bareLine))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+	bareGot, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() with bare verb error = %v", err)
+	}
+
+	prefixedLine := "beans roadmap"
+	if err := pick.Flags().Set("line", prefixedLine); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(prefixedLine))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+	prefixedGot, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() with \"beans \"-prefixed verb error = %v", err)
+	}
+
+	if len(bareGot) == 0 {
+		t.Fatal("expected a non-empty candidate set for the bare-verb form")
+	}
+	if len(bareGot) != len(prefixedGot) {
+		t.Fatalf("bare verb gave %d candidates, \"beans \"-prefixed gave %d, want equal", len(bareGot), len(prefixedGot))
+	}
+	bareIDs := make(map[string]bool, len(bareGot))
+	for _, b := range bareGot {
+		bareIDs[b.ID] = true
+	}
+	for _, b := range prefixedGot {
+		if !bareIDs[b.ID] {
+			t.Errorf("prefixed-form candidate %s not present in bare-form result", b.ID)
+		}
+	}
+}
