@@ -991,3 +991,47 @@ func TestShowMaxWidthAppliesWithoutTable(t *testing.T) {
 		}
 	}
 }
+
+// TestShowHeaderWrapsAtTheResolvedWidth pins that --max-width governs the
+// header too. renderBeanHeader emitted every label/value pair as one
+// unbroken line, so a bean with a few sentences in an extra key ran to the
+// terminal's own width while the rule below it obeyed the cap -- the flag
+// looked honoured because the only measurable element, the rule, was.
+//
+// The continuation lines are checked for their hanging indent as well: a
+// value that resumes in column 0 reads as a new field rather than as the
+// remainder of the one above it.
+func TestShowHeaderWrapsAtTheResolvedWidth(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+	b.Extra = map[string]any{
+		"customer_value": "Entries that are still queued, that failed, or that look " +
+			"like a double capture are recognisable without relying on colour, and " +
+			"each carries the gesture that resolves it.",
+	}
+	b.Title = "Offline states and duplicate detection: pending, failed and suspicious are visible"
+
+	for _, width := range []int{80, 100} {
+		out := renderBeanHeader(b, cfg, width)
+		for _, line := range strings.Split(out, "\n") {
+			if got := ui.DisplayWidth(stripANSI(line)); got > width {
+				t.Errorf("at width %d a header line is %d cells: %q", width, got, stripANSI(line))
+			}
+		}
+
+		var continuations int
+		for _, line := range strings.Split(out, "\n") {
+			plain := stripANSI(line)
+			if !strings.HasPrefix(plain, " ") || strings.TrimSpace(plain) == "" {
+				continue
+			}
+			continuations++
+			if !strings.HasPrefix(plain, strings.Repeat(" ", len("customer_value: "))) {
+				t.Errorf("continuation line is not aligned under its value: %q", plain)
+			}
+		}
+		if continuations == 0 {
+			t.Errorf("at width %d nothing wrapped, so the test proves nothing:\n%s", width, out)
+		}
+	}
+}

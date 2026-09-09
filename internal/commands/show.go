@@ -158,7 +158,7 @@ func showOutput(b *bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 		return string(content), nil
 	}
 	if metaOnly {
-		return renderBeanHeader(b, cfg), nil
+		return renderBeanHeader(b, cfg, width), nil
 	}
 	return styledBeanOutput(b, width)
 }
@@ -232,7 +232,7 @@ func styledBeanOutput(b *bean.Bean, width int) (string, error) {
 func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 	var sb strings.Builder
 
-	sb.WriteString(renderBeanHeader(b, cfg))
+	sb.WriteString(renderBeanHeader(b, cfg, width))
 	sb.WriteString(ui.TreeLine.Render(strings.Repeat("─", width)) + "\n\n")
 
 	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
@@ -251,7 +251,7 @@ func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 // them below a screenful of markdown. Relationships, unknown ("extra") front
 // matter keys, order and the timestamps follow, each labelled, which is what
 // makes this the whole front matter and not a selection of it.
-func renderBeanHeader(b *bean.Bean, cfg *config.Config) string {
+func renderBeanHeader(b *bean.Bean, cfg *config.Config, width int) string {
 	var sb strings.Builder
 
 	tint := ""
@@ -351,6 +351,44 @@ func renderBeanHeader(b *bean.Bean, cfg *config.Config) string {
 		sb.WriteString(ui.Muted.Render(strings.Join(stamps, "  ")) + "\n")
 	}
 
+	return wrapHeaderLines(sb.String(), width)
+}
+
+// wrapHeaderLines folds every header line to width visible cells, hanging
+// the continuation under the value rather than under the label.
+//
+// It runs over the assembled header instead of inside each of the eight
+// write sites above: the width concern is uniform, and threading it through
+// every branch would put the same three lines in eight places. A value that
+// carries no "label:" prefix -- the type/id and title lines -- wraps flush,
+// because there is no label to hang under.
+func wrapHeaderLines(header string, width int) string {
+	var sb strings.Builder
+	for _, line := range strings.Split(header, "\n") {
+		if line == "" {
+			continue
+		}
+		if visibleWidth(line) <= width {
+			sb.WriteString(line + "\n")
+			continue
+		}
+
+		indent := ""
+		if plain := stripANSI(line); strings.Contains(plain, ": ") {
+			label := plain[:strings.Index(plain, ": ")+2]
+			if !strings.Contains(strings.TrimSuffix(label, ": "), " ") {
+				indent = strings.Repeat(" ", ui.DisplayWidth(label))
+			}
+		}
+
+		for i, folded := range wrapVisible(line, width-ui.DisplayWidth(indent)) {
+			if i == 0 {
+				sb.WriteString(folded + "\n")
+				continue
+			}
+			sb.WriteString(indent + folded + "\n")
+		}
+	}
 	return sb.String()
 }
 
