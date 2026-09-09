@@ -56,10 +56,10 @@ beans help create
 source <(beans completion bash)
 ```
 
-`extras/zsh/beans-pick.zsh` ships alongside this the same way: a source-able zsh file with a ZLE widget bound to `Alt+i` by default that calls `beans pick` and inserts the chosen ID at the cursor.
+`extras/zsh/beans-pick.zsh` ships alongside this the same way: a source-able zsh file with a ZLE widget bound to `Alt+i` by default that calls `beans pick` and inserts the chosen ID at the cursor. When `beans` is installed via a package manager, find this file in the package's share/doc directory (or copy it out of the source checkout) and source it by its absolute path:
 
 ```
-source extras/zsh/beans-pick.zsh
+source /path/to/beans/extras/zsh/beans-pick.zsh
 ```
 
 ## Related documentation
