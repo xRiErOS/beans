@@ -575,9 +575,13 @@ func TestGraphMermaidHandlesAConfiguredPrefix(t *testing.T) {
 	setupGraphTest(t)
 	resetGraphFlags(t)
 
+	// Status names are configuration as well, and they reach the output as
+	// class names, so the same hole exists on that side: a status with a
+	// space would split the class and classDef lines apart.
 	cfg.Beans.Prefix = `my bean"s `
-	hostile := &bean.Bean{ID: `my bean"s vm76`, Slug: "first", Title: "First", Status: "todo", Type: "task"}
-	plain := &bean.Bean{ID: `my bean"s wtwd`, Slug: "second", Title: "Second", Status: "todo", Type: "task",
+	cfg.Statuses = append(cfg.Statuses, config.StatusOverride{Name: `needs "review" now`, Color: "#a6e3a1"})
+	hostile := &bean.Bean{ID: `my bean"s vm76`, Slug: "first", Title: "First", Status: `needs "review" now`, Type: "task"}
+	plain := &bean.Bean{ID: `my bean"s wtwd`, Slug: "second", Title: "Second", Status: `needs "review" now`, Type: "task",
 		BlockedBy: []string{`my bean"s vm76`}}
 	for _, b := range []*bean.Bean{hostile, plain} {
 		if err := core.Create(b); err != nil {
@@ -628,8 +632,22 @@ func TestGraphMermaidHandlesAConfiguredPrefix(t *testing.T) {
 	if !strings.Contains(out, `my bean&quot;s vm76<br/>`) {
 		t.Errorf("the real id is missing from the label:\n%s", out)
 	}
-	// And the hyphen is not swept up with it.
-	if !strings.Contains(out, "status-todo") {
-		t.Errorf("the class name lost its hyphen:\n%s", out)
+	// The class name went through the same guard, and the classDef that
+	// declares it agrees with the class statements that reference it -- a
+	// mismatch would leave every node unstyled.
+	declared := ""
+	for _, line := range strings.Split(out, "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 && fields[0] == "classDef" {
+			declared = fields[1]
+		}
+	}
+	if declared == "" {
+		t.Fatalf("no classDef in the output:\n%s", out)
+	}
+	if strings.ContainsAny(declared, ` "`) {
+		t.Errorf("class name %q carries a space or a quote", declared)
+	}
+	if !strings.Contains(out, "class "+strings.Fields(out[strings.Index(out, "class ")+6:])[0]+" "+declared+";") {
+		t.Errorf("class statements do not reference the declared %q:\n%s", declared, out)
 	}
 }
