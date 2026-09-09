@@ -564,3 +564,72 @@ func TestGraphMermaidNeutralisesHTMLInLabels(t *testing.T) {
 		t.Errorf("the renderer's own line break was escaped away:\n%s", out)
 	}
 }
+
+
+// TestGraphMermaidHandlesAConfiguredPrefix covers the reason the handle is
+// not simply the id: beans.prefix is free-form configuration, so an id can
+// carry a space or a quote, and either one splits a handle and its class
+// statement into fragments Mermaid cannot read. The hyphen is exempt -- it
+// parses -- so the guard has to be narrow rather than a blanket rewrite.
+func TestGraphMermaidHandlesAConfiguredPrefix(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+
+	cfg.Beans.Prefix = `my bean"s `
+	hostile := &bean.Bean{ID: `my bean"s vm76`, Slug: "first", Title: "First", Status: "todo", Type: "task"}
+	plain := &bean.Bean{ID: `my bean"s wtwd`, Slug: "second", Title: "Second", Status: "todo", Type: "task",
+		BlockedBy: []string{`my bean"s vm76`}}
+	for _, b := range []*bean.Bean{hostile, plain} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create() error = %v", err)
+		}
+	}
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", `my bean"s vm76`)
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "flowchart") || strings.HasPrefix(trimmed, "classDef") {
+			continue
+		}
+		// Every handle on a line is a whitespace-delimited token: the node
+		// definition's `id["..."]`, the two ends of an arrow, and the two
+		// names in a class statement. A handle may carry neither a space --
+		// which is why they are tokens at all -- nor a quote.
+		var handles []string
+		switch {
+		case strings.HasPrefix(trimmed, "class "):
+			handles = strings.Fields(strings.TrimSuffix(trimmed, ";"))[1:]
+		case strings.Contains(trimmed, "-->"):
+			for _, side := range strings.Split(trimmed, "-->") {
+				side = strings.TrimSpace(side)
+				if i := strings.LastIndex(side, "|"); i >= 0 {
+					side = strings.TrimSpace(side[i+1:])
+				}
+				handles = append(handles, side)
+			}
+		default:
+			handles = []string{strings.Split(trimmed, `["`)[0]}
+		}
+		for _, h := range handles {
+			if h == "" {
+				t.Errorf("line %q yielded an empty handle", trimmed)
+			}
+			if strings.ContainsAny(h, ` "`) {
+				t.Errorf("handle %q in line %q carries a space or a quote", h, trimmed)
+			}
+		}
+	}
+
+	// The id itself still reaches the reader, in the label.
+	if !strings.Contains(out, `my bean&quot;s vm76<br/>`) {
+		t.Errorf("the real id is missing from the label:\n%s", out)
+	}
+	// And the hyphen is not swept up with it.
+	if !strings.Contains(out, "status-todo") {
+		t.Errorf("the class name lost its hyphen:\n%s", out)
+	}
+}

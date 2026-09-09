@@ -292,18 +292,31 @@ func renderGraphDot(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdge) e
 	return nil
 }
 
-// mermaidQuoteID escapes a bean id or status name for use as a Mermaid node
-// handle or class name. Both parse verbatim, hyphen included -- measured
-// against mermaid 11, which accepts `beans-a --> beans-b` and a class named
-// `s-in-progress` -- so the id is kept as it is: a handle a reader can map
-// back to a bean beats one that cannot, and rewriting the hyphen would let
-// two ids differing only in `-` versus `_` collide on one node.
+// mermaidHandle turns a bean id or status name into a Mermaid node handle or
+// class name.
 //
-// Only a double quote is neutralised, since an id is emitted unquoted here
-// and a quote would open a label where none belongs. Bean ids cannot carry
-// one today; the guard costs nothing and keeps this independent of that.
-func mermaidQuoteID(s string) string {
-	return strings.ReplaceAll(s, `"`, "&quot;")
+// A hyphen is kept: mermaid 11 accepts it in `beans-a --> beans-b` and in a
+// class named `status-in-progress`, so a handle stays something a reader can
+// look up in the store, and two ids differing only in `-` versus `_` cannot
+// collapse onto one node.
+//
+// Everything outside [A-Za-z0-9_-] becomes an underscore, because the id
+// prefix is free-form configuration: `prefix: "my bean\"s "` in .beans.yml
+// yields the real id `my bean"s vm76`, whose space alone splits the handle
+// and the class statement into fragments Mermaid cannot read. The label
+// still carries the id as written, which is where a reader looks for it.
+func mermaidHandle(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '_', r == '-':
+			sb.WriteRune(r)
+		default:
+			sb.WriteByte('_')
+		}
+	}
+	return sb.String()
 }
 
 // mermaidLabel escapes a string for a quoted Mermaid node label.
@@ -354,7 +367,7 @@ func renderGraphMermaid(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdg
 	var classOrder []string
 	for _, b := range beans {
 		fmt.Fprintf(w, "  %s[\"%s<br/>%s\"]\n",
-			mermaidQuoteID(b.ID), mermaidLabel(b.ID), mermaidLabel(ui.Truncate(b.Title, 40)))
+			mermaidHandle(b.ID), mermaidLabel(b.ID), mermaidLabel(ui.Truncate(b.Title, 40)))
 
 		sc := cfg.GetStatus(b.Status)
 		if sc == nil || sc.Color == "" {
@@ -364,17 +377,17 @@ func renderGraphMermaid(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdg
 		if !strings.HasPrefix(colour, "#") {
 			continue
 		}
-		name := "status-" + mermaidQuoteID(b.Status)
+		name := "status-" + mermaidHandle(b.Status)
 		if _, ok := classes[name]; !ok {
 			classes[name] = colour
 			classOrder = append(classOrder, name)
 		}
-		fmt.Fprintf(w, "  class %s %s;\n", mermaidQuoteID(b.ID), name)
+		fmt.Fprintf(w, "  class %s %s;\n", mermaidHandle(b.ID), name)
 	}
 
 	for _, e := range edges {
 		fmt.Fprintf(w, "  %s -->|%s| %s\n",
-			mermaidQuoteID(e.From), mermaidLabel(e.Relation), mermaidQuoteID(e.To))
+			mermaidHandle(e.From), mermaidLabel(e.Relation), mermaidHandle(e.To))
 	}
 
 	for _, name := range classOrder {
