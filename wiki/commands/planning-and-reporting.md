@@ -44,7 +44,13 @@ beans progress --json
 
 ## `beans graph`
 
-`beans graph [id]` prints parent and blocking relationships. The default Graphviz DOT output can be piped into tools such as `dot -Tpng`; `--format ascii` prints a terminal edge list, and `--format json` returns `nodes` and `edges`.
+`beans graph [id]` prints parent and blocking relationships. The default Graphviz DOT output can be piped into tools such as `dot -Tpng`; `--format ascii` prints a terminal edge list, `--format mermaid` a Mermaid flowchart, and `--format json` returns `nodes` and `edges`.
+
+`--format mermaid` writes a `flowchart LR` that pastes into any Markdown document that renders Mermaid, which is what makes a blocking chain readable in a document rather than only on a terminal. Node handles are sanitised — a bean id carries a hyphen, and Mermaid would read `beans-a --> beans-b` as an id followed by a malformed arrow — while the label keeps the real id above the title. Label text is escaped for the characters that would otherwise end the node or be drawn as markup: quotes, the four bracket pairs, angle brackets and the ampersand. Edges carry their relation as the arrow label, so `parent` and `blocks` stay distinguishable, and each status becomes a `classDef` with its configured colour, which is the DOT output's `fillcolor` expressed the way Mermaid allows. One limit is Mermaid's own rather than this command's: the renderer refuses a diagram above 500 edges by default, and a whole store easily passes that, so scope the graph with a bean id, a `--depth` or a `--relation` instead of asking for everything. Combined with `--relation blocks`, this is the direct route from the store to a dependency diagram:
+
+```
+beans graph beans-xkih --format mermaid --relation blocks --depth 0
+```
 
 Without an ID the command includes the complete store. Naming one bean scopes the graph to its neighborhood: `--depth 1` includes its direct relationships, larger values widen the traversal by hops, and `--depth 0` walks its whole connected component. `--relation parent` and `--relation blocks` can be repeated to restrict edge kinds. Broken links and self-links are omitted here and reported by `beans check`.
 
@@ -53,6 +59,7 @@ beans graph
 beans graph beans-xkih --format ascii
 beans graph beans-xkih --depth 2 --relation parent
 beans graph --format json
+beans graph beans-xkih --format mermaid --relation blocks
 ```
 
 ## Related documentation
