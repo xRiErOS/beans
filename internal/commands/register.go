@@ -57,6 +57,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterMilestonesCmd(root)
 	RegisterNextCmd(root)
 	RegisterOrderCmd(root)
+	RegisterPickCmd(root)
 	RegisterPathCmd(root)
 	markPlumbing(pathCmd)
 	RegisterPrimeCmd(root)
