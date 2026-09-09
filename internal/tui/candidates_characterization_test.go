@@ -122,32 +122,23 @@ func TestParentPickerCandidates_ExcludesDescendants(t *testing.T) {
 	}
 }
 
-// TestBlockingPickerCandidates_IncludesDescendants pins the blocking
-// producer's deliberate asymmetry with the parent producer: it excludes
-// only the bean itself, never its descendants.
-func TestBlockingPickerCandidates_IncludesDescendants(t *testing.T) {
+// TestBlockingPickerCandidates_ExcludesDescendants pins the blocking
+// producer's parity with the parent producer: it excludes both the bean
+// itself and its descendants.
+func TestBlockingPickerCandidates_ExcludesDescendants(t *testing.T) {
 	resolver, cfg := candidateFixture(t)
 
 	m := newBlockingPickerModel("beans-f1", "Feature A", nil, resolver, cfg, 100, 40)
 
 	got := blockingPickerBeanIDs(t, m)
-	want := []string{"beans-m1", "beans-m2", "beans-m3", "beans-e1", "beans-e2", "beans-f2", "beans-t1"}
+	want := []string{"beans-m1", "beans-m2", "beans-e1", "beans-e2", "beans-f2"}
 	mustEqual(t, got, want)
 
-	for _, id := range got {
-		if id == "beans-f1" {
-			t.Fatalf("expected beans-f1 (self) to be excluded, got %v", got)
-		}
-	}
-	for _, descendant := range []string{"beans-t1", "beans-m3"} {
-		found := false
+	for _, excluded := range []string{"beans-f1", "beans-t1", "beans-m3"} {
 		for _, id := range got {
-			if id == descendant {
-				found = true
+			if id == excluded {
+				t.Fatalf("expected %s to be excluded from blocking candidates, got %v", excluded, got)
 			}
-		}
-		if !found {
-			t.Fatalf("expected %s (descendant) to remain, unlike the parent picker: %v", descendant, got)
 		}
 	}
 }
