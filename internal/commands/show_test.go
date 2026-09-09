@@ -909,3 +909,44 @@ func TestTableRelationsNameTypeAndTitle(t *testing.T) {
 		t.Errorf("unresolvable id was dropped instead of shown bare:\n%s", out)
 	}
 }
+
+// TestTableWrapsStyledValuesAtVisibleWidth is the defect the first TTY run
+// showed: a styled value (a relation carries the related type's colour and a
+// muted id) wrapped several cells early, because ui.WrapText measures the
+// string it is given and a styled string carries ANSI bytes that occupy no
+// cells. The grid stayed aligned -- padding is computed on visible width --
+// so only a side-by-side comparison of a styled and an unstyled row of the
+// same text reveals it.
+func TestTableWrapsStyledValuesAtVisibleWidth(t *testing.T) {
+	setupShowTest(t)
+
+	// The escape sequences are written out rather than taken from
+	// ui.Muted.Render: the test environment sets NO_COLOR, which makes
+	// lipgloss render plain text and would leave this test asserting
+	// nothing. What the renderer has to survive is ANSI in its input,
+	// whoever produced it.
+	dim := func(s string) string { return "\x1b[38;5;245m" + s + "\x1b[0m" }
+	text := "alpha bravo charlie delta echo foxtrot golf hotel india juliett kilo lima mike"
+	styled := dim("alpha") + " bravo charlie delta echo foxtrot golf " +
+		dim("hotel") + " india juliett kilo lima " + dim("mike")
+
+	plainLines := tableRowLines(tableRow{label: "x:", value: text}, 40)
+	styledLines := tableRowLines(tableRow{label: "x:", value: styled}, 40)
+
+	if len(plainLines) != len(styledLines) {
+		t.Fatalf("styled value wrapped into %d lines, plain into %d:\n%q\n%q",
+			len(styledLines), len(plainLines), styledLines, plainLines)
+	}
+	for i := range plainLines {
+		if got, want := stripANSI(styledLines[i]), plainLines[i]; got != want {
+			t.Errorf("line %d: styled wrapped to %q, plain to %q", i, got, want)
+		}
+	}
+	// Every sequence must survive the wrap paired: a line that opens a
+	// colour and never closes it bleeds into the border and beyond.
+	for i, line := range styledLines {
+		if opens, closes := strings.Count(line, "\x1b[38"), strings.Count(line, "\x1b[0m"); opens != closes {
+			t.Errorf("line %d has %d colour starts and %d resets: %q", i, opens, closes, line)
+		}
+	}
+}

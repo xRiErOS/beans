@@ -105,7 +105,51 @@ func tableRowLines(r tableRow, valueWidth int) []string {
 	if r.value == "" {
 		return []string{""}
 	}
-	return ui.WrapText(r.value, valueWidth)
+	return wrapVisible(r.value, valueWidth)
+}
+
+// wrapVisible wraps s to width *visible* cells, leaving the ANSI sequences a
+// styled value carries intact.
+//
+// ui.WrapText cannot be used directly here: it measures the string it is
+// handed, and a styled value carries escape bytes that occupy no cells, so a
+// coloured relation wrapped several cells early while the grid around it
+// stayed aligned. Splitting on whitespace keeps each sequence inside the
+// token that opened it, so no line can end mid-escape; a single token wider
+// than the column is handed to ui.WrapText stripped, because there is no way
+// to hard-break inside a coloured run without splitting its sequence.
+func wrapVisible(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	tokens := strings.Fields(s)
+	if len(tokens) == 0 {
+		return []string{""}
+	}
+
+	var lines []string
+	cur := ""
+	for _, tok := range tokens {
+		switch {
+		case visibleWidth(tok) > width:
+			if cur != "" {
+				lines = append(lines, cur)
+				cur = ""
+			}
+			lines = append(lines, ui.WrapText(stripANSI(tok), width)...)
+		case cur == "":
+			cur = tok
+		case visibleWidth(cur)+1+visibleWidth(tok) <= width:
+			cur += " " + tok
+		default:
+			lines = append(lines, cur)
+			cur = tok
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	return lines
 }
 
 // padPairs joins the pairs of one row, padding each value to its budget so
