@@ -80,20 +80,26 @@ func ParentCandidates(ctx context.Context, resolver *beangraph.CoreResolver, cfg
 }
 
 // BlockingCandidates returns every bean other than beanID, sorted by type
-// order then title (case-insensitive). Unlike ParentCandidates, it does
-// not exclude descendants of beanID: a bean may block or be blocked by its
-// own descendants.
+// order then title (case-insensitive). Like ParentCandidates, it excludes
+// beanID's own descendants: a bean may not block or be blocked by a bean
+// in its own subtree.
 func BlockingCandidates(ctx context.Context, resolver *beangraph.CoreResolver, cfg *config.Config, beanID string) ([]*bean.Bean, error) {
 	allBeans, err := resolver.Beans(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 
+	descendants := collectDescendants(beanID, allBeans)
+
 	var eligibleBeans []*bean.Bean
 	for _, b := range allBeans {
-		if b.ID != beanID {
-			eligibleBeans = append(eligibleBeans, b)
+		if b.ID == beanID {
+			continue
 		}
+		if descendants[b.ID] {
+			continue
+		}
+		eligibleBeans = append(eligibleBeans, b)
 	}
 
 	sortByTypeThenTitle(eligibleBeans, cfg)
