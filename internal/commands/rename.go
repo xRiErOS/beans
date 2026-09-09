@@ -95,6 +95,7 @@ func RegisterRenameCmd(root *cobra.Command) {
 	renameCmd.Flags().BoolVar(&renameDryRun, "dry-run", false, "show the planned changes without applying them")
 	renameCmd.Flags().BoolVar(&renameYes, "yes", false, "skip the confirmation prompt (prefix rebrand)")
 	renameCmd.Flags().BoolVar(&renameJSON, "json", false, "output as JSON")
+	renameCmd.ValidArgsFunction = completionUpTo(1)
 	root.AddCommand(renameCmd)
 }
 

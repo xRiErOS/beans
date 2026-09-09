@@ -329,13 +329,16 @@ func (c *Core) loadFromDisk() error {
 		return err
 	}
 
-	// Reinitialize search index if it was active: close and re-create (best-effort, don't fail load)
+	// Resync the search index if it was active: diff against the freshly
+	// reloaded beans instead of closing and rebuilding from scratch, so a
+	// reload only reindexes what actually changed (AC-02).
 	if c.searchIndex != nil {
-		c.searchIndex.Close()
-		c.searchIndex = nil
-
-		if err := c.ensureSearchIndexLocked(); err != nil {
-			c.logWarn("failed to reinitialize search index after reload: %v", err)
+		allBeans := make([]*bean.Bean, 0, len(c.beans))
+		for _, b := range c.beans {
+			allBeans = append(allBeans, b)
+		}
+		if err := c.searchIndex.Sync(allBeans); err != nil {
+			c.logWarn("failed to resync search index after reload: %v", err)
 		}
 	}
 
@@ -398,29 +401,78 @@ func (c *Core) loadBean(path string) (*bean.Bean, error) {
 	return b, nil
 }
 
-// ensureSearchIndexLocked initializes the in-memory search index if not already created.
-// Must be called with lock held or from a method that holds the lock.
-func (c *Core) ensureSearchIndexLocked() error {
+// ensureSearchIndexLocked initializes the search index if not already created.
+// Must be called with lock held or from a method that holds the lock. It
+// prefers a persisted, cross-process index at c.indexDir() (AC-01, AC-04);
+// on any error resolving that location, opening it, or acquiring its lock,
+// it falls back to a private in-memory index rather than fail (AC-05,
+// AC-07). Either way, the index is then synced to the current in-memory
+// beans (AC-02, AC-03).
+//
+// write distinguishes the caller's intent (beans-dfdw): false opens the
+// persisted index in shared mode (search.OpenRead), letting concurrent
+// readers each get the warm on-disk index instead of degrading; true keeps
+// the pre-existing exclusive, non-blocking-degrade-to-memory behavior
+// (search.Open, beans-6y60 AC-07).
+//
+// Search, the only production caller today, passes true even though it is
+// conceptually a reader: c.searchIndex is cached for the rest of this
+// Core's lifetime (see the guard above) and later reused directly by
+// Create/Update/Delete and the file watcher for real writes
+// (IndexBean/DeleteBean) whenever this Core belongs to a long-lived process
+// such as beans serve or beans-tui. A shared-mode (search.OpenRead) index
+// is backed by Bleve's read-only mode and hangs forever on its first write
+// (measured directly -- see search.OpenRead's doc comment), so passing
+// false here would freeze the very processes beans-dfdw's Outcome names as
+// its motivating case the moment they next create/update/delete a bean.
+// Making Search itself pass false safely needs Core to know, at this call
+// site, whether it will ever be asked to write to the same cached index
+// later -- a distinction this Core does not currently track and beans-dfdw
+// leaves unresolved (see the completion report's open question). The
+// danger is not only later Create/Update/Delete calls: this function
+// itself unconditionally calls idx.Sync(allBeans) below before returning,
+// so passing false would already deadlock right here, inside
+// ensureSearchIndexLocked, on the very first call that actually obtains a
+// persisted (non-fallback) shared-mode index -- not merely on some later
+// bean write as the paragraph above might suggest in isolation.
+func (c *Core) ensureSearchIndexLocked(write bool) error {
 	if c.searchIndex != nil {
 		return nil
 	}
 
-	idx, err := search.NewIndex()
-	if err != nil {
-		return fmt.Errorf("initializing search index: %w", err)
+	openPersisted := search.OpenRead
+	if write {
+		openPersisted = search.Open
 	}
 
-	c.searchIndex = idx
+	var idx *search.Index
+	if dir, err := c.indexDir(); err != nil {
+		c.logWarn("resolving persisted search index location: %v", err)
+	} else if pidx, err := openPersisted(dir); err != nil {
+		c.logWarn("opening persisted search index: %v", err)
+	} else {
+		idx = pidx
+		c.maintainIndexDir(dir)
+	}
 
-	// Populate the in-memory index with existing beans
+	if idx == nil {
+		memIdx, err := search.NewIndex()
+		if err != nil {
+			return fmt.Errorf("initializing search index: %w", err)
+		}
+		idx = memIdx
+	}
+
 	allBeans := make([]*bean.Bean, 0, len(c.beans))
 	for _, b := range c.beans {
 		allBeans = append(allBeans, b)
 	}
-	if err := c.searchIndex.IndexBeans(allBeans); err != nil {
+	if err := idx.Sync(allBeans); err != nil {
+		idx.Close()
 		return fmt.Errorf("populating search index: %w", err)
 	}
 
+	c.searchIndex = idx
 	return nil
 }
 
@@ -429,7 +481,7 @@ func (c *Core) ensureSearchIndexLocked() error {
 func (c *Core) Search(query string) ([]*bean.Bean, error) {
 	// Ensure index is initialized (needs write lock for lazy init)
 	c.mu.Lock()
-	if err := c.ensureSearchIndexLocked(); err != nil {
+	if err := c.ensureSearchIndexLocked(true); err != nil {
 		c.mu.Unlock()
 		return nil, err
 	}

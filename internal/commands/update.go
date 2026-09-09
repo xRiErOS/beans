@@ -8,9 +8,9 @@ import (
 
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
-	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/pkg/beangraph/model"
+	"github.com/xRiErOS/beans/pkg/candidates"
 	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/spf13/cobra"
@@ -297,19 +297,15 @@ func mutationError(jsonOutput bool, err error) error {
 }
 
 func RegisterUpdateCmd(root *cobra.Command) {
-	// Build help text with allowed values from hardcoded config
-	statusNames := make([]string, len(config.DefaultStatuses))
-	for i, s := range config.DefaultStatuses {
-		statusNames[i] = s.Name
-	}
-	typeNames := make([]string, len(config.DefaultTypes))
-	for i, t := range config.DefaultTypes {
-		typeNames[i] = t.Name
-	}
-	priorityNames := make([]string, len(config.DefaultPriorities))
-	for i, p := range config.DefaultPriorities {
-		priorityNames[i] = p.Name
-	}
+	// Help text sources its allowed values from cfg's canonical accessors
+	// (pkg/config/config.go StatusNames/TypeNames/PriorityNames), the same
+	// read path the completion funcs below use -- no local copy of the name
+	// lists (beans-pkq3 AC-02/AC-08, SC-01). cfg is nil here (Register* runs
+	// before PersistentPreRunE loads it); StatusList/TypeList/PriorityList
+	// are nil-receiver safe and fall back to DefaultStatuses/Types/Priorities.
+	statusNames := cfg.StatusNames()
+	typeNames := cfg.TypeNames()
+	priorityNames := cfg.PriorityNames()
 
 	updateCmd.Flags().StringVarP(&updateStatus, "status", "s", "", "New status ("+strings.Join(statusNames, ", ")+")")
 	updateCmd.Flags().StringVarP(&updateType, "type", "t", "", "New type ("+strings.Join(typeNames, ", ")+")")
@@ -338,5 +334,107 @@ func RegisterUpdateCmd(root *cobra.Command) {
 	updateCmd.MarkFlagsMutuallyExclusive("body", "body-file", "body-append")
 	// body-replace-old and body-append can now be used together!
 	updateCmd.MarkFlagsRequiredTogether("body-replace-old", "body-replace-new")
+	updateCmd.ValidArgsFunction = completionUpTo(1)
+	_ = updateCmd.RegisterFlagCompletionFunc("status", statusFlagCompletion)
+	_ = updateCmd.RegisterFlagCompletionFunc("type", typeFlagCompletion)
+	_ = updateCmd.RegisterFlagCompletionFunc("priority", priorityFlagCompletion)
+	_ = updateCmd.RegisterFlagCompletionFunc("tag", tagFlagCompletion)
+	_ = updateCmd.RegisterFlagCompletionFunc("parent", updateParentFlagCompletion)
+	_ = updateCmd.RegisterFlagCompletionFunc("blocked-by", blockedByFlagCompletion)
+	_ = updateCmd.RegisterFlagCompletionFunc("blocking", blockingFlagCompletion)
 	root.AddCommand(updateCmd)
+}
+
+// statusFlagCompletion offers --status candidates for create/update/list:
+// the merged status names from *config.Config's canonical accessor, never
+// a second, independently maintained list (beans-pkq3 AC-02, SC-01).
+func statusFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return cfg.StatusNames(), completionDirective
+}
+
+// typeFlagCompletion is statusFlagCompletion's --type counterpart.
+func typeFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return cfg.TypeNames(), completionDirective
+}
+
+// priorityFlagCompletion is statusFlagCompletion's --priority counterpart.
+func priorityFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return cfg.PriorityNames(), completionDirective
+}
+
+// tagFlagCompletion offers every tag already in use across the store,
+// annotated with its usage count, sourced from pkg/candidates.TagCandidates
+// (beans-v725) -- beans-pkq3 AC-03. Shared by create/update/list/tag's
+// --tag.
+func tagFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	resolver := &beangraph.CoreResolver{Core: core}
+	tags, err := candidates.TagCandidates(context.Background(), resolver)
+	if err != nil {
+		return nil, completionDirective
+	}
+	out := make([]string, 0, len(tags))
+	for _, t := range tags {
+		out = append(out, fmt.Sprintf("%s\t%d bean(s)", t.Tag, t.Count))
+	}
+	return out, completionDirective
+}
+
+// beanFlagCandidates formats an already-filtered bean list as
+// shell-completion candidates ("id\ttype title"), mirroring completion.go's
+// beanIDCandidates shape for a caller that holds its own pkg/candidates
+// result rather than every bean in the store.
+func beanFlagCandidates(beans []*bean.Bean) []string {
+	out := make([]string, 0, len(beans))
+	for _, b := range beans {
+		out = append(out, b.ID+"\t"+b.Type+" "+b.Title)
+	}
+	return out
+}
+
+// updateParentFlagCompletion offers update --parent candidates: beans whose
+// type is a valid parent for the bean update's own positional argument
+// names, excluding that bean and its descendants (candidates.
+// ParentCandidates, beans-v725) -- beans-pkq3 AC-04.
+func updateParentFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	if len(args) == 0 || core == nil {
+		return nil, completionDirective
+	}
+	b, err := core.Get(args[0])
+	if err != nil {
+		return nil, completionDirective
+	}
+	resolver := &beangraph.CoreResolver{Core: core}
+	eligible, err := candidates.ParentCandidates(context.Background(), resolver, cfg, []string{b.ID}, []string{b.Type})
+	if err != nil {
+		return nil, completionDirective
+	}
+	return beanFlagCandidates(eligible), completionDirective
+}
+
+// blockedByFlagCompletion and blockingFlagCompletion both offer every other
+// bean in the store (candidates.BlockingCandidates, beans-v725) -- neither
+// edge direction excludes descendants (beans-pkq3 AC-04; see pkg/candidates'
+// BlockingCandidates doc comment).
+func blockedByFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return blockingLikeFlagCompletion(args)
+}
+
+func blockingFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return blockingLikeFlagCompletion(args)
+}
+
+// blockingLikeFlagCompletion is blockedByFlagCompletion's and
+// blockingFlagCompletion's shared body: args[0], when present, is the bean
+// being updated, excluded from its own candidate list.
+func blockingLikeFlagCompletion(args []string) ([]string, cobra.ShellCompDirective) {
+	var beanID string
+	if len(args) > 0 {
+		beanID = args[0]
+	}
+	resolver := &beangraph.CoreResolver{Core: core}
+	eligible, err := candidates.BlockingCandidates(context.Background(), resolver, cfg, beanID)
+	if err != nil {
+		return nil, completionDirective
+	}
+	return beanFlagCandidates(eligible), completionDirective
 }

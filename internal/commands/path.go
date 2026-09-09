@@ -8,6 +8,7 @@ import (
 
 var pathCmd = &cobra.Command{
 	Use:   "path",
+	Args:  cobra.NoArgs,
 	Short: "Print the resolved beans directory",
 	Long: `Prints the absolute path of the beans directory this invocation resolved to.
 

@@ -41,13 +41,30 @@ install-wip: build
 # Ein liegengebliebenes {{wip_bin}} täuscht in einem späteren Testlauf einen
 # Stand vor, den das Repo nicht mehr hat.
 
+# Wegwerf-Store plus zsh mit geladener Vervollständigung in einer
+# tmux-Sitzung. Für Hand-Tests der interaktiven Oberfläche; das `beans`
+# darin kann den echten Store aus keinem Verzeichnis treffen.
+
+# Wurzel der Bühne. Einzige Quelle dieses Werts: das Skript führt keinen
+# eigenen Default, weil der Pfad hinter einem `rm -rf` steht.
+demo_root := env_var_or_default("BEANS_DEMO_ROOT", "/tmp/beans-demo")
+
+# Interaktive tmux-Bühne mit Wegwerf-Store starten (beans-ejxf)
+demo SESSION='beans-demo':
+    bash scripts/demo-stage.sh "{{ SESSION }}" "{{ demo_root }}"
+
+# Bühne beenden und ihren Wegwerf-Store restlos entfernen
+demo-stop SESSION='beans-demo':
+    -tmux kill-session -t "{{ SESSION }}"
+    rm -rf "{{ demo_root }}"
+
 # Teststand {{wip_bin}} wieder aus {{bin_dir}} entfernen
 uninstall-wip:
     rm -f "{{bin_dir}}/{{wip_bin}}"
 
 # Run the Go test suite, e.g. `just test ./internal/bean/...`
 test ARGS='./...':
-    go test {{ARGS}}
+    go test -count=1 {{ARGS}}
 
 # Run the frontend unit tests, e.g. `just test-web --project server`
 test-web ARGS='':
@@ -64,7 +81,7 @@ test-e2e ARGS='':
 
 # Run the Go test suite under the race detector
 test-race ARGS='./...':
-    go test -race {{ARGS}}
+    go test -race -count=1 {{ARGS}}
 
 # Validate .goreleaser.yaml (schema, templates) without building anything
 release-check:

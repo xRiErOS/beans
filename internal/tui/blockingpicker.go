@@ -4,16 +4,15 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"sort"
-	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/xRiErOS/beans/pkg/bean"
-	"github.com/xRiErOS/beans/pkg/config"
-	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/internal/ui"
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/candidates"
+	"github.com/xRiErOS/beans/pkg/config"
 )
 
 // blockingConfirmedMsg is sent when blocking changes are confirmed
@@ -102,8 +101,7 @@ type blockingPickerModel struct {
 }
 
 func newBlockingPickerModel(beanID, beanTitle string, currentBlocking []string, resolver *beangraph.CoreResolver, cfg *config.Config, width, height int) blockingPickerModel {
-	// Fetch all beans
-	allBeans, _ := resolver.Beans(context.Background(), nil)
+	eligibleBeans, _ := candidates.BlockingCandidates(context.Background(), resolver, cfg, beanID)
 
 	// Create maps for original and pending state
 	originalBlocking := make(map[string]bool)
@@ -112,28 +110,6 @@ func newBlockingPickerModel(beanID, beanTitle string, currentBlocking []string, 
 		originalBlocking[id] = true
 		pendingBlocking[id] = true
 	}
-
-	// Filter out the current bean and build items
-	var eligibleBeans []*bean.Bean
-	for _, b := range allBeans {
-		if b.ID != beanID {
-			eligibleBeans = append(eligibleBeans, b)
-		}
-	}
-
-	// Sort by type order, then by title
-	typeNames := cfg.TypeNames()
-	typeOrder := make(map[string]int)
-	for i, t := range typeNames {
-		typeOrder[t] = i
-	}
-	sort.Slice(eligibleBeans, func(i, j int) bool {
-		ti, tj := typeOrder[eligibleBeans[i].Type], typeOrder[eligibleBeans[j].Type]
-		if ti != tj {
-			return ti < tj
-		}
-		return strings.ToLower(eligibleBeans[i].Title) < strings.ToLower(eligibleBeans[j].Title)
-	})
 
 	// Build items list
 	items := make([]list.Item, 0, len(eligibleBeans))

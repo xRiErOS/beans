@@ -19,6 +19,7 @@ var initProfile string
 
 var initCmd = &cobra.Command{
 	Use:   "init",
+	Args:  cobra.NoArgs,
 	Short: "Initialize a beans project",
 	Long:  `Creates a .beans directory and .beans.yml config file in the current directory.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
