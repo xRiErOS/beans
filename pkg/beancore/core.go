@@ -408,15 +408,41 @@ func (c *Core) loadBean(path string) (*bean.Bean, error) {
 // it falls back to a private in-memory index rather than fail (AC-05,
 // AC-07). Either way, the index is then synced to the current in-memory
 // beans (AC-02, AC-03).
-func (c *Core) ensureSearchIndexLocked() error {
+//
+// write distinguishes the caller's intent (beans-dfdw): false opens the
+// persisted index in shared mode (search.OpenRead), letting concurrent
+// readers each get the warm on-disk index instead of degrading; true keeps
+// the pre-existing exclusive, non-blocking-degrade-to-memory behavior
+// (search.Open, beans-6y60 AC-07).
+//
+// Search, the only production caller today, passes true even though it is
+// conceptually a reader: c.searchIndex is cached for the rest of this
+// Core's lifetime (see the guard above) and later reused directly by
+// Create/Update/Delete and the file watcher for real writes
+// (IndexBean/DeleteBean) whenever this Core belongs to a long-lived process
+// such as beans serve or beans-tui. A shared-mode (search.OpenRead) index
+// is backed by Bleve's read-only mode and hangs forever on its first write
+// (measured directly -- see search.OpenRead's doc comment), so passing
+// false here would freeze the very processes beans-dfdw's Outcome names as
+// its motivating case the moment they next create/update/delete a bean.
+// Making Search itself pass false safely needs Core to know, at this call
+// site, whether it will ever be asked to write to the same cached index
+// later -- a distinction this Core does not currently track and beans-dfdw
+// leaves unresolved (see the completion report's open question).
+func (c *Core) ensureSearchIndexLocked(write bool) error {
 	if c.searchIndex != nil {
 		return nil
+	}
+
+	openPersisted := search.OpenRead
+	if write {
+		openPersisted = search.Open
 	}
 
 	var idx *search.Index
 	if dir, err := c.indexDir(); err != nil {
 		c.logWarn("resolving persisted search index location: %v", err)
-	} else if pidx, err := search.Open(dir); err != nil {
+	} else if pidx, err := openPersisted(dir); err != nil {
 		c.logWarn("opening persisted search index: %v", err)
 	} else {
 		idx = pidx
@@ -449,7 +475,7 @@ func (c *Core) ensureSearchIndexLocked() error {
 func (c *Core) Search(query string) ([]*bean.Bean, error) {
 	// Ensure index is initialized (needs write lock for lazy init)
 	c.mu.Lock()
-	if err := c.ensureSearchIndexLocked(); err != nil {
+	if err := c.ensureSearchIndexLocked(true); err != nil {
 		c.mu.Unlock()
 		return nil, err
 	}
