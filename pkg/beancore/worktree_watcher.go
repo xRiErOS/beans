@@ -125,7 +125,11 @@ func (c *Core) loadWorktreeBeansInitial(wt *worktreeWatcher) {
 		c.worktreeLinks[newBean.ID] = wt.worktreePath
 
 		if c.searchIndex != nil {
-			_ = c.searchIndex.IndexBean(newBean)
+			if err := c.ensureWritableSearchIndexLocked(); err != nil {
+				c.logWarn("failed to upgrade search index for bean %s: %v", newBean.ID, err)
+			} else {
+				_ = c.searchIndex.IndexBean(newBean)
+			}
 		}
 	}
 }
@@ -274,7 +278,11 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 				delete(c.worktreeLinks, id)
 
 				if c.searchIndex != nil {
-					_ = c.searchIndex.IndexBean(mainBean)
+					if err := c.ensureWritableSearchIndexLocked(); err != nil {
+						c.logWarn("failed to upgrade search index for bean %s: %v", id, err)
+					} else {
+						_ = c.searchIndex.IndexBean(mainBean)
+					}
 				}
 
 				events = append(events, BeanEvent{
@@ -289,7 +297,11 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 				delete(c.worktreeLinks, id)
 
 				if c.searchIndex != nil {
-					_ = c.searchIndex.DeleteBean(id)
+					if err := c.ensureWritableSearchIndexLocked(); err != nil {
+						c.logWarn("failed to upgrade search index for bean %s: %v", id, err)
+					} else {
+						_ = c.searchIndex.DeleteBean(id)
+					}
 				}
 
 				events = append(events, BeanEvent{
@@ -328,7 +340,11 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 					delete(c.dirty, newBean.ID)
 					delete(c.worktreeLinks, newBean.ID)
 					if c.searchIndex != nil {
-						_ = c.searchIndex.IndexBean(mainBean)
+						if err := c.ensureWritableSearchIndexLocked(); err != nil {
+							c.logWarn("failed to upgrade search index for bean %s: %v", newBean.ID, err)
+						} else {
+							_ = c.searchIndex.IndexBean(mainBean)
+						}
 					}
 					events = append(events, BeanEvent{
 						Type:   EventUpdated,
@@ -345,9 +361,13 @@ func (c *Core) handleWorktreeChanges(wt *worktreeWatcher, changes map[string]fsn
 		c.dirty[newBean.ID] = true // Mark as dirty — came from worktree, not persisted to main
 		c.worktreeLinks[newBean.ID] = wt.worktreePath
 
-		// Update search index
+		// Update search index. ensureWritableSearchIndexLocked upgrades a
+		// cached shared, read-only handle first (beans-4t2m): IndexBean
+		// would otherwise hang forever on one.
 		if c.searchIndex != nil {
-			if err := c.searchIndex.IndexBean(newBean); err != nil {
+			if err := c.ensureWritableSearchIndexLocked(); err != nil {
+				c.logWarn("failed to upgrade search index for bean %s: %v", newBean.ID, err)
+			} else if err := c.searchIndex.IndexBean(newBean); err != nil {
 				c.logWarn("failed to index worktree bean %s: %v", newBean.ID, err)
 			}
 		}

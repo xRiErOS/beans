@@ -17,6 +17,22 @@ type Index struct {
 	dir        string            // index directory; empty for in-memory indexes
 	etags      map[string]string // bean ID -> last-synced ETag; nil for in-memory indexes
 	lock       *indexLock        // held only when persistent
+	// readOnly is true exactly when this Index was obtained through
+	// OpenRead (lockModeShared) AND a real persisted index was opened --
+	// never for the in-memory fallback, which is always writable even
+	// when OpenRead is the caller that triggered it. IndexBean, DeleteBean,
+	// and Sync all hang forever on a readOnly index (see OpenRead's doc
+	// comment); a caller that needs to write MUST Close this handle and
+	// reopen the same dir with Open instead. See ReadOnly.
+	readOnly bool
+}
+
+// ReadOnly reports whether this index was opened in shared, read-only mode
+// (see OpenRead) and therefore must never be written to directly. The
+// supported way to start writing is to Close this handle -- releasing the
+// shared lock -- and reopen the same directory exclusively via Open.
+func (idx *Index) ReadOnly() bool {
+	return idx.readOnly
 }
 
 // beanDocument is the structure stored in the Bleve index.
@@ -175,32 +191,22 @@ func (idx *Index) Search(queryStr string, limit int) ([]string, error) {
 // Bleve index instead would race Core.Search, which reads idx.index after
 // releasing its lock.
 func (idx *Index) Sync(beans []*bean.Bean) error {
-	seen := make(map[string]struct{}, len(beans))
+	changed, removed := diffAgainstETags(idx.etags, beans)
+	if len(changed) == 0 && len(removed) == 0 {
+		return nil
+	}
+
 	batch := idx.index.NewBatch()
-	dirty := false
-	for _, b := range beans {
-		seen[b.ID] = struct{}{}
-		key := staleKey(b)
-		if idx.etags[b.ID] == key {
-			continue
-		}
+	for _, b := range changed {
 		doc := beanDocument{ID: b.ID, Slug: b.Slug, Title: b.Title, Body: b.Body}
 		if err := batch.Index(b.ID, doc); err != nil {
 			return err
 		}
-		idx.etags[b.ID] = key
-		dirty = true
+		idx.etags[b.ID] = staleKey(b)
 	}
-	for id := range idx.etags {
-		if _, ok := seen[id]; ok {
-			continue
-		}
+	for _, id := range removed {
 		batch.Delete(id)
 		delete(idx.etags, id)
-		dirty = true
-	}
-	if !dirty {
-		return nil
 	}
 	if batch.Size() > 0 {
 		if err := idx.index.Batch(batch); err != nil {
@@ -211,4 +217,38 @@ func (idx *Index) Sync(beans []*bean.Bean) error {
 		return saveETags(idx.dir, idx.etags)
 	}
 	return nil
+}
+
+// diffAgainstETags compares beans against etags (the ID -> staleKey map an
+// Index carries) and reports which beans are new or changed and which
+// previously-seen IDs are no longer present. Sync and NeedsSync both go
+// through this single comparison so they cannot drift: Sync acts on the
+// result, NeedsSync only asks whether it is non-empty.
+func diffAgainstETags(etags map[string]string, beans []*bean.Bean) (changed []*bean.Bean, removed []string) {
+	seen := make(map[string]struct{}, len(beans))
+	for _, b := range beans {
+		seen[b.ID] = struct{}{}
+		if etags[b.ID] != staleKey(b) {
+			changed = append(changed, b)
+		}
+	}
+	for id := range etags {
+		if _, ok := seen[id]; !ok {
+			removed = append(removed, id)
+		}
+	}
+	return changed, removed
+}
+
+// NeedsSync reports whether calling Sync(beans) on this index would change
+// anything: a bean added, removed, or edited (its ETag or Path changed)
+// since this index's etags were last recorded. It runs the exact same
+// comparison Sync itself uses (diffAgainstETags) without mutating the
+// index or its etags, so a caller can safely ask this of a read-only
+// index -- unlike Sync, which hangs forever on one (see OpenRead's doc
+// comment) -- to decide whether it is actually behind before upgrading to
+// a writable handle just to sync it.
+func (idx *Index) NeedsSync(beans []*bean.Bean) bool {
+	changed, removed := diffAgainstETags(idx.etags, beans)
+	return len(changed) > 0 || len(removed) > 0
 }

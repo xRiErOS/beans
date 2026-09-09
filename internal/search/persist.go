@@ -55,19 +55,19 @@ var tryAcquireSharedIndexLock = tryAcquireIndexLock
 // obtained, is backed by Bleve's read-only mode (see openOrCreatePersistent):
 // writing to it -- IndexBean, DeleteBean, or Sync -- blocks forever rather
 // than erroring, because Bleve's background persister never starts for a
-// read-only-opened index. A caller MUST NOT call OpenRead if it will reuse
-// the returned *Index for writes later in its lifetime (e.g. a long-lived
-// process that also handles bean Create/Update/Delete through the same
-// cached index): use Open for that caller instead, even though it is
-// conceptually "mostly reading" -- see beans-dfdw's completion report for
-// why pkg/beancore's only current call site keeps write intent for exactly
-// this reason.
+// read-only-opened index (Index.ReadOnly reports exactly this). A caller
+// MUST NOT write to the *Index OpenRead returns while still holding it.
+// The supported way to start writing is to Close the shared handle --
+// releasing the shared lock -- and then Open the same dir exclusively
+// (beans-4t2m): the shared lock must be released before the exclusive
+// request, or the process would be contending against its own lock.
 func Open(dir string) (*Index, error) {
 	return open(dir, lockModeExclusive)
 }
 
 // OpenRead is Open's read-caller counterpart: see Open's doc comment,
-// especially the warning about never reusing the result for writes.
+// especially the warning about never writing to the result without first
+// closing it and reopening exclusively via Open.
 func OpenRead(dir string) (*Index, error) {
 	return open(dir, lockModeShared)
 }
@@ -101,6 +101,11 @@ func open(dir string, mode lockMode) (*Index, error) {
 		dir:        dir,
 		etags:      etags,
 		lock:       lock,
+		// The in-memory fallback above is always writable, even when mode
+		// is lockModeShared: readOnly only describes a real persisted
+		// index opened through Bleve's read-only runtime config, which
+		// openOrCreatePersistent only does for lockModeShared.
+		readOnly: mode == lockModeShared,
 	}, nil
 }
 
@@ -135,9 +140,9 @@ func open(dir string, mode lockMode) (*Index, error) {
 // "degrade to in-memory" exactly like the exclusive path (AC-05, AC-07).
 //
 // A caller that will reuse the returned *Index for writes after this call
-// returns (as pkg/beancore's ensureSearchIndexLocked does when it caches
-// Core.searchIndex for a long-lived process's later Create/Update/Delete)
-// MUST NOT pass lockModeShared: see Open and OpenRead's doc comments.
+// returns without going through the close-and-reopen upgrade (Open's doc
+// comment, beans-4t2m) MUST NOT pass lockModeShared: see Open and
+// OpenRead's doc comments.
 func openOrCreatePersistent(dir string, mode lockMode) (bleve.Index, map[string]string, error) {
 	if mode == lockModeShared {
 		idx, err := bleve.OpenUsing(dir, map[string]interface{}{"read_only": true})
