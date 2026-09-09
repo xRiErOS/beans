@@ -22,6 +22,19 @@ func completionUnbounded(cmd *cobra.Command, args []string, toComplete string) (
 	return beanIDCandidates(), completionDirective
 }
 
+// completionUnboundedFiltered is completionUnbounded's per-verb-narrowed
+// sibling: same unbounded-arity offering, but restricted to beans keep
+// reports true for (beans-j5so). complete/start/scrap use it to exclude
+// beans that verb cannot validly act on again (e.g. a bean already
+// completed); show/delete/tag stay on plain completionUnbounded because
+// every bean, regardless of status, remains a valid target for them
+// (beans-sfle AC-02).
+func completionUnboundedFiltered(keep func(*bean.Bean) bool) func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		return beanIDCandidatesFiltered(keep), completionDirective
+	}
+}
+
 // completionNoFileComp is the ValidArgsFunction for verbs whose first
 // positional argument is free-form text with no bean-ID or file-path
 // meaning -- create's title, graphql's query string. Without a
@@ -77,12 +90,24 @@ func completionStatusRank(status string) int {
 // reads Bean.ID/.Type/.Title/.Status and never a bean's Body, never
 // pkg/search, and triggers no further disk read (R-04 SC-01, SC-03).
 func beanIDCandidates() []string {
+	return beanIDCandidatesFiltered(nil)
+}
+
+// beanIDCandidatesFiltered is beanIDCandidates' predicate-narrowed sibling
+// (beans-j5so): identical candidate shape and actionable-first ordering,
+// but a bean is included only when keep(bean) is true. A nil keep keeps
+// every bean, making beanIDCandidates() == beanIDCandidatesFiltered(nil).
+func beanIDCandidatesFiltered(keep func(*bean.Bean) bool) []string {
 	if core == nil {
 		return nil
 	}
 	all := core.All()
-	ordered := make([]*bean.Bean, len(all))
-	copy(ordered, all)
+	ordered := make([]*bean.Bean, 0, len(all))
+	for _, b := range all {
+		if keep == nil || keep(b) {
+			ordered = append(ordered, b)
+		}
+	}
 	sort.SliceStable(ordered, func(i, j int) bool {
 		return completionStatusRank(ordered[i].Status) < completionStatusRank(ordered[j].Status)
 	})
@@ -91,4 +116,15 @@ func beanIDCandidates() []string {
 		candidates = append(candidates, b.ID+"\t"+b.Type+" "+b.Title+" ("+b.Status+")")
 	}
 	return candidates
+}
+
+// isArchivedStatus reports whether status is one of cfg's Archive-marked
+// statuses (pkg/config StatusConfig.Archive via cfg.GetStatus), the single
+// source completion's per-verb narrowing predicates read from -- never a
+// second, hand-maintained list of terminal status names (beans-j5so). An
+// unknown status is not archived: it is not actionable either, but that is
+// completionStatusRank's concern, not this predicate's.
+func isArchivedStatus(status string) bool {
+	s := cfg.GetStatus(status)
+	return s != nil && s.Archive
 }
