@@ -1,7 +1,9 @@
 // Package justfileguard bewacht, dass die `just test`- und `just test-race`-Rezepte im
-// repo-weiten `justfile` weiterhin `-count=1` unmittelbar vor `{{ ARGS }}` tragen. Ein
-// spaeterer Edit am `justfile`, der `-count=1` verliert, bringt sonst den Go-Testcache still
-// zurueck (siehe beans-mkfb).
+// repo-weiten `justfile` sowie das `mise.toml`-Pendant `[tasks.test]` weiterhin `-count=1`
+// tragen. Ein spaeterer Edit, der `-count=1` an einem der beiden CI-Einstiegspunkte verliert,
+// bringt sonst den Go-Testcache still zurueck (siehe beans-mkfb, beans-fo9g): `just` deckt nur
+// den lokalen/justfile-Pfad ab, waehrend CI (.github/workflows/test.yml) ausschliesslich ueber
+// `mise test` laeuft.
 package justfileguard
 
 import (
@@ -89,4 +91,46 @@ func read(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(out)
+}
+
+// miseTaskBody extrahiert den `run`-Wert eines `[tasks.<name>]`-Abschnitts aus einem
+// mise.toml-Inhalt: alle Zeilen ab dem exakten Tabellenkopf bis zur naechsten Zeile, die mit
+// `[` beginnt (der naechste TOML-Tabellenkopf), oder bis zum Dateiende.
+func miseTaskBody(t *testing.T, miseToml, name string) string {
+	t.Helper()
+	lines := strings.Split(miseToml, "\n")
+	header := "[tasks." + name + "]"
+
+	var body []string
+	inBody := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !inBody {
+			if trimmed == header {
+				inBody = true
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		body = append(body, line)
+	}
+
+	if len(body) == 0 {
+		t.Fatalf("mise task %q not found (or empty body) in mise.toml", name)
+	}
+	return strings.Join(body, "\n")
+}
+
+// TestMiseTestTaskHasCountFlag guards beans-fo9g's second CI entry point: CI
+// (.github/workflows/test.yml) never installs `just` and runs tests exclusively via
+// `mise test`, so the justfile-only guards above leave that path unchecked. `[tasks.test]`'s
+// `run` line must carry wantCountFlag directly, independent of the justfile.
+func TestMiseTestTaskHasCountFlag(t *testing.T) {
+	miseToml := read(t, repoRoot(t)+"/mise.toml")
+	body := miseTaskBody(t, miseToml, "test")
+	if !strings.Contains(body, wantCountFlag) {
+		t.Errorf("expected %q in mise.toml [tasks.test] body, got:\n%s", wantCountFlag, body)
+	}
 }
