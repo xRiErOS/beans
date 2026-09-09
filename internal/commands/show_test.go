@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
@@ -1092,6 +1094,299 @@ func TestShowHeaderWrapsAtTheResolvedWidth(t *testing.T) {
 		}
 		if continuations == 0 {
 			t.Errorf("at width %d nothing wrapped, so the test proves nothing:\n%s", width, out)
+		}
+	}
+}
+
+// TestBandIDWidthFollowsTheConfiguredPrefix pins that the id cell in the top
+// band is budgeted from the store's own id shape -- prefix plus suffix
+// length -- rather than from a constant.
+//
+// It asserts the exact column "type:" starts at, not merely that a longer
+// prefix moves it: a constant that only ever pads moves the column too, so a
+// comparative assertion passes under the defect. With "SPF-" ids the derived
+// budget is eight cells and a constant of twelve wasted four, which is
+// exactly the kind of drift a band's fixed columns exist to avoid.
+func TestBandIDWidthFollowsTheConfiguredPrefix(t *testing.T) {
+	setupShowTest(t)
+
+	for _, tc := range []struct {
+		prefix   string
+		idLength int
+	}{
+		{"SPF-", 4},
+		{"beans-", 4},
+		{"a-very-long-prefix-", 6},
+	} {
+		old := cfg.Beans
+		cfg.Beans.Prefix, cfg.Beans.IDLength = tc.prefix, tc.idLength
+
+		b := showFullBean("Body.\n")
+		b.ID = tc.prefix + strings.Repeat("z", tc.idLength)
+		band := stripANSI(strings.Split(renderBeanTable(b, cfg, 110), "\n")[1])
+		cfg.Beans = old
+
+		// "│ " + "id: " + <id cell> + "    " + "type:"
+		want := len("│ id: ") + len(tc.prefix) + tc.idLength + 4
+		if got := strings.Index(band, "type:"); got != want {
+			t.Errorf("prefix %q: type: starts at column %d, want %d\n%s",
+				tc.prefix, got, want, band)
+		}
+	}
+
+	// Two beans of one store keep the column: an id shorter than the
+	// configured shape is padded up to it, which is what a width derived
+	// from the data at hand would not do.
+	old := cfg.Beans
+	cfg.Beans.Prefix, cfg.Beans.IDLength = "beans-", 4
+	t.Cleanup(func() { cfg.Beans = old })
+
+	b1, b2 := showFullBean("x\n"), showFullBean("y\n")
+	b1.ID, b2.ID = "beans-aaaa", "beans-b"
+	col := func(b *bean.Bean) int {
+		return strings.Index(stripANSI(strings.Split(renderBeanTable(b, cfg, 110), "\n")[1]), "type:")
+	}
+	if col(b1) != col(b2) {
+		t.Errorf("type: moves between beans of one store: %d vs %d", col(b1), col(b2))
+	}
+}
+
+// TestHeaderHangIndentSurvivesColour covers the path the suite otherwise
+// cannot reach: the environment sets NO_COLOR, so ui.Muted.Render returns
+// plain text in every other test and a hang indent derived from the styled
+// string would look correct here while being wrong on a real terminal.
+//
+// wrapHeaderLines is called directly with escape sequences written out, so
+// the assertion holds regardless of the colour profile.
+func TestHeaderHangIndentSurvivesColour(t *testing.T) {
+	dim := func(s string) string { return "\x1b[38;5;245m" + s + "\x1b[0m" }
+	line := dim("customer_value:") + " " +
+		"Entries that are still queued, that failed, or that look like a double capture " +
+		"are recognisable without relying on colour."
+
+	out := wrapHeaderLines(line+"\n", 60)
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(lines) < 2 {
+		t.Fatalf("nothing wrapped, so the test proves nothing:\n%s", out)
+	}
+	for i, l := range lines {
+		if got := ui.DisplayWidth(stripANSI(l)); got > 60 {
+			t.Errorf("line %d is %d cells wide: %q", i, got, stripANSI(l))
+		}
+	}
+	for i, l := range lines[1:] {
+		if want := strings.Repeat(" ", len("customer_value: ")); !strings.HasPrefix(stripANSI(l), want) {
+			t.Errorf("continuation %d is not hung under the value: %q", i, stripANSI(l))
+		}
+	}
+}
+
+// TestTableRulesConnectTheColumn pins that every horizontal rule carries the
+// connector matching what the column line does at that height: it begins,
+// continues, ends, or is absent. Drawing every rule straight left a visible
+// gap wherever the column line arrived at a rule with nothing to meet it,
+// and the misalignment is invisible in a width check -- every row was the
+// right width, the corners were simply not joined.
+func TestTableRulesConnectTheColumn(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+
+	lines := strings.Split(strings.TrimRight(renderBeanTable(b, cfg, 110), "\n"), "\n")
+	if len(lines) < 5 {
+		t.Fatalf("grid too small to have interior rules:\n%s", strings.Join(lines, "\n"))
+	}
+
+	// The column sits wherever a field row puts its second bar.
+	column := -1
+	for _, line := range lines {
+		if !tableIsFieldRow(line) {
+			continue
+		}
+		runes := []rune(stripANSI(line))
+		for i := 1; i < len(runes)-1; i++ {
+			if runes[i] == '│' {
+				column = i
+				break
+			}
+		}
+		break
+	}
+	if column < 1 {
+		t.Fatalf("no column found in any field row")
+	}
+
+	isRule := func(line string) bool { return strings.Contains(stripANSI(line), "───") }
+	for i, line := range lines {
+		if !isRule(line) {
+			continue
+		}
+		runes := []rune(stripANSI(line))
+		got := runes[column]
+
+		above := i > 0 && tableIsFieldRow(lines[i-1])
+		below := i+1 < len(lines) && tableIsFieldRow(lines[i+1])
+		want := '─'
+		switch {
+		case above && below:
+			want = '┼'
+		case below:
+			want = '┬'
+		case above:
+			want = '┴'
+		}
+		if got != want {
+			t.Errorf("rule on line %d has %q at the column, want %q\n%s",
+				i+1, string(got), string(want), strings.Join(lines, "\n"))
+		}
+	}
+}
+
+// TestTableTitleIsBold pins the weight on the title, the one field a reader
+// looks for first. It asserts on the block model because the environment
+// sets NO_COLOR, which makes lipgloss emit plain text -- a rendered-string
+// assertion would pass on an unstyled title.
+func TestTableTitleIsBold(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+	b.Title = "A full bean"
+
+	var title *tableBlock
+	for i, bl := range beanTableBlocks(b, cfg) {
+		if bl.label == "title:" {
+			title = &beanTableBlocks(b, cfg)[i]
+		}
+	}
+	if title == nil {
+		t.Fatalf("no title block")
+	}
+	if !title.bold {
+		t.Errorf("title block is not marked bold: %+v", *title)
+	}
+	// The value stays plain text: the weight is applied per wrapped line at
+	// render time, because a style spanning a wrap leaks into the border.
+	if title.value != b.Title {
+		t.Errorf("title value = %q, want the plain title %q", title.value, b.Title)
+	}
+}
+
+// TestTableStaysAlignedWithColour is the defect a NO_COLOR test run cannot
+// see: the id in the label column and the type tint in the band are styled,
+// and ui.PadRight measures the string it is handed, so under a real colour
+// profile every styled cell was padded by however many bytes its escape
+// sequences occupied -- which is to say not at all. Every row still had the
+// nominally correct width in a byte count while the borders visibly stepped
+// left, exactly what the terminal showed.
+//
+// Forcing the profile is what gives the test teeth; the suite otherwise runs
+// with NO_COLOR set and lipgloss emits plain text.
+func TestTableStaysAlignedWithColour(t *testing.T) {
+	setupShowTest(t)
+	withTrueColorCommands(t)
+
+	parent := &bean.Bean{
+		ID:     "beans-pare1",
+		Slug:   bean.Slugify("The parent epic"),
+		Title:  "The parent epic",
+		Status: "todo",
+		Type:   "epic",
+	}
+	if err := core.Create(parent); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+
+	b := showFullBean("Body.\n")
+	b.Parent = parent.ID
+	// A label longer than the id is what exposes the defect: with
+	// "blocked by:" as the widest label and an eleven-character id there
+	// is nothing to pad, and the missing padding is invisible. Real stores
+	// carry keys like customer_value.
+	b.Extra["customer_value"] = "Recognisable without relying on colour."
+
+	out := renderBeanTable(b, cfg, 100)
+	if !strings.Contains(out, "\x1b[") {
+		t.Fatalf("no colour in output, so the test proves nothing")
+	}
+
+	var column = -1
+	for _, line := range strings.Split(out, "\n") {
+		if line == "" {
+			continue
+		}
+		plain := stripANSI(line)
+		if got := ui.DisplayWidth(plain); got != 100 {
+			t.Errorf("row is %d cells wide, want 100: %q", got, plain)
+		}
+		if !tableIsFieldRow(line) {
+			continue
+		}
+		runes := []rune(plain)
+		for i := 1; i < len(runes)-1; i++ {
+			if runes[i] == '│' {
+				if column == -1 {
+					column = i
+				} else if i != column {
+					t.Errorf("column moved from %d to %d: %q", column, i, plain)
+				}
+				break
+			}
+		}
+	}
+}
+
+// withTrueColorCommands forces lipgloss to TrueColor for one test, mirroring
+// internal/ui's own helper: without it `go test` has no controlling tty,
+// lipgloss emits no escapes, and any alignment assertion about styled cells
+// is vacuously true.
+func withTrueColorCommands(t *testing.T) {
+	t.Helper()
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(old) })
+}
+
+// TestTableBoldTitleClosesOnEveryLine pins that a styled value that wraps
+// carries its start and its reset on each of its lines. Styling the whole
+// title and wrapping afterwards put "\x1b[1m" on the first line and its
+// reset on the last, so every line between them, and the border to their
+// right, inherited the weight -- visible in a terminal as a bold box edge.
+func TestTableBoldTitleClosesOnEveryLine(t *testing.T) {
+	setupShowTest(t)
+	withTrueColorCommands(t)
+
+	b := showFullBean("Body.\n")
+	b.Title = "Offline states and duplicate detection: pending, failed and suspicious are visible"
+
+	// The width has to force the title to wrap: on one line lipgloss's own
+	// reset lands before the border and the defect cannot appear.
+	rendered := renderBeanTable(b, cfg, 80)
+	if !strings.Contains(rendered, "visible") || len(strings.Split(rendered, "\n")) < 6 {
+		t.Fatalf("title did not wrap, so the test proves nothing:\n%s", stripANSI(rendered))
+	}
+
+	for _, line := range strings.Split(rendered, "\n") {
+		if !strings.Contains(line, "\x1b[1m") {
+			continue
+		}
+		// Counting starts against resets is not enough: the reset may
+		// well arrive, but *after* the closing border, which is exactly
+		// what a bold box edge is. The assertion is positional -- no
+		// border character may sit inside an open bold run.
+		bold := false
+		for i := 0; i < len(line); {
+			switch {
+			case strings.HasPrefix(line[i:], "\x1b[1m"):
+				bold, i = true, i+len("\x1b[1m")
+			case strings.HasPrefix(line[i:], "\x1b[0m"):
+				bold, i = false, i+len("\x1b[0m")
+			case strings.HasPrefix(line[i:], "│"):
+				if bold {
+					t.Errorf("border sits inside an open bold run: %q", line)
+				}
+				i += len("│")
+			default:
+				i++
+			}
 		}
 	}
 }

@@ -24,12 +24,16 @@ var tableLabelVocabulary = []string{
 	"title:", "tags:", "parent:", "blocked by:", "blocking:",
 }
 
-// bandIDWidth budgets the id cell in the top band. Ids are prefix plus a
-// four-character suffix, which lands at twelve cells for the common prefixes,
-// and padding to a constant is what keeps "type:" starting at the same cell
-// in every bean. A longer id pushes the rest of the band right, which is
-// visible and rare -- the same trade the label column makes.
-const bandIDWidth = 12
+// bandIDWidth budgets the id cell in the top band from the store's own id
+// shape, so "type:" starts at the same cell for every bean of a store
+// without spending cells a store's ids can never use. A constant fitted to
+// "beans-" wasted four cells on a "SPF-" store and would have been too
+// narrow for a longer prefix; an id longer than its own configuration -- a
+// bean carried over from another store -- pushes the band right, which is
+// visible and rare, the same trade the label column makes.
+func bandIDWidth(cfg *config.Config) int {
+	return ui.DisplayWidth(cfg.Beans.Prefix) + cfg.Beans.IDLength
+}
 
 // tableBlock is one horizontally ruled section of the grid. A band spans the
 // full width and carries several label/value pairs, left-packed with one
@@ -41,6 +45,12 @@ type tableBlock struct {
 	value string
 	left  []string
 	right string
+	// bold marks a value to be emphasised. It is a flag rather than a
+	// pre-styled value because the value wraps: styling the whole string
+	// first puts the opening sequence on the first line and its reset on
+	// the last, so every line and border between them inherits the
+	// weight. The style is applied per wrapped line instead.
+	bold bool
 }
 
 // renderBeanTable lays out one bean's whole front matter, capped at width
@@ -84,24 +94,33 @@ func renderBeanTable(b *bean.Bean, cfg *config.Config, width int) string {
 	}
 
 	bar := ui.TreeLine.Render("│")
-	rule := func(left, right string) string {
-		// The rules run straight through the column line rather than
-		// meeting it in a ┼: they separate whole records, and a junction
-		// on every one of them turns the grid into graph paper.
-		return ui.TreeLine.Render(left+strings.Repeat("─", width-2)+right) + "\n"
+
+	// The column line exists only across the field rows, so each horizontal
+	// rule needs the junction that matches what happens to that line at
+	// that height: it begins (┬), continues (┼), ends (┴), or is absent.
+	// Drawing every rule straight left visible gaps where the column line
+	// arrived at a rule and no connector met it.
+	column := labelWidth + 3
+	rule := func(left, joint, right string) string {
+		bar := strings.Repeat("─", column-1)
+		rest := strings.Repeat("─", width-column-2)
+		return ui.TreeLine.Render(left+bar+joint+rest+right) + "\n"
 	}
 
 	var sb strings.Builder
-	sb.WriteString(rule("┌", "┐"))
+	sb.WriteString(rule("┌", "─", "┐"))
 	for i, bl := range blocks {
 		if i > 0 {
-			sb.WriteString(rule("├", "┤"))
+			sb.WriteString(rule("├", ruleJoint(blocks, i), "┤"))
 		}
 		if bl.band {
 			sb.WriteString(bar + " " + padVisible(packBand(bl, bandWidth), bandWidth) + " " + bar + "\n")
 			continue
 		}
 		for j, line := range fieldValueLines(bl, valueWidth) {
+			if bl.bold {
+				line = ui.Bold.Render(line)
+			}
 			label := ""
 			switch {
 			case j == 0:
@@ -109,13 +128,45 @@ func renderBeanTable(b *bean.Bean, cfg *config.Config, width int) string {
 			case j == 1 && bl.right != "":
 				label = bl.right
 			}
+			// The label column is padded as plain text and styled
+			// afterwards: ui.PadRight measures the string it is handed,
+			// so padding an already-styled cell -- as the relation id
+			// was -- counted its escape sequences as width and padded
+			// by nothing, which stepped the border seven cells left on
+			// exactly those rows.
 			sb.WriteString(bar + " " + ui.Muted.Render(ui.PadRight(label, labelWidth)) +
 				" " + bar + " " + padVisible(line, valueWidth) + " " + bar + "\n")
 		}
 	}
-	sb.WriteString(rule("└", "┘"))
+	sb.WriteString(rule("└", lastJoint(blocks), "┘"))
 
 	return sb.String()
+}
+
+// ruleJoint is the connector for the rule above block i: the column line
+// starts where the first field row does, continues between two field rows,
+// and ends where the fields give way to the closing band.
+func ruleJoint(blocks []tableBlock, i int) string {
+	above, below := !blocks[i-1].band, !blocks[i].band
+	switch {
+	case above && below:
+		return "┼"
+	case below:
+		return "┬"
+	case above:
+		return "┴"
+	default:
+		return "─"
+	}
+}
+
+// lastJoint is the connector in the bottom border: a ┴ only when the final
+// block is a field row, so the column line actually reaches it.
+func lastJoint(blocks []tableBlock) string {
+	if len(blocks) > 0 && !blocks[len(blocks)-1].band {
+		return "┴"
+	}
+	return "─"
 }
 
 // packBand left-packs a band's pairs and pushes its trailer against the right
@@ -257,7 +308,7 @@ func beanTableBlocks(b *bean.Bean, cfg *config.Config) []tableBlock {
 	}
 
 	identity := tableBlock{band: true, left: []string{
-		ui.Muted.Render("id:") + " " + padVisible(tint.Render(b.ID), bandIDWidth),
+		ui.Muted.Render("id:") + " " + padVisible(tint.Render(b.ID), bandIDWidth(cfg)),
 		ui.Muted.Render("type:") + " " + padVisible(tint.Render(b.Type), vocabularyWidth(cfg.TypeNames())),
 		ui.Muted.Render("status:") + " " + statusCell,
 	}}
@@ -269,7 +320,10 @@ func beanTableBlocks(b *bean.Bean, cfg *config.Config) []tableBlock {
 		identity.right = ui.Muted.Render("priority:") + " " +
 			lipgloss.NewStyle().Foreground(ui.ResolveColor(priorityColor)).Render(b.Priority)
 	}
-	blocks := []tableBlock{identity, {label: "title:", value: b.Title}}
+	// The title is the one field a reader looks for first, and bold is the
+	// only weight available that does not spend a colour the type tint
+	// already uses.
+	blocks := []tableBlock{identity, {label: "title:", value: b.Title, bold: true}}
 
 	if len(b.Tags) > 0 {
 		parts := make([]string, len(b.Tags))
@@ -369,5 +423,5 @@ func describeRelated(id string, cfg *config.Config) (string, string) {
 	if related.Title != "" {
 		parts = append(parts, related.Title)
 	}
-	return strings.Join(parts, " · "), ui.Muted.Render(id)
+	return strings.Join(parts, " · "), id
 }
