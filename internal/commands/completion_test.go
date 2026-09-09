@@ -835,6 +835,17 @@ func TestFlagCompletionOffersRealCandidates(t *testing.T) {
 		if !strings.Contains(out, "parentflag-epic") {
 			t.Errorf("completion output = %q, want it to contain the eligible parent %q", out, "parentflag-epic")
 		}
+		// candidates.ParentCandidates excludes the bean being updated from
+		// its own --parent candidates (a bean cannot be its own parent),
+		// unlike beanIDCandidates which lists every bean in the store with
+		// no such exclusion. A regression that swapped
+		// updateParentFlagCompletion's ParentCandidates call for
+		// beanIDCandidates would still pass the positive assertion above
+		// (parentflag-epic is in both sets) but would let
+		// parentflag-child leak back in here.
+		if strings.Contains(out, "parentflag-child") {
+			t.Errorf("completion output = %q, must not contain the bean's own ID %q as its own --parent candidate", out, "parentflag-child")
+		}
 	})
 
 	t.Run("list --parent", func(t *testing.T) {
