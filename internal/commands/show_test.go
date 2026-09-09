@@ -1364,6 +1364,14 @@ func TestTableBoldTitleClosesOnEveryLine(t *testing.T) {
 		t.Fatalf("title did not wrap, so the test proves nothing:\n%s", stripANSI(rendered))
 	}
 
+	// Without this the test is silently vacuous: it only inspects lines
+	// that carry the bold sequence, so a title rendered plain -- because
+	// the flag was dropped, or because the profile degraded -- would find
+	// nothing to inspect and pass. The sequence has to be there first.
+	if !strings.Contains(rendered, "\x1b[1m") {
+		t.Fatalf("no bold sequence around the title:\n%s", rendered)
+	}
+
 	for _, line := range strings.Split(rendered, "\n") {
 		if !strings.Contains(line, "\x1b[1m") {
 			continue
