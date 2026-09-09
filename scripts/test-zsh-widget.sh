@@ -24,6 +24,11 @@ if ! command -v zsh >/dev/null 2>&1; then
 	exit 0
 fi
 
+if ! command -v python3 >/dev/null 2>&1; then
+	echo "python3 not installed (needed for the pty), skipping beans-pick-widget test"
+	exit 0
+fi
+
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
@@ -43,12 +48,18 @@ export PATH="$bin_dir:$PATH"
 
 failures=0
 
-# run_case sources the widget in a fresh, non-interactive zsh (via script(1)
-# so /dev/tty -- which the widget's own command substitution opens -- has a
-# real controlling terminal to open), seeds BUFFER/CURSOR/LBUFFER/RBUFFER,
+# run_case sources the widget in a fresh, non-interactive zsh under a pty
+# (the widget's own command substitution redirects from /dev/tty, so there
+# has to be a controlling terminal), seeds BUFFER/CURSOR/LBUFFER/RBUFFER,
 # invokes beans-pick-widget, and writes the resulting LBUFFER/RBUFFER to
 # result_file so this script can assert on them without parsing terminal
-# noise from script(1).
+# noise.
+#
+# The pty comes from python3's stdlib pty.spawn rather than script(1): the
+# BSD/macOS and util-linux dialects of script(1) take their arguments in
+# incompatible orders, and picking the wrong one degrades to a silent no-op
+# on the very platform (CI) that cannot be rehearsed locally. python3 is
+# already a hard dependency of the toolchain and behaves identically on both.
 run_case() {
 	local name="$1" buffer="$2" cursor="$3" lbuffer="$4" rbuffer="$5"
 	local case_script="$tmp/$name.zsh"
@@ -65,18 +76,11 @@ run_case() {
 		printf '{ printf "LBUFFER=%%s\\n" "$LBUFFER"; printf "RBUFFER=%%s\\n" "$RBUFFER"; } > %q\n' "$result_file"
 	} > "$case_script"
 
-	# script(1) has two incompatible dialects: util-linux (Linux/CI) takes the
-	# command via -c and the typescript file last, BSD/macOS takes the file
-	# first and the command as trailing argv. Getting this wrong on CI means a
-	# silent no-op, so pick by flavour instead of assuming.
 	local status=0
-	if script --version 2>/dev/null | grep -q util-linux; then
-		script -q -e -c "zsh -f $(printf '%q' "$case_script")" /dev/null >/dev/null 2>&1 || status=$?
-	else
-		script -q /dev/null zsh -f "$case_script" >/dev/null 2>&1 || status=$?
-	fi
+	python3 -c 'import pty,sys; sys.exit(pty.spawn(sys.argv[1:]))' \
+		zsh -f "$case_script" >/dev/null 2>&1 || status=$?
 	if [[ ! -s "$result_file" ]]; then
-		echo "FAIL: $name case produced no result (script exit $status) -- the widget never ran" >&2
+		echo "FAIL: $name case produced no result (pty exit $status) -- the widget never ran" >&2
 		failures=$((failures + 1))
 	fi
 }
