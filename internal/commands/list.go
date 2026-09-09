@@ -455,6 +455,26 @@ func RegisterListCmd(root *cobra.Command) {
 		listCmd.Flags().IntVar(&listMaxWidth, "max-width", 0,
 			"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
 		listCmd.Flags().BoolVar(&listTags, "tags", false, "Render each bean's tags")
+		// AC-01/AC-02/AC-03/AC-04: only the affirmative enum-valued filter
+		// flags gain completion (beans-pkq3 Non-Goals) -- the boolean and
+		// --no-* exclusion flags take no enum value. --parent uses
+		// beanIDCandidates (completion.go), not candidates.ParentCandidates:
+		// list --parent matches any existing bean ID, not a type-eligible
+		// new-parent set (beans-pkq3 Risks).
+		_ = listCmd.RegisterFlagCompletionFunc("status", statusFlagCompletion)
+		_ = listCmd.RegisterFlagCompletionFunc("type", typeFlagCompletion)
+		_ = listCmd.RegisterFlagCompletionFunc("priority", priorityFlagCompletion)
+		_ = listCmd.RegisterFlagCompletionFunc("tag", tagFlagCompletion)
+		_ = listCmd.RegisterFlagCompletionFunc("parent", listParentFlagCompletion)
 	}
 	root.AddCommand(listCmd)
+}
+
+// listParentFlagCompletion offers list --parent candidates: every bean ID
+// in the store (completion.go's beanIDCandidates), because list --parent
+// filters by matching an existing bean's ID, unlike create/update --parent
+// which choose among type-eligible new-parent candidates (beans-pkq3
+// Risks).
+func listParentFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return beanIDCandidates(), completionDirective
 }
