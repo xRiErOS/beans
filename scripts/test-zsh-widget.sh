@@ -65,7 +65,20 @@ run_case() {
 		printf '{ printf "LBUFFER=%%s\\n" "$LBUFFER"; printf "RBUFFER=%%s\\n" "$RBUFFER"; } > %q\n' "$result_file"
 	} > "$case_script"
 
-	script -q /dev/null zsh -f "$case_script" >/dev/null 2>&1 || true
+	# script(1) has two incompatible dialects: util-linux (Linux/CI) takes the
+	# command via -c and the typescript file last, BSD/macOS takes the file
+	# first and the command as trailing argv. Getting this wrong on CI means a
+	# silent no-op, so pick by flavour instead of assuming.
+	local status=0
+	if script --version 2>/dev/null | grep -q util-linux; then
+		script -q -e -c "zsh -f $(printf '%q' "$case_script")" /dev/null >/dev/null 2>&1 || status=$?
+	else
+		script -q /dev/null zsh -f "$case_script" >/dev/null 2>&1 || status=$?
+	fi
+	if [[ ! -s "$result_file" ]]; then
+		echo "FAIL: $name case produced no result (script exit $status) -- the widget never ran" >&2
+		failures=$((failures + 1))
+	fi
 }
 
 assert_eq() {
@@ -112,6 +125,7 @@ assert_contains "non-empty-buffer argv" "$argv_got" "--line $buffer --cursor $cu
 : > "$argv_log"
 run_case "empty" "" "0" "" ""
 argv_got="$(cat "$argv_log" 2>/dev/null || true)"
+assert_contains "empty-buffer argv" "$argv_got" "pick"
 assert_not_contains "empty-buffer argv" "$argv_got" "--line"
 
 if [[ "$failures" -gt 0 ]]; then
