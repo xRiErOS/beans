@@ -24,6 +24,9 @@ var (
 	showBodyOnly bool
 	showETagOnly bool
 	showMeta     bool
+	showTable    bool
+	showMaxWidth int
+	showParent   string
 )
 
 var showCmd = &cobra.Command{
@@ -37,14 +40,42 @@ raw markdown of the source file — the same text --raw produces, unpadded and
 unwrapped, so it can be fed to a parser.
 
 --meta drops the body from either representation and keeps the front matter:
-the styled header on a terminal, the source YAML block off one.`,
-	Args: cobra.MinimumNArgs(1),
+the styled header on a terminal, the source YAML block off one.
+
+--parent <id> adds that bean's children to the ids given, so a container and
+its children reach one page without naming each child. Given ids come first,
+then the children in the order list --parent uses; a bean named twice is shown
+once. Without ids, --parent shows the children alone.`,
+	// --parent supplies the ids, so a bare `show --parent <id>` is complete
+	// while a bare `show` is still a usage error.
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 && showParent == "" {
+			return fmt.Errorf("requires at least 1 arg(s), only received 0")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resolver := &beangraph.CoreResolver{Core: core}
 
 		// Collect all beans
 		var beans []*bean.Bean
-		for _, id := range args {
+		ids := args
+		if showParent != "" {
+			children, err := showChildIDs(resolver, showParent)
+			if err != nil {
+				if showJSON {
+					return output.Error(output.ErrNotFound, err.Error())
+				}
+				return err
+			}
+			ids = append(ids, children...)
+		}
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			b, err := resolver.Bean(context.Background(), id)
 			if err != nil {
 				if showJSON {
@@ -106,8 +137,29 @@ the styled header on a terminal, the source YAML block off one.`,
 			return nil
 		}
 
+		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+		width := resolveWidth(showMaxWidth, cmd.Flags().Changed("max-width"), cfg)
+
+		// --table forces the grid in both directions, the way --raw forces
+		// raw markdown on a terminal: an explicit arrangement flag outranks
+		// the representation stdout would otherwise pick.
+		if showTable {
+			labelWidth := beanTableLabelWidth(beans, cfg)
+			for i, b := range beans {
+				if i > 0 {
+					fmt.Println()
+				}
+				out, err := showOutputTable(b, showMeta, width, labelWidth)
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+			}
+			return nil
+		}
+
 		// Default: styled for a terminal, raw markdown for a pipe or a file
-		out, err := showOutputAll(beans, term.IsTerminal(int(os.Stdout.Fd())), showMeta)
+		out, err := showOutputAll(beans, isTTY, showMeta, width)
 		if err != nil {
 			return err
 		}
@@ -122,7 +174,7 @@ the styled header on a terminal, the source YAML block off one.`,
 // representation, leaving the front matter -- styled off the header for a
 // terminal, and the source YAML block for a pipe, which still parses as a
 // bean file with an empty body.
-func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
+func showOutput(b *bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 	if !isTTY {
 		source := b
 		if metaOnly {
@@ -136,9 +188,9 @@ func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
 		return string(content), nil
 	}
 	if metaOnly {
-		return renderBeanHeader(b, cfg), nil
+		return renderBeanHeader(b, cfg, width), nil
 	}
-	return styledBeanOutput(b)
+	return styledBeanOutput(b, width)
 }
 
 // showOutputAll joins the output of several beans with the separator that
@@ -148,7 +200,37 @@ func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
 // front matter's own closing "---" plus a blank line, and adding the raw
 // separator on top of that produced an empty third document between every
 // pair of beans.
-func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
+// showChildIDs resolves --parent to its children's ids, in the order the
+// resolver sorts them, so the page matches `list --parent` and `roadmap`
+// rather than inventing a third order. It goes through
+// CoreResolver.BeanChildren instead of re-deriving the parent link, which
+// keeps one definition of "child" in the codebase.
+//
+// Both empty cases are errors: an unknown parent is a typo, and a childless
+// one would render an empty page that reads like a broken command.
+func showChildIDs(resolver *beangraph.CoreResolver, parentID string) ([]string, error) {
+	parent, err := resolver.Bean(context.Background(), parentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find --parent bean: %w", err)
+	}
+	if parent == nil {
+		return nil, fmt.Errorf("bean not found: %s", parentID)
+	}
+	children, err := resolver.BeanChildren(context.Background(), parent, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve children of %s: %w", parentID, err)
+	}
+	if len(children) == 0 {
+		return nil, fmt.Errorf("bean has no children: %s", parentID)
+	}
+	ids := make([]string, 0, len(children))
+	for _, c := range children {
+		ids = append(ids, c.ID)
+	}
+	return ids, nil
+}
+
+func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 	separator := "\n---\n\n"
 	switch {
 	case isTTY:
@@ -162,7 +244,7 @@ func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
 		if i > 0 {
 			out.WriteString(separator)
 		}
-		text, err := showOutput(b, isTTY, metaOnly)
+		text, err := showOutput(b, isTTY, metaOnly, width)
 		if err != nil {
 			return "", err
 		}
@@ -171,9 +253,34 @@ func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
 	return out.String(), nil
 }
 
-// styledBeanOutput builds the styled representation of a single bean.
-func styledBeanOutput(b *bean.Bean) (string, error) {
-	return renderBeanDetail(b, cfg, resolveWidth(0, false, cfg)), nil
+// showOutputTable renders one bean as the label/value grid. metaOnly keeps
+// the grid alone; otherwise the body follows, separated by the same rule the
+// styled detail view uses.
+//
+// The width is resolved by the caller through resolveWidth, so --max-width,
+// display.max_width and the built-in default rank exactly as they do for
+// beans list -- one width policy for the whole CLI rather than a second one
+// here. Taking it as a parameter also keeps this function out of showCmd's
+// initialisation cycle, which a flag lookup from here would create.
+func showOutputTable(b *bean.Bean, metaOnly bool, width, labelWidth int) (string, error) {
+	var sb strings.Builder
+	sb.WriteString(renderBeanTable(b, cfg, width, labelWidth))
+	if metaOnly {
+		return sb.String(), nil
+	}
+
+	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
+		sb.WriteString("\n" + body + "\n")
+	}
+	return sb.String(), nil
+}
+
+// styledBeanOutput builds the styled representation of a single bean at the
+// width the caller resolved. It used to resolve its own width from
+// resolveWidth(0, false, cfg), which ignored --max-width unless --table was
+// also given -- a flag that works in one combination and not in another.
+func styledBeanOutput(b *bean.Bean, width int) (string, error) {
+	return renderBeanDetail(b, cfg, width), nil
 }
 
 // renderBeanDetail lays out one bean for the terminal: the attribute header,
@@ -185,7 +292,7 @@ func styledBeanOutput(b *bean.Bean) (string, error) {
 func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 	var sb strings.Builder
 
-	sb.WriteString(renderBeanHeader(b, cfg))
+	sb.WriteString(renderBeanHeader(b, cfg, width))
 	sb.WriteString(ui.TreeLine.Render(strings.Repeat("─", width)) + "\n\n")
 
 	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
@@ -204,7 +311,7 @@ func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 // them below a screenful of markdown. Relationships, unknown ("extra") front
 // matter keys, order and the timestamps follow, each labelled, which is what
 // makes this the whole front matter and not a selection of it.
-func renderBeanHeader(b *bean.Bean, cfg *config.Config) string {
+func renderBeanHeader(b *bean.Bean, cfg *config.Config, width int) string {
 	var sb strings.Builder
 
 	tint := ""
@@ -304,6 +411,44 @@ func renderBeanHeader(b *bean.Bean, cfg *config.Config) string {
 		sb.WriteString(ui.Muted.Render(strings.Join(stamps, "  ")) + "\n")
 	}
 
+	return wrapHeaderLines(sb.String(), width)
+}
+
+// wrapHeaderLines folds every header line to width visible cells, hanging
+// the continuation under the value rather than under the label.
+//
+// It runs over the assembled header instead of inside each of the eight
+// write sites above: the width concern is uniform, and threading it through
+// every branch would put the same three lines in eight places. A value that
+// carries no "label:" prefix -- the type/id and title lines -- wraps flush,
+// because there is no label to hang under.
+func wrapHeaderLines(header string, width int) string {
+	var sb strings.Builder
+	for _, line := range strings.Split(header, "\n") {
+		if line == "" {
+			continue
+		}
+		if visibleWidth(line) <= width {
+			sb.WriteString(line + "\n")
+			continue
+		}
+
+		indent := ""
+		if plain := stripANSI(line); strings.Contains(plain, ": ") {
+			label := plain[:strings.Index(plain, ": ")+2]
+			if !strings.Contains(strings.TrimSuffix(label, ": "), " ") {
+				indent = strings.Repeat(" ", ui.DisplayWidth(label))
+			}
+		}
+
+		for i, folded := range wrapVisible(line, width-ui.DisplayWidth(indent)) {
+			if i == 0 {
+				sb.WriteString(folded + "\n")
+				continue
+			}
+			sb.WriteString(indent + folded + "\n")
+		}
+	}
 	return sb.String()
 }
 
@@ -381,7 +526,20 @@ func RegisterShowCmd(root *cobra.Command) {
 	showCmd.Flags().BoolVar(&showBodyOnly, "body-only", false, "Output only the body content")
 	showCmd.Flags().BoolVar(&showETagOnly, "etag-only", false, "Output only the etag")
 	showCmd.Flags().BoolVar(&showMeta, "meta", false, "Output only the front matter, without the body")
+	showCmd.Flags().BoolVar(&showTable, "table", false,
+		"Arrange the front matter as a label/value grid (forces the grid into a pipe too)")
+	showCmd.Flags().StringVar(&showParent, "parent", "",
+		"Also show the children of this bean, in the order list --parent uses")
+	showCmd.Flags().IntVar(&showMaxWidth, "max-width", 0,
+		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
+	// Two groups rather than one: --meta and --table each exclude the four
+	// wholesale representations, but not each other -- "--meta --table" is
+	// the combination the grid exists for.
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "meta")
+	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "table")
 	showCmd.ValidArgsFunction = completionUnbounded
+	// --parent matches any existing bean ID, like list --parent and unlike
+	// create/update --parent, which offer type-eligible new parents.
+	_ = showCmd.RegisterFlagCompletionFunc("parent", listParentFlagCompletion)
 	root.AddCommand(showCmd)
 }

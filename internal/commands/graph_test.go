@@ -326,3 +326,328 @@ func TestGraphEmptyStoreIsNotAnError(t *testing.T) {
 		t.Errorf("ascii output on empty store = %q, want %q", out, "no relationships\n")
 	}
 }
+
+// TestGraphMermaidRendersEveryNodeAndEdge is the feature: the blocked-by
+// chain as a Mermaid flowchart, so it pastes into a Markdown document
+// instead of being derived by hand from --format json.
+func TestGraphMermaidRendersEveryNodeAndEdge(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", "--depth", "0", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	if !strings.HasPrefix(out, "flowchart LR\n") {
+		t.Errorf("output does not open with a flowchart header:\n%s", out)
+	}
+	for _, want := range []string{"beans-bbbb", "beans-cccc", "Child task", "Blocked task"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "beans-aaaa") {
+		t.Errorf("--relation blocks leaked the parent edge:\n%s", out)
+	}
+	if n := strings.Count(out, "-->"); n != 1 {
+		t.Errorf("found %d edge arrows, want exactly the one block edge:\n%s", n, out)
+	}
+}
+
+// TestGraphMermaidUsesTheBeanIDVerbatim keeps the handle mappable back to a
+// bean. Mermaid 11 accepts a hyphenated id, in `beans-a --> beans-b` as well
+// as in a class name, so rewriting the hyphen would buy nothing and cost
+// two things: a handle a reader cannot look up, and a collision between two
+// ids that differ only in `-` versus `_`.
+func TestGraphMermaidUsesTheBeanIDVerbatim(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	var edgeLines []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "-->") {
+			edgeLines = append(edgeLines, strings.TrimSpace(line))
+		}
+	}
+	if len(edgeLines) != 1 {
+		t.Fatalf("want one edge line, got %v", edgeLines)
+	}
+	if want := "beans-bbbb -->|blocks| beans-cccc"; edgeLines[0] != want {
+		t.Errorf("edge line = %q, want %q", edgeLines[0], want)
+	}
+
+	// The node handle is the id itself, not a rewritten form of it.
+	if !strings.Contains(out, `beans-bbbb["`) {
+		t.Errorf("node handle is not the verbatim id:\n%s", out)
+	}
+	if strings.Contains(out, "beans_bbbb") || strings.Contains(out, "nbeans") {
+		t.Errorf("output still carries a sanitised handle:\n%s", out)
+	}
+}
+
+// TestGraphMermaidClassNamesCarryTheStatus pairs with it for the second
+// user of the id escaping: a status like in-progress becomes a class name,
+// which Mermaid also accepts with its hyphen.
+func TestGraphMermaidClassNamesCarryTheStatus(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	running := &bean.Bean{ID: "beans-iiii", Slug: "running", Title: "Running", Status: "in-progress", Type: "task"}
+	if err := core.Create(running); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+
+	out, err := runGraph(t, "--format", "mermaid", "beans-iiii")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+	if !strings.Contains(out, "status-in-progress") {
+		t.Errorf("class name does not name the status verbatim:\n%s", out)
+	}
+}
+
+// TestGraphMermaidEscapesLabelSyntax stops a title from ending the node: a
+// quote or a bracket in a title would otherwise close the label early and
+// produce a diagram that does not render at all.
+func TestGraphMermaidEscapesLabelSyntax(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	mkGraphBean(t, "beans-eeee", `Fix "q" [b] (p) {c} &quot; #91; title`, "task", "", []string{"beans-ffff"}, nil)
+	mkGraphBean(t, "beans-ffff", "Plain", "task", "", nil, nil)
+
+	out, err := runGraph(t, "--format", "mermaid", "--depth", "0", "beans-eeee")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	label := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "beans-eeee") && strings.Contains(line, "[") && !strings.Contains(line, "-->") {
+			label = line
+		}
+	}
+	if label == "" {
+		t.Fatalf("no node line for beans-eeee:\n%s", out)
+	}
+	// The label frame is made of the same characters as a title may carry, so
+	// the text is read out from between the quotes before anything is
+	// asserted about it.
+	openIdx, closeIdx := strings.Index(label, `["`), strings.LastIndex(label, `"]`)
+	if openIdx < 0 || closeIdx <= openIdx {
+		t.Fatalf("node line %q has no quoted label", label)
+	}
+	text := label[openIdx+2 : closeIdx]
+	if strings.Contains(text, `"`) {
+		t.Errorf("a raw double quote survives and closes the label: %q", text)
+	}
+
+	// The whole label is pinned, not substrings of it: an escaping pass that
+	// runs its rules in the wrong order mangles its own entities into
+	// visible text -- &#91; becoming &amp;#35;91; -- and every substring
+	// assertion still passes on that. The literal &quot; and #91; in the
+	// title are here for the same reason: Mermaid resolves both spellings,
+	// so both have to survive as text.
+	// Brackets stay verbatim on purpose: Mermaid renders them as written
+	// inside a quoted label, and the HTML entity form came out as "&[".
+	wantText := "beans-eeee<br/>Fix &quot;q&quot; [b] (p) {c} &amp;quot; #35;91; title"
+	if text != wantText {
+		t.Errorf("label text  = %q\nwant          %q", text, wantText)
+	}
+	if !strings.Contains(label, "Fix") || !strings.Contains(label, "title") {
+		t.Errorf("escaping dropped the words themselves: %q", label)
+	}
+}
+
+// TestGraphMermaidDistinguishesRelations keeps the two edge kinds apart:
+// a parent edge and a block edge mean different things and a reader of the
+// diagram must not have to guess which is which.
+func TestGraphMermaidDistinguishesRelations(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--depth", "0", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+	if !strings.Contains(out, relBlocks) {
+		t.Errorf("block edge is unlabelled:\n%s", out)
+	}
+	if !strings.Contains(out, relParent) {
+		t.Errorf("parent edge is unlabelled:\n%s", out)
+	}
+}
+
+// TestGraphMermaidCarriesStatusColour holds the parity with --format dot,
+// which is the reason a native renderer beats a jq one-liner: the status is
+// visible in the picture rather than only in the label.
+func TestGraphMermaidCarriesStatusColour(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	sc := cfg.GetStatus("todo")
+	if sc == nil || sc.Color == "" {
+		t.Skip("default config has no colour for status todo")
+	}
+	colour := string(ui.ResolveColor(sc.Color))
+	if !strings.HasPrefix(colour, "#") {
+		t.Skipf("status colour %q is not a hex value", colour)
+	}
+	if !strings.Contains(out, "classDef") {
+		t.Fatalf("no classDef in the output:\n%s", out)
+	}
+	if !strings.Contains(out, colour) {
+		t.Errorf("status colour %s is missing:\n%s", colour, out)
+	}
+	if !strings.Contains(out, "class ") && !strings.Contains(out, ":::") {
+		t.Errorf("nodes are never assigned to a status class:\n%s", out)
+	}
+}
+
+// TestGraphMermaidIsAValidFormat pins the flag surface: mermaid must pass
+// validation and a typo must still be rejected with the full list.
+func TestGraphMermaidIsAValidFormat(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	if _, err := runGraph(t, "--format", "mermaid"); err != nil {
+		t.Errorf("runGraph(--format mermaid) error = %v, want nil", err)
+	}
+	_, err := runGraph(t, "--format", "mermaidd")
+	if err == nil {
+		t.Fatal("runGraph(--format mermaidd) error = nil, want a validation error")
+	}
+	if !strings.Contains(err.Error(), "mermaid") {
+		t.Errorf("error %q does not offer mermaid as a choice", err)
+	}
+}
+
+
+// TestGraphMermaidNeutralisesHTMLInLabels closes the gap the escaping had:
+// Mermaid renders node labels as HTML, so a title carrying markup would be
+// drawn as markup rather than as the title a user wrote. Angle brackets are
+// escaped for that reason, and the <br/> the renderer inserts itself has to
+// survive that escaping -- which fixes the order: escape the text first,
+// then join the parts.
+func TestGraphMermaidNeutralisesHTMLInLabels(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	mkGraphBean(t, "beans-hhhh", "A <b>bold</b> and <img src=x> title", "task", "", nil, nil)
+
+	out, err := runGraph(t, "--format", "mermaid", "beans-hhhh")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+	for _, markup := range []string{"<b>", "</b>", "<img"} {
+		if strings.Contains(out, markup) {
+			t.Errorf("markup %q reaches the label unescaped:\n%s", markup, out)
+		}
+	}
+	if !strings.Contains(out, "bold") || !strings.Contains(out, "title") {
+		t.Errorf("escaping dropped the words themselves:\n%s", out)
+	}
+	if !strings.Contains(out, "<br/>") {
+		t.Errorf("the renderer's own line break was escaped away:\n%s", out)
+	}
+}
+
+
+// TestGraphMermaidHandlesAConfiguredPrefix covers the reason the handle is
+// not simply the id: beans.prefix is free-form configuration, so an id can
+// carry a space or a quote, and either one splits a handle and its class
+// statement into fragments Mermaid cannot read. The hyphen is exempt -- it
+// parses -- so the guard has to be narrow rather than a blanket rewrite.
+func TestGraphMermaidHandlesAConfiguredPrefix(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+
+	// Status names are configuration as well, and they reach the output as
+	// class names, so the same hole exists on that side: a status with a
+	// space would split the class and classDef lines apart.
+	cfg.Beans.Prefix = `my bean"s `
+	cfg.Statuses = append(cfg.Statuses, config.StatusOverride{Name: `needs "review" now`, Color: "#a6e3a1"})
+	hostile := &bean.Bean{ID: `my bean"s vm76`, Slug: "first", Title: "First", Status: `needs "review" now`, Type: "task"}
+	plain := &bean.Bean{ID: `my bean"s wtwd`, Slug: "second", Title: "Second", Status: `needs "review" now`, Type: "task",
+		BlockedBy: []string{`my bean"s vm76`}}
+	for _, b := range []*bean.Bean{hostile, plain} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create() error = %v", err)
+		}
+	}
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", `my bean"s vm76`)
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "flowchart") || strings.HasPrefix(trimmed, "classDef") {
+			continue
+		}
+		// Every handle on a line is a whitespace-delimited token: the node
+		// definition's `id["..."]`, the two ends of an arrow, and the two
+		// names in a class statement. A handle may carry neither a space --
+		// which is why they are tokens at all -- nor a quote.
+		var handles []string
+		switch {
+		case strings.HasPrefix(trimmed, "class "):
+			handles = strings.Fields(strings.TrimSuffix(trimmed, ";"))[1:]
+		case strings.Contains(trimmed, "-->"):
+			for _, side := range strings.Split(trimmed, "-->") {
+				side = strings.TrimSpace(side)
+				if i := strings.LastIndex(side, "|"); i >= 0 {
+					side = strings.TrimSpace(side[i+1:])
+				}
+				handles = append(handles, side)
+			}
+		default:
+			handles = []string{strings.Split(trimmed, `["`)[0]}
+		}
+		for _, h := range handles {
+			if h == "" {
+				t.Errorf("line %q yielded an empty handle", trimmed)
+			}
+			if strings.ContainsAny(h, ` "`) {
+				t.Errorf("handle %q in line %q carries a space or a quote", h, trimmed)
+			}
+		}
+	}
+
+	// The id itself still reaches the reader, in the label.
+	if !strings.Contains(out, `my bean&quot;s vm76<br/>`) {
+		t.Errorf("the real id is missing from the label:\n%s", out)
+	}
+	// The class name went through the same guard, and the classDef that
+	// declares it agrees with the class statements that reference it -- a
+	// mismatch would leave every node unstyled.
+	declared := ""
+	for _, line := range strings.Split(out, "\n") {
+		if fields := strings.Fields(line); len(fields) > 1 && fields[0] == "classDef" {
+			declared = fields[1]
+		}
+	}
+	if declared == "" {
+		t.Fatalf("no classDef in the output:\n%s", out)
+	}
+	if strings.ContainsAny(declared, ` "`) {
+		t.Errorf("class name %q carries a space or a quote", declared)
+	}
+	if !strings.Contains(out, "class "+strings.Fields(out[strings.Index(out, "class ")+6:])[0]+" "+declared+";") {
+		t.Errorf("class statements do not reference the declared %q:\n%s", declared, out)
+	}
+}

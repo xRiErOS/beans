@@ -28,7 +28,15 @@ beans list --json --status in-progress --sort updated --desc
 
 The styled header carries the whole front matter, not a selection of it: type and id, title, status and priority (plus an inherited status, if one applies), tags, `parent`, `blocking` and `blocked by`, any unknown ("extra") keys such as `branch` or `release` in alphabetical order, and finally the created/updated timestamps and `order`. Tags sit in the header rather than after the body, where a long bean pushed them off the first screen.
 
-Flags: `--raw` forces raw Markdown output even on a terminal; `--json` returns the bean's front matter and body as JSON instead of Markdown; `--body-only` prints only the body content; `--meta` prints only the front matter without the body — the styled header on a terminal, and the source YAML block off one, which still parses as a bean file with an empty body; `--etag-only` prints only the etag, which is useful for detecting whether a bean changed between two reads. These five output-mode flags are mutually exclusive.
+Flags: `--raw` forces raw Markdown output even on a terminal; `--json` returns the bean's front matter and body as JSON instead of Markdown; `--body-only` prints only the body content; `--meta` prints only the front matter without the body — the styled header on a terminal, and the source YAML block off one, which still parses as a bean file with an empty body; `--etag-only` prints only the etag, which is useful for detecting whether a bean changed between two reads. `--json`, `--raw`, `--body-only` and `--etag-only` each replace the whole representation, so they exclude one another and they exclude `--meta` and `--table`; `--meta --table` is the one combination that is allowed, because the two describe different things — how much of the bean, and in what arrangement.
+
+`--table` arranges the same front matter as a ruled grid instead of the flowing header. A band across the top carries what the bean is — `id`, `type` and `status` packed left, `priority` against the right edge — and a band across the bottom carries the managed stamps, `created` and `updated` left with `order` on the right. Between them sits one horizontally ruled row per front matter entry, in a fixed order: `title`, `tags`, `parent`, `blocked by`, `blocking`, then any unknown ("extra") keys alphabetically. The bands are what separate identity and bookkeeping from content; in a flat label column the id sat in the same shape as the title.
+
+The column geometry starts from the label and config vocabulary rather than from the bean at hand, so the id, type and status cells sit at the same offset for every bean and a reader scans down a column instead of reading every line. The vocabulary is a floor, not a fixed width: a bean whose custom front matter carries a key longer than the built-in labels widens the label column to fit it. Within one call that widening is shared — the column is as wide as the widest label any of the shown beans carries, so several grids on one page have one boundary rather than stepping. Across separate calls the boundary is therefore stable for beans whose custom keys stay inside the vocabulary, and moves for a bean that carries a longer one, which is the price of showing that key in full rather than truncating it. In a relation row the related bean's type and title fill the value cell, and its id sits in the label column on the row beneath the label — the label column is where a reader looks for what a row is, and keeping the id out of the value column leaves type and title the full width. An id that cannot be resolved becomes the value itself rather than being dropped. The title carries bold, the one weight the type tint does not already spend. Long free text wraps inside its own cell, and the horizontal rules carry the connector the column line calls for at that height — it begins below the top band, continues between field rows, and ends above the bottom one. Unlike the default view, `--table` forces the grid into a pipe as well — the way `--raw` forces raw markdown onto a terminal — and it combines with `--meta` to give the grid alone.
+
+`--parent <id>` adds the children of `<id>` to the ids given on the command line, so a container and its children reach one page without naming each child or shelling out to `beans list --parent --json` first. The given ids come first, then the children in the order `list --parent` and `roadmap` use, and a bean that is both an argument and a child is shown once rather than twice. Without any ids, `--parent` shows the children alone, which is the direct counterpart of `beans list --parent`. Two cases are errors rather than an empty page, because an empty page reads like a broken command: an id that names no bean, and a bean that has no children.
+
+`--max-width <n>` caps the rendered width at `n` cells, in the grid as well as in the default styled view, and follows the same policy as `beans list`: the flag outranks `display.max_width` in the config, which outranks the built-in default of 110, and `0` disables the cap and renders at the terminal's own width. Two limits apply on top of the number: the rendered width never exceeds the detected terminal width, and it never falls below 80 cells, so a value below 80 renders at 80. Below that floor no layout stays readable, and the floor is shared with `beans list` rather than being a rule of its own here.
 
 ```
 beans show beans-vvat beans-gng9
@@ -36,6 +44,11 @@ beans show beans-vvat beans-gng9
 
 ```
 beans show --meta beans-vvat
+```
+
+```
+beans show --meta --table --max-width 100 beans-vvat beans-gng9
+beans show --meta --table --parent beans-vvat beans-vvat
 ```
 
 ```

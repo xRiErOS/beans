@@ -44,7 +44,13 @@ beans progress --json
 
 ## `beans graph`
 
-`beans graph [id]` prints parent and blocking relationships. The default Graphviz DOT output can be piped into tools such as `dot -Tpng`; `--format ascii` prints a terminal edge list, and `--format json` returns `nodes` and `edges`.
+`beans graph [id]` prints parent and blocking relationships. The default Graphviz DOT output can be piped into tools such as `dot -Tpng`; `--format ascii` prints a terminal edge list, `--format mermaid` a Mermaid flowchart, and `--format json` returns `nodes` and `edges`.
+
+`--format mermaid` writes a `flowchart LR` that pastes into any Markdown document that renders Mermaid, which is what makes a blocking chain readable in a document rather than only on a terminal. Node handles keep the bean id, hyphen included, so a handle in the diagram can be looked up in the store. Since `beans.prefix` is free-form configuration, a character that Mermaid cannot carry in an identifier — a space or a quote, for instance — becomes an underscore in the handle only; the label always shows the id as written. Label text is escaped only where Mermaid needs it, which is less than it looks: a double quote would close the label, a `<` would be drawn as markup because labels are rendered as HTML, and `#` and `&` each open an entity that a title may spell out literally. Brackets, parentheses and braces are left as written — inside a quoted label Mermaid takes them verbatim, and their HTML entity form is actively wrong there, since Mermaid resolves the `#91;` inside `&#91;` and leaves the ampersand behind. Edges carry their relation as the arrow label, so `parent` and `blocks` stay distinguishable, and each status becomes a `classDef` with its configured colour, which is the DOT output's `fillcolor` expressed the way Mermaid allows. Status names are configuration too, so they pass through the same handle guard as the ids — a name Mermaid could not carry as an identifier would otherwise split the `class` and `classDef` lines apart. One limit is Mermaid's own rather than this command's: the renderer refuses a diagram above 500 edges by default, and a whole store easily passes that, so scope the graph with a bean id, a `--depth` or a `--relation` instead of asking for everything. Combined with `--relation blocks`, this is the direct route from the store to a dependency diagram:
+
+```
+beans graph beans-xkih --format mermaid --relation blocks --depth 0
+```
 
 Without an ID the command includes the complete store. Naming one bean scopes the graph to its neighborhood: `--depth 1` includes its direct relationships, larger values widen the traversal by hops, and `--depth 0` walks its whole connected component. `--relation parent` and `--relation blocks` can be repeated to restrict edge kinds. Broken links and self-links are omitted here and reported by `beans check`.
 
@@ -53,6 +59,7 @@ beans graph
 beans graph beans-xkih --format ascii
 beans graph beans-xkih --depth 2 --relation parent
 beans graph --format json
+beans graph beans-xkih --format mermaid --relation blocks
 ```
 
 ## Related documentation
