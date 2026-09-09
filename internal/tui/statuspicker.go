@@ -85,7 +85,7 @@ type statusPickerModel struct {
 
 func newStatusPickerModel(beanIDs []string, beanTitle, currentStatus string, cfg *config.Config, width, height int) statusPickerModel {
 	// Get all statuses
-	statuses := candidates.StatusCandidates()
+	statuses := candidates.StatusCandidates(cfg)
 
 	delegate := statusItemDelegate{}
 
