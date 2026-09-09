@@ -292,44 +292,49 @@ func renderGraphDot(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdge) e
 	return nil
 }
 
-// mermaidHandle turns a bean id into a Mermaid node handle. Bean ids carry
-// a hyphen, and Mermaid reads `beans-a --> beans-b` as an id followed by a
-// malformed arrow, so anything outside [A-Za-z0-9_] becomes an underscore.
-// The real id stays in the label, which is where a reader looks for it.
-func mermaidHandle(id string) string {
-	var sb strings.Builder
-	sb.Grow(len(id) + 1)
-	sb.WriteByte('n')
-	for _, r := range id {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			sb.WriteRune(r)
-		default:
-			sb.WriteByte('_')
-		}
-	}
-	return sb.String()
+// mermaidQuoteID escapes a bean id or status name for use as a Mermaid node
+// handle or class name. Both parse verbatim, hyphen included -- measured
+// against mermaid 11, which accepts `beans-a --> beans-b` and a class named
+// `s-in-progress` -- so the id is kept as it is: a handle a reader can map
+// back to a bean beats one that cannot, and rewriting the hyphen would let
+// two ids differing only in `-` versus `_` collide on one node.
+//
+// Only a double quote is neutralised, since an id is emitted unquoted here
+// and a quote would open a label where none belongs. Bean ids cannot carry
+// one today; the guard costs nothing and keeps this independent of that.
+func mermaidQuoteID(s string) string {
+	return strings.ReplaceAll(s, `"`, "&quot;")
 }
 
-// mermaidLabel escapes a string for a quoted Mermaid node label. A double
-// quote would close the label and a bracket would close the node, either of
-// which yields a diagram that does not render at all, so both become HTML
-// entities -- Mermaid resolves them back when it draws the label. Angle
-// brackets go the same way because Mermaid draws labels as HTML, so markup
-// in a title would otherwise be rendered as markup. The <br/> the caller
-// joins the label with is inserted after this escaping, never before.
-// Newlines become <br/> for the same reason they become \n in DOT.
+// mermaidLabel escapes a string for a quoted Mermaid node label.
+//
+// The set is smaller than it looks, and it was measured by rendering with
+// mermaid-cli rather than derived from the grammar:
+//
+//   - " would close the label, so it becomes &quot;.
+//   - < becomes an entity because Mermaid draws labels as HTML, so markup in
+//     a title would otherwise be rendered as markup. A lone > needs no
+//     escaping: without an opening < it is text, and it is left alone rather
+//     than escaped for symmetry.
+//   - # opens a Mermaid entity of the form #91;, which a title may spell out
+//     literally, so it becomes #35;.
+//   - & opens an HTML entity for the same reason.
+//   - Newlines become <br/>, as they become \n in DOT.
+//
+// Brackets, parentheses and braces are deliberately absent: inside a quoted
+// label Mermaid takes them verbatim, so escaping them only made titles
+// harder to read. The HTML forms were worse than useless -- Mermaid resolves
+// the #91; inside &#91; and leaves the ampersand behind, so a bracket came
+// out as "&[".
+//
+// & and # are escaped before every other rule, because those rules insert
+// entities built from both characters and escaping them afterwards would
+// mangle this function's own output into visible text.
 func mermaidLabel(s string) string {
 	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, "#", "#35;")
 	s = strings.ReplaceAll(s, `"`, "&quot;")
-	s = strings.ReplaceAll(s, "[", "&#91;")
-	s = strings.ReplaceAll(s, "]", "&#93;")
-	s = strings.ReplaceAll(s, "(", "&#40;")
-	s = strings.ReplaceAll(s, ")", "&#41;")
-	s = strings.ReplaceAll(s, "{", "&#123;")
-	s = strings.ReplaceAll(s, "}", "&#125;")
 	s = strings.ReplaceAll(s, "<", "&lt;")
-	s = strings.ReplaceAll(s, ">", "&gt;")
 	s = strings.ReplaceAll(s, "\r\n", "<br/>")
 	s = strings.ReplaceAll(s, "\n", "<br/>")
 	s = strings.ReplaceAll(s, "\r", "<br/>")
@@ -349,7 +354,7 @@ func renderGraphMermaid(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdg
 	var classOrder []string
 	for _, b := range beans {
 		fmt.Fprintf(w, "  %s[\"%s<br/>%s\"]\n",
-			mermaidHandle(b.ID), mermaidLabel(b.ID), mermaidLabel(ui.Truncate(b.Title, 40)))
+			mermaidQuoteID(b.ID), mermaidLabel(b.ID), mermaidLabel(ui.Truncate(b.Title, 40)))
 
 		sc := cfg.GetStatus(b.Status)
 		if sc == nil || sc.Color == "" {
@@ -359,17 +364,17 @@ func renderGraphMermaid(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdg
 		if !strings.HasPrefix(colour, "#") {
 			continue
 		}
-		name := "s" + mermaidHandle(b.Status)
+		name := "status-" + mermaidQuoteID(b.Status)
 		if _, ok := classes[name]; !ok {
 			classes[name] = colour
 			classOrder = append(classOrder, name)
 		}
-		fmt.Fprintf(w, "  class %s %s;\n", mermaidHandle(b.ID), name)
+		fmt.Fprintf(w, "  class %s %s;\n", mermaidQuoteID(b.ID), name)
 	}
 
 	for _, e := range edges {
 		fmt.Fprintf(w, "  %s -->|%s| %s\n",
-			mermaidHandle(e.From), mermaidLabel(e.Relation), mermaidHandle(e.To))
+			mermaidQuoteID(e.From), mermaidLabel(e.Relation), mermaidQuoteID(e.To))
 	}
 
 	for _, name := range classOrder {
