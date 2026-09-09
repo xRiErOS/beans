@@ -612,15 +612,28 @@ func TestExtraValueStaysOnOneLine(t *testing.T) {
 func tableLabels(out string) []string {
 	var labels []string
 	for _, line := range strings.Split(out, "\n") {
-		cells := strings.Split(line, "│")
-		if len(cells) < 3 {
+		if !tableIsFieldRow(line) {
 			continue
 		}
+		cells := strings.Split(stripANSI(line), "│")
 		if label := strings.TrimSpace(cells[1]); label != "" {
 			labels = append(labels, label)
 		}
 	}
 	return labels
+}
+
+// tableIsFieldRow tells a two-column field row from a full-width band. Both
+// carry three bars; only a field row has its second bar at an interior
+// column rather than at the right edge, so the width of the first cell is
+// what separates them.
+func tableIsFieldRow(line string) bool {
+	plain := stripANSI(line)
+	cells := strings.Split(plain, "│")
+	if len(cells) != 4 {
+		return false
+	}
+	return ui.DisplayWidth(cells[1]) < ui.DisplayWidth(plain)-4
 }
 
 // TestTableCarriesEveryFrontMatterField is the table view's half of
@@ -655,26 +668,46 @@ func TestTableCarriesEveryFrontMatterField(t *testing.T) {
 	}
 }
 
-// TestTableRowOrderFollowsTheSketch pins the PO's row order. A grid whose
-// rows move between beans buys nothing over the flowing header -- reading a
-// column only works when the same label sits on the same row every time.
-func TestTableRowOrderFollowsTheSketch(t *testing.T) {
+// TestTableBlockOrderFollowsTheSketch pins the PO's arrangement: an
+// identity band, then one ruled field per front matter entry in a fixed
+// order, then the stamps band. A grid whose rows move between beans buys
+// nothing over the flowing header -- reading a column only works when the
+// same label sits on the same row every time.
+//
+// It asserts on the block model rather than the rendered text, because the
+// order is a property of the layout and not of the box drawing.
+func TestTableBlockOrderFollowsTheSketch(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Body.\n")
 
-	got := tableLabels(renderBeanTable(b, cfg, 110))
+	blocks := beanTableBlocks(b, cfg)
+	if len(blocks) < 3 {
+		t.Fatalf("got %d blocks, want an identity band, fields and a stamps band", len(blocks))
+	}
+	if !blocks[0].band {
+		t.Errorf("first block is not the identity band: %+v", blocks[0])
+	}
+	if !blocks[len(blocks)-1].band {
+		t.Errorf("last block is not the stamps band: %+v", blocks[len(blocks)-1])
+	}
+
+	var got []string
+	for _, bl := range blocks[1 : len(blocks)-1] {
+		if bl.band {
+			t.Errorf("unexpected band between the two: %+v", bl)
+		}
+		got = append(got, bl.label)
+	}
 	want := []string{
-		"title:", "id:", "type:", "tags:", "parent:",
-		"blocked by:", "blocking:",
+		"title:", "tags:", "parent:", "blocked by:", "blocking:",
 		"branch:", "gate:", "release:", "reviews:",
-		"created:",
 	}
 	if len(got) != len(want) {
-		t.Fatalf("row labels = %v, want %v", got, want)
+		t.Fatalf("field labels = %v, want %v", got, want)
 	}
 	for i := range want {
 		if got[i] != want[i] {
-			t.Errorf("row %d label = %q, want %q (all: %v)", i, got[i], want[i], got)
+			t.Errorf("field %d = %q, want %q (all: %v)", i, got[i], want[i], got)
 		}
 	}
 }
@@ -726,11 +759,10 @@ func TestTableRasterIsIdenticalAcrossBeans(t *testing.T) {
 	geometry := func(out string) []int {
 		var boundaries []int
 		for _, line := range strings.Split(out, "\n") {
-			plain := stripANSI(line)
-			if !strings.Contains(plain, "│") {
+			if !tableIsFieldRow(line) {
 				continue
 			}
-			inner := strings.TrimPrefix(plain, "│")
+			inner := strings.TrimPrefix(stripANSI(line), "│")
 			boundaries = append(boundaries, ui.DisplayWidth(inner[:strings.Index(inner, "│")]))
 		}
 		return boundaries
@@ -909,11 +941,28 @@ func TestTableRelationsNameTypeAndTitle(t *testing.T) {
 		t.Errorf("unresolvable id was dropped instead of shown bare:\n%s", out)
 	}
 
-	// The id precedes the title: the cell wraps, and an id pushed behind a
-	// long title lands alone on the continuation line looking like a
-	// truncated remnant rather than the bean's name.
-	if idAt, titleAt := strings.Index(out, parent.ID), strings.Index(out, "The parent epic"); idAt > titleAt {
-		t.Errorf("id %q follows the title instead of preceding it:\n%s", parent.ID, out)
+	// The id sits at the cell's right edge, not inline: that puts it in the
+	// same column in every relation row, so comparing two relations is
+	// reading one column rather than two phrases of different length. It
+	// also settles where the id goes when the value wraps -- inline it
+	// interrupted type and title, trailing it landed alone on the
+	// continuation line looking like a truncated remnant.
+	var checked bool
+	for _, line := range strings.Split(out, "\n") {
+		plain := stripANSI(line)
+		if !strings.Contains(plain, "parent:") {
+			continue
+		}
+		checked = true
+		if want := parent.ID + " │"; !strings.HasSuffix(strings.TrimRight(plain, " "), want) {
+			t.Errorf("parent row does not end with the id at the right edge: %q", plain)
+		}
+		if idAt, titleAt := strings.Index(plain, parent.ID), strings.Index(plain, "The parent epic"); idAt < titleAt {
+			t.Errorf("id precedes the title instead of being right-aligned: %q", plain)
+		}
+	}
+	if !checked {
+		t.Fatalf("no parent row in output:\n%s", out)
 	}
 }
 
@@ -937,8 +986,8 @@ func TestTableWrapsStyledValuesAtVisibleWidth(t *testing.T) {
 	styled := dim("alpha") + " bravo charlie delta echo foxtrot golf " +
 		dim("hotel") + " india juliett kilo lima " + dim("mike")
 
-	plainLines := tableRowLines(tableRow{label: "x:", value: text}, 40)
-	styledLines := tableRowLines(tableRow{label: "x:", value: styled}, 40)
+	plainLines := wrapVisible(text, 40)
+	styledLines := wrapVisible(styled, 40)
 
 	if len(plainLines) != len(styledLines) {
 		t.Fatalf("styled value wrapped into %d lines, plain into %d:\n%q\n%q",
