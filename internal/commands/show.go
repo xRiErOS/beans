@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -14,6 +15,7 @@ import (
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
+	"gopkg.in/yaml.v3"
 )
 
 var (
@@ -21,6 +23,7 @@ var (
 	showRaw      bool
 	showBodyOnly bool
 	showETagOnly bool
+	showMeta     bool
 )
 
 var showCmd = &cobra.Command{
@@ -31,7 +34,10 @@ var showCmd = &cobra.Command{
 The representation follows stdout. On a terminal the output is styled and the
 body is rendered as markdown. When stdout is a pipe or a file, the output is the
 raw markdown of the source file — the same text --raw produces, unpadded and
-unwrapped, so it can be fed to a parser.`,
+unwrapped, so it can be fed to a parser.
+
+--meta drops the body from either representation and keeps the front matter:
+the styled header on a terminal, the source YAML block off one.`,
 	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resolver := &beangraph.CoreResolver{Core: core}
@@ -101,7 +107,7 @@ unwrapped, so it can be fed to a parser.`,
 		}
 
 		// Default: styled for a terminal, raw markdown for a pipe or a file
-		out, err := showOutputAll(beans, term.IsTerminal(int(os.Stdout.Fd())))
+		out, err := showOutputAll(beans, term.IsTerminal(int(os.Stdout.Fd())), showMeta)
 		if err != nil {
 			return err
 		}
@@ -112,24 +118,43 @@ unwrapped, so it can be fed to a parser.`,
 }
 
 // showOutput returns the text for a single bean, choosing the representation
-// from whether stdout is a terminal.
-func showOutput(b *bean.Bean, isTTY bool) (string, error) {
+// from whether stdout is a terminal. metaOnly drops the body from either
+// representation, leaving the front matter -- styled off the header for a
+// terminal, and the source YAML block for a pipe, which still parses as a
+// bean file with an empty body.
+func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
 	if !isTTY {
-		content, err := b.Render()
+		source := b
+		if metaOnly {
+			source = b.Clone()
+			source.Body = ""
+		}
+		content, err := source.Render()
 		if err != nil {
 			return "", fmt.Errorf("failed to render bean: %w", err)
 		}
 		return string(content), nil
+	}
+	if metaOnly {
+		return renderBeanHeader(b, cfg), nil
 	}
 	return styledBeanOutput(b)
 }
 
 // showOutputAll joins the output of several beans with the separator that
 // belongs to the chosen representation.
-func showOutputAll(beans []*bean.Bean, isTTY bool) (string, error) {
+//
+// Piped --meta output needs no separator: each block already ends with the
+// front matter's own closing "---" plus a blank line, and adding the raw
+// separator on top of that produced an empty third document between every
+// pair of beans.
+func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
 	separator := "\n---\n\n"
-	if isTTY {
+	switch {
+	case isTTY:
 		separator = "\n" + ui.Muted.Render(strings.Repeat("═", 60)) + "\n\n"
+	case metaOnly:
+		separator = ""
 	}
 
 	var out strings.Builder
@@ -137,7 +162,7 @@ func showOutputAll(beans []*bean.Bean, isTTY bool) (string, error) {
 		if i > 0 {
 			out.WriteString(separator)
 		}
-		text, err := showOutput(b, isTTY)
+		text, err := showOutput(b, isTTY, metaOnly)
 		if err != nil {
 			return "", err
 		}
@@ -151,15 +176,35 @@ func styledBeanOutput(b *bean.Bean) (string, error) {
 	return renderBeanDetail(b, cfg, resolveWidth(0, false, cfg)), nil
 }
 
-// renderBeanDetail lays out one bean for the terminal: the attribute header
-// reads the same order vertically that the beans table reads horizontally --
-// type, id, then title, then status and priority -- so type, id and title
-// carry the type's colour and weight and the header reads as one unit.
+// renderBeanDetail lays out one bean for the terminal: the attribute header,
+// then the rendered body.
 //
 // The body goes through ui.RenderMarkdown (Task 16) instead of glamour: that
 // renderer emits no trailing padding and no painted backgrounds, which is
 // exactly what glamour got wrong.
 func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
+	var sb strings.Builder
+
+	sb.WriteString(renderBeanHeader(b, cfg))
+	sb.WriteString(ui.TreeLine.Render(strings.Repeat("─", width)) + "\n\n")
+
+	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
+		sb.WriteString(body + "\n")
+	}
+	return sb.String()
+}
+
+// renderBeanHeader renders every front matter field the bean carries, so the
+// styled view withholds nothing the file holds: the attribute header reads
+// the same order vertically that the beans table reads horizontally -- type,
+// id, then title, then status and priority -- so type, id and title carry the
+// type's colour and weight and the header reads as one unit.
+//
+// Tags sit in the header rather than after the body, where a long bean hid
+// them below a screenful of markdown. Relationships, unknown ("extra") front
+// matter keys, order and the timestamps follow, each labelled, which is what
+// makes this the whole front matter and not a selection of it.
+func renderBeanHeader(b *bean.Bean, cfg *config.Config) string {
 	var sb strings.Builder
 
 	tint := ""
@@ -211,13 +256,40 @@ func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 		sb.WriteString(strings.Join(attrs, "  ") + "\n")
 	}
 
+	// Tags keep the table's "#tag" spelling so one reader recognises them
+	// across both views.
+	if len(b.Tags) > 0 {
+		parts := make([]string, len(b.Tags))
+		for i, t := range b.Tags {
+			parts[i] = "#" + t
+		}
+		// ui.Secondary resolves to the same tone as ui.Muted (both
+		// "overlay1"), so styling the values would only repeat the label's
+		// colour. Plain foreground gives them the same weight every other
+		// labelled value in this header has.
+		sb.WriteString(ui.Muted.Render("tags:") + " " + strings.Join(parts, " ") + "\n")
+	}
+
 	if rel := formatRelationships(b); rel != "" {
 		sb.WriteString(rel + "\n")
 	}
 
-	// created/updated: presentation-only metadata the old header carried as
-	// muted text. Dropping glamour is the plan's only authorised behaviour
-	// change; this stays, just moved under the reordered attribute header.
+	// Extra keys are front matter the schema does not name -- policy fields
+	// like branch, commit or release. They are part of the bean, so they are
+	// part of its detail view; sorted, because a map has no order and a
+	// reader needs a stable one.
+	if len(b.Extra) > 0 {
+		keys := make([]string, 0, len(b.Extra))
+		for k := range b.Extra {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			sb.WriteString(ui.Muted.Render(k+":") + " " + formatExtraValue(b.Extra[k]) + "\n")
+		}
+	}
+
+	// created/updated/order: managed metadata, muted on one trailing line.
 	var stamps []string
 	if b.CreatedAt != nil {
 		stamps = append(stamps, "created "+b.CreatedAt.Format("2006-01-02 15:04 UTC"))
@@ -225,41 +297,80 @@ func renderBeanDetail(b *bean.Bean, cfg *config.Config, width int) string {
 	if b.UpdatedAt != nil {
 		stamps = append(stamps, "updated "+b.UpdatedAt.Format("2006-01-02 15:04 UTC"))
 	}
+	if b.Order != "" {
+		stamps = append(stamps, "order "+b.Order)
+	}
 	if len(stamps) > 0 {
 		sb.WriteString(ui.Muted.Render(strings.Join(stamps, "  ")) + "\n")
 	}
 
-	sb.WriteString(ui.TreeLine.Render(strings.Repeat("─", width)) + "\n\n")
-
-	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
-		sb.WriteString(body + "\n")
-	}
-	if len(b.Tags) > 0 {
-		parts := make([]string, len(b.Tags))
-		for i, t := range b.Tags {
-			parts[i] = "#" + t
-		}
-		sb.WriteString("\n  " + ui.Muted.Render(strings.Join(parts, " ")) + "\n")
-	}
 	return sb.String()
 }
 
-// formatRelationships formats parent and blocks for display.
+// formatExtraValue renders one unknown front matter value as a single line.
+// Scalars print as themselves; a sequence or mapping goes through YAML in
+// flow style -- "[a, b]", "{k: v}" -- which is the value's own notation on
+// one line, rather than Go's map[...] debug spelling.
+//
+// The flow style has to be set on the encoded node: yaml.Marshal defaults to
+// block style, and folding that back onto one line by collapsing whitespace
+// yields the block markers without their meaning ("- a - b").
+func formatExtraValue(v any) string {
+	switch t := v.(type) {
+	case nil:
+		return ""
+	case string:
+		return t
+	case []any, map[string]any, map[any]any:
+		var node yaml.Node
+		if err := node.Encode(v); err != nil {
+			return fmt.Sprint(v)
+		}
+		setFlowStyle(&node)
+		out, err := yaml.Marshal(&node)
+		if err != nil {
+			return fmt.Sprint(v)
+		}
+		return strings.TrimRight(string(out), "\n")
+	default:
+		return fmt.Sprint(v)
+	}
+}
+
+// setFlowStyle marks a node and everything under it as flow style, so a
+// nested sequence inside a mapping stays on the same line as its parent.
+func setFlowStyle(n *yaml.Node) {
+	if n.Kind == yaml.SequenceNode || n.Kind == yaml.MappingNode {
+		n.Style = yaml.FlowStyle
+	}
+	for _, child := range n.Content {
+		setFlowStyle(child)
+	}
+}
+
+// formatRelationships formats parent, blocking and blocked_by for display.
+// blocked_by is the direction a reader acts on -- what has to finish before
+// this bean can move -- and was the one relationship the detail view left
+// out.
 func formatRelationships(b *bean.Bean) string {
 	var parts []string
 
-	// Display parent
 	if b.Parent != "" {
 		parts = append(parts, fmt.Sprintf("%s %s",
 			ui.Muted.Render("parent:"),
 			ui.ID.Render(b.Parent)))
 	}
 
-	// Display blocking
 	for _, target := range b.Blocking {
 		parts = append(parts, fmt.Sprintf("%s %s",
 			ui.Muted.Render("blocking:"),
 			ui.ID.Render(target)))
+	}
+
+	for _, blocker := range b.BlockedBy {
+		parts = append(parts, fmt.Sprintf("%s %s",
+			ui.Muted.Render("blocked by:"),
+			ui.ID.Render(blocker)))
 	}
 	return strings.Join(parts, "\n")
 }
@@ -269,7 +380,8 @@ func RegisterShowCmd(root *cobra.Command) {
 	showCmd.Flags().BoolVar(&showRaw, "raw", false, "Force raw markdown output even on a terminal (already the default off a terminal)")
 	showCmd.Flags().BoolVar(&showBodyOnly, "body-only", false, "Output only the body content")
 	showCmd.Flags().BoolVar(&showETagOnly, "etag-only", false, "Output only the etag")
-	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only")
+	showCmd.Flags().BoolVar(&showMeta, "meta", false, "Output only the front matter, without the body")
+	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "meta")
 	showCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(showCmd)
 }
