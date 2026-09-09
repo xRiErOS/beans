@@ -18,7 +18,19 @@
 beans-pick-widget() {
 	local id
 	zle -I
-	id=$(beans pick </dev/tty) || { zle reset-prompt; return; }
+	if [[ -n $BUFFER ]]; then
+		# A non-empty buffer carries real invocation context: forwarding it
+		# lets beans pick narrow its candidates to whatever verb/--parent
+		# position the cursor currently sits in (R-12). An empty buffer has
+		# no verb to resolve at all -- forwarding it would only trip AC5's
+		# "no resolvable verb" error, so that case calls flag-less `beans
+		# pick` instead and gets the full, unscoped candidate set, which is
+		# the deliberately unconstrained (not "not understood") outcome for
+		# starting a line from nothing (beans-eeej).
+		id=$(beans pick --line "$BUFFER" --cursor "$CURSOR" </dev/tty) || { zle reset-prompt; return; }
+	else
+		id=$(beans pick </dev/tty) || { zle reset-prompt; return; }
+	fi
 	zle reset-prompt
 	[[ -z $id ]] && return
 	LBUFFER+="$id "

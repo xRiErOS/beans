@@ -34,6 +34,13 @@ const (
 	// an explicit rank lands here, which keeps the old behaviour where an
 	// unknown type was treated like "task".
 	LeafRank = 4
+	// MaxContainerRank is the highest rank a container type (one that can
+	// hold children, as opposed to a leaf rendered inside one) sits on.
+	// Ranks 1 through MaxContainerRank are container ranks; the single
+	// source for that bound, read by internal/commands' isContainerRank,
+	// validateRoadmapRootType, and roadmapScopeTypes instead of each
+	// repeating the literal 3 (beans-v2ox).
+	MaxContainerRank = 3
 	// DefaultMaxWidth is the rendered width cap used when display.max_width
 	// is unset. GetMaxWidth() and internal/commands' resolveWidth() both
 	// need this exact number - it used to be a literal duplicated in both

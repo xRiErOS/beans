@@ -83,6 +83,10 @@ test-e2e ARGS='':
 test-race ARGS='./...':
     go test -race -count=1 {{ARGS}}
 
+# Prove beans-pick-widget's zsh contract against a stubbed beans (beans-fcj0)
+test-zsh:
+    bash scripts/test-zsh-widget.sh
+
 # Validate .goreleaser.yaml (schema, templates) without building anything
 release-check:
     mise exec goreleaser@latest -- goreleaser check
