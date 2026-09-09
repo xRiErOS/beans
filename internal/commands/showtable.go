@@ -21,37 +21,43 @@ import (
 // per bean, and that is a deliberate trade: an unusually long key is visible
 // and rare, whereas a silently uneven grid is neither.
 var tableLabelVocabulary = []string{
-	"title:", "id:", "type:", "status:", "priority:", "tags:",
-	"parent:", "blocked by:", "blocking:", "created:", "updated:", "order:",
+	"title:", "tags:", "parent:", "blocked by:", "blocking:",
 }
 
-// tableRow is one line of the grid before layout: a label and its value, or
-// several label/value pairs that share the line. A pair's label is padded to
-// its own fixed width so that status and priority start at the same cell in
-// every bean, which a plain strings.Join would not guarantee.
-type tableRow struct {
+// bandIDWidth budgets the id cell in the top band. Ids are prefix plus a
+// four-character suffix, which lands at twelve cells for the common prefixes,
+// and padding to a constant is what keeps "type:" starting at the same cell
+// in every bean. A longer id pushes the rest of the band right, which is
+// visible and rare -- the same trade the label column makes.
+const bandIDWidth = 12
+
+// tableBlock is one horizontally ruled section of the grid. A band spans the
+// full width and carries several label/value pairs, left-packed with one
+// right-aligned trailer; a field is the two-column label/value form whose
+// value wraps.
+type tableBlock struct {
+	band  bool
 	label string
 	value string
-	pairs []tablePair
+	left  []string
+	right string
 }
 
-type tablePair struct {
-	label string
-	value string
-	// width is the cell budget for the value, taken from the config
-	// vocabulary (the longest type/status/priority name) so the pair
-	// columns line up across beans.
-	width int
-}
-
-// renderBeanTable lays out one bean's whole front matter as a label/value
-// grid, capped at width cells including the borders.
+// renderBeanTable lays out one bean's whole front matter, capped at width
+// cells including the borders.
+//
+// The arrangement is the PO's: a band across the top carrying what the bean
+// *is* (id, type, status, and priority against the right edge), a band across
+// the bottom carrying the managed stamps, and between them one horizontally
+// ruled field per line of front matter. The bands separate identity and
+// bookkeeping from content, which is what a flat label column could not do --
+// there, id and created sat in the same shape as the title.
 //
 // It is an arrangement of the same fields renderBeanHeader prints, not a
 // selection of them: dropping one here would reintroduce exactly the defect
 // beans-p1d0 fixed, and TestTableCarriesEveryFrontMatterField pins that.
 func renderBeanTable(b *bean.Bean, cfg *config.Config, width int) string {
-	rows := beanTableRows(b, cfg)
+	blocks := beanTableBlocks(b, cfg)
 
 	labelWidth := 0
 	for _, l := range tableLabelVocabulary {
@@ -59,53 +65,125 @@ func renderBeanTable(b *bean.Bean, cfg *config.Config, width int) string {
 			labelWidth = w
 		}
 	}
-	for _, r := range rows {
-		if w := ui.DisplayWidth(r.label); w > labelWidth {
+	for _, bl := range blocks {
+		if w := ui.DisplayWidth(bl.label); w > labelWidth {
 			labelWidth = w
 		}
 	}
 
-	// A row is "│ " + label + " │ " + value + " │": seven cells of border
-	// and padding on top of the two text columns.
+	// A field row is "│ " + label + " │ " + value + " │": seven cells of
+	// border and padding on top of the two text columns. A band row is
+	// "│ " + content + " │": four.
 	valueWidth := width - labelWidth - 7
 	if valueWidth < 1 {
 		valueWidth = 1
 	}
+	bandWidth := width - 4
+	if bandWidth < 1 {
+		bandWidth = 1
+	}
+
+	bar := ui.TreeLine.Render("│")
+	rule := func(left, right string) string {
+		// The rules run straight through the column line rather than
+		// meeting it in a ┼: they separate whole records, and a junction
+		// on every one of them turns the grid into graph paper.
+		return ui.TreeLine.Render(left+strings.Repeat("─", width-2)+right) + "\n"
+	}
 
 	var sb strings.Builder
-	border := func(left, mid, right string) {
-		sb.WriteString(ui.TreeLine.Render(
-			left+strings.Repeat("─", labelWidth+2)+mid+strings.Repeat("─", valueWidth+2)+right) + "\n")
-	}
-	bar := ui.TreeLine.Render("│")
-
-	border("┌", "┬", "┐")
-	for _, r := range rows {
-		for i, line := range tableRowLines(r, valueWidth) {
+	sb.WriteString(rule("┌", "┐"))
+	for i, bl := range blocks {
+		if i > 0 {
+			sb.WriteString(rule("├", "┤"))
+		}
+		if bl.band {
+			sb.WriteString(bar + " " + padVisible(packBand(bl, bandWidth), bandWidth) + " " + bar + "\n")
+			continue
+		}
+		for j, line := range wrapFieldValue(bl, valueWidth) {
 			label := ""
-			if i == 0 {
-				label = r.label
+			if j == 0 {
+				label = bl.label
 			}
 			sb.WriteString(bar + " " + ui.Muted.Render(ui.PadRight(label, labelWidth)) +
 				" " + bar + " " + padVisible(line, valueWidth) + " " + bar + "\n")
 		}
 	}
-	border("└", "┴", "┘")
+	sb.WriteString(rule("└", "┘"))
 
 	return sb.String()
 }
 
-// tableRowLines renders a row's value into the lines of its cell: a plain
-// value wraps, a paired row stays on one line because its cells are already
-// budgeted.
-func tableRowLines(r tableRow, valueWidth int) []string {
-	if len(r.pairs) > 0 {
-		return []string{padPairs(r.pairs, valueWidth)}
+// packBand left-packs a band's pairs and pushes its trailer against the right
+// edge, which is what makes priority and order findable without reading the
+// line: they are always in the same corner.
+func packBand(bl tableBlock, bandWidth int) string {
+	left := strings.Join(bl.left, "    ")
+	if bl.right == "" {
+		return left
 	}
-	if r.value == "" {
-		return []string{""}
+
+	gap := bandWidth - visibleWidth(left) - visibleWidth(bl.right)
+	if gap < 1 {
+		// Too narrow to separate the two: cut the left group so the
+		// trailer survives, since it is the shorter and the more
+		// positional of the two.
+		left = ui.Truncate(stripANSI(left), bandWidth-visibleWidth(bl.right)-1)
+		gap = 1
 	}
-	return wrapVisible(r.value, valueWidth)
+	return left + strings.Repeat(" ", gap) + bl.right
+}
+
+// wrapFieldValue folds a field's value and pushes its trailer -- the related
+// bean's id -- against the right edge of the first line.
+//
+// Right-aligning the id is what makes a relation scannable: it lands in the
+// same column in every row, so comparing two relations is reading one column
+// rather than two phrases of different length. It also settles where the id
+// goes when the cell wraps, which neither leading nor trailing it did: a
+// leading id interrupted the type and title, a trailing one ended up alone
+// on the continuation line looking like a truncated remnant.
+func wrapFieldValue(bl tableBlock, valueWidth int) []string {
+	if bl.right == "" {
+		return wrapVisible(bl.value, valueWidth)
+	}
+
+	trailer := visibleWidth(bl.right)
+	first := valueWidth - trailer - 2
+	if first < 1 {
+		// No room to share the line: the id keeps its own, since it is
+		// the part that identifies the row.
+		return append([]string{padLeftVisible(bl.right, valueWidth)},
+			wrapVisible(bl.value, valueWidth)...)
+	}
+
+	lines := wrapVisibleFirst(bl.value, first, valueWidth)
+	gap := valueWidth - visibleWidth(lines[0]) - trailer
+	lines[0] = lines[0] + strings.Repeat(" ", gap) + bl.right
+	return lines
+}
+
+// padLeftVisible right-aligns s in width cells, counting visible cells only.
+func padLeftVisible(s string, width int) string {
+	if pad := width - visibleWidth(s); pad > 0 {
+		return strings.Repeat(" ", pad) + s
+	}
+	return s
+}
+
+// wrapVisibleFirst wraps s with a narrower budget for the first line, which
+// is what leaves room for a right-aligned trailer beside it.
+func wrapVisibleFirst(s string, firstWidth, width int) []string {
+	lines := wrapVisible(s, firstWidth)
+	if len(lines) < 2 {
+		return lines
+	}
+	// Re-flow everything after the first line at the full width, so the
+	// narrowing costs one line's worth of words rather than the whole
+	// cell's.
+	rest := strings.Join(lines[1:], " ")
+	return append(lines[:1], wrapVisible(rest, width)...)
 }
 
 // wrapVisible wraps s to width *visible* cells, leaving the ANSI sequences a
@@ -152,35 +230,6 @@ func wrapVisible(s string, width int) []string {
 	return lines
 }
 
-// padPairs joins the pairs of one row, padding each value to its budget so
-// the following label starts at a fixed cell. The last pair is not padded --
-// trailing spaces before the border are the caller's job.
-func padPairs(pairs []tablePair, valueWidth int) string {
-	var parts []string
-	for i, p := range pairs {
-		value := p.value
-		if i < len(pairs)-1 {
-			value = padVisible(value, p.width)
-		}
-		// The first pair of a row carries no label of its own -- the row's
-		// left column already names it ("type:", "created:"). Rendering an
-		// empty label with its separating space would indent that value by
-		// one cell and break the raster against every other row.
-		cell := value
-		if p.label != "" {
-			cell = ui.Muted.Render(p.label) + " " + value
-		}
-		parts = append(parts, cell)
-	}
-	line := strings.Join(parts, "  ")
-	if visibleWidth(line) > valueWidth {
-		// A narrow --max-width cannot fit the pairs; cutting is better
-		// than breaking the border, and the cut is visible.
-		return ui.Truncate(stripANSI(line), valueWidth)
-	}
-	return line
-}
-
 // padVisible pads s to width counting only visible cells, so a styled value
 // keeps the grid aligned. ui.PadRight would count the ANSI sequences.
 func padVisible(s string, width int) string {
@@ -216,10 +265,9 @@ func stripANSI(s string) string {
 	return sb.String()
 }
 
-// beanTableRows turns one bean into the sketch's row sequence. The order is
-// the PO's: what a thing is, then how it stands, then how it relates, then
-// the free text, then the managed stamps.
-func beanTableRows(b *bean.Bean, cfg *config.Config) []tableRow {
+// beanTableBlocks turns one bean into the sketch's sequence: identity band,
+// then one ruled field per front matter entry, then the stamps band.
+func beanTableBlocks(b *bean.Bean, cfg *config.Config) []tableBlock {
 	tint := lipgloss.NewStyle()
 	if tc := cfg.GetType(b.Type); tc != nil {
 		tint = tint.Bold(tc.Emphasis)
@@ -228,56 +276,55 @@ func beanTableRows(b *bean.Bean, cfg *config.Config) []tableRow {
 		}
 	}
 
-	rows := []tableRow{
-		{label: "title:", value: b.Title},
-		{label: "id:", value: tint.Render(b.ID)},
-	}
-
-	statusCell := b.Status
 	statusColor, statusBold := "gray", true
 	if sc := cfg.GetStatus(b.Status); sc != nil {
 		statusColor, statusBold = sc.Color, !sc.Archive
 	}
-	statusCell = lipgloss.NewStyle().Foreground(ui.ResolveColor(statusColor)).
+	statusCell := lipgloss.NewStyle().Foreground(ui.ResolveColor(statusColor)).
 		Bold(statusBold).Render(b.Status)
 	if implicit, from := core.ImplicitStatus(b.ID); implicit != "" {
 		statusCell += " " + ui.Muted.Render("↑"+implicit+" ("+from+")")
 	}
 
-	priorityCell := ""
+	identity := tableBlock{band: true, left: []string{
+		ui.Muted.Render("id:") + " " + padVisible(tint.Render(b.ID), bandIDWidth),
+		ui.Muted.Render("type:") + " " + padVisible(tint.Render(b.Type), vocabularyWidth(cfg.TypeNames())),
+		ui.Muted.Render("status:") + " " + statusCell,
+	}}
 	if b.Priority != "" {
 		priorityColor := "gray"
 		if pc := cfg.GetPriority(b.Priority); pc != nil {
 			priorityColor = pc.Color
 		}
-		priorityCell = lipgloss.NewStyle().Foreground(ui.ResolveColor(priorityColor)).
-			Render(b.Priority)
+		identity.right = ui.Muted.Render("priority:") + " " +
+			lipgloss.NewStyle().Foreground(ui.ResolveColor(priorityColor)).Render(b.Priority)
 	}
-
-	rows = append(rows, tableRow{label: "type:", pairs: []tablePair{
-		{label: "", value: tint.Render(b.Type), width: vocabularyWidth(cfg.TypeNames())},
-		{label: "status:", value: statusCell, width: vocabularyWidth(cfg.StatusNames())},
-		{label: "priority:", value: priorityCell, width: vocabularyWidth(cfg.PriorityNames())},
-	}})
+	blocks := []tableBlock{identity, {label: "title:", value: b.Title}}
 
 	if len(b.Tags) > 0 {
 		parts := make([]string, len(b.Tags))
 		for i, t := range b.Tags {
 			parts[i] = "#" + t
 		}
-		rows = append(rows, tableRow{label: "tags:", value: strings.Join(parts, " ")})
+		blocks = append(blocks, tableBlock{label: "tags:", value: strings.Join(parts, " ")})
 	}
 
 	if b.Parent != "" {
-		rows = append(rows, tableRow{label: "parent:", value: describeRelated(b.Parent, cfg)})
+		text, trailer := describeRelated(b.Parent, cfg)
+		blocks = append(blocks, tableBlock{label: "parent:", value: text, right: trailer})
 	}
 	for _, id := range b.BlockedBy {
-		rows = append(rows, tableRow{label: "blocked by:", value: describeRelated(id, cfg)})
+		text, trailer := describeRelated(id, cfg)
+		blocks = append(blocks, tableBlock{label: "blocked by:", value: text, right: trailer})
 	}
 	for _, id := range b.Blocking {
-		rows = append(rows, tableRow{label: "blocking:", value: describeRelated(id, cfg)})
+		text, trailer := describeRelated(id, cfg)
+		blocks = append(blocks, tableBlock{label: "blocking:", value: text, right: trailer})
 	}
 
+	// Extra keys are front matter the schema does not name -- policy fields
+	// like branch, topic or release. Sorted, because a map has no order and
+	// a reader needs a stable one.
 	if len(b.Extra) > 0 {
 		keys := make([]string, 0, len(b.Extra))
 		for k := range b.Extra {
@@ -285,29 +332,31 @@ func beanTableRows(b *bean.Bean, cfg *config.Config) []tableRow {
 		}
 		sort.Strings(keys)
 		for _, k := range keys {
-			rows = append(rows, tableRow{label: k + ":", value: formatExtraValue(b.Extra[k])})
+			blocks = append(blocks, tableBlock{label: k + ":", value: formatExtraValue(b.Extra[k])})
 		}
 	}
 
-	var stamps []tablePair
+	stamps := tableBlock{band: true}
 	if b.CreatedAt != nil {
-		stamps = append(stamps, tablePair{value: b.CreatedAt.Format("2006-01-02 15:04 UTC"), width: 20})
+		stamps.left = append(stamps.left, ui.Muted.Render("created:")+" "+
+			b.CreatedAt.Format("2006-01-02 15:04 UTC"))
 	}
 	if b.UpdatedAt != nil {
-		stamps = append(stamps, tablePair{label: "updated:", value: b.UpdatedAt.Format("2006-01-02 15:04 UTC"), width: 20})
+		stamps.left = append(stamps.left, ui.Muted.Render("updated:")+" "+
+			b.UpdatedAt.Format("2006-01-02 15:04 UTC"))
 	}
 	if b.Order != "" {
-		stamps = append(stamps, tablePair{label: "order:", value: b.Order, width: 4})
+		stamps.right = ui.Muted.Render("order:") + " " + b.Order
 	}
-	if len(stamps) > 0 {
-		rows = append(rows, tableRow{label: "created:", pairs: stamps})
+	if len(stamps.left) > 0 || stamps.right != "" {
+		blocks = append(blocks, stamps)
 	}
 
-	return rows
+	return blocks
 }
 
 // vocabularyWidth is the widest name in a config enum, which is what makes a
-// pair column's width a property of the configuration rather than of the bean
+// band's columns a property of the configuration rather than of the bean
 // being rendered.
 func vocabularyWidth(names []string) int {
 	w := 0
@@ -323,11 +372,13 @@ func vocabularyWidth(names []string) int {
 // bare id. A parent from another store, or one that has been deleted, is
 // information the reader still needs -- an empty cell or an error would be
 // worse than the id.
-func describeRelated(id string, cfg *config.Config) string {
+func describeRelated(id string, cfg *config.Config) (string, string) {
 	resolver := &beangraph.CoreResolver{Core: core}
 	related, err := resolver.Bean(context.Background(), id)
 	if err != nil || related == nil {
-		return id
+		// Nothing to describe: the id becomes the value itself rather
+		// than a trailer beside an empty cell.
+		return id, ""
 	}
 
 	tint := lipgloss.NewStyle()
@@ -337,21 +388,16 @@ func describeRelated(id string, cfg *config.Config) string {
 			tint = tint.Foreground(ui.ResolveColor(tc.Color))
 		}
 	}
-	// Type and id lead, the title trails: the cell wraps, and a trailing id
-	// ended up alone on the second line looking like a truncated remnant.
-	// What identifies the bean now sits on the first line in every case,
-	// and only the title -- the part a reader can stop reading -- breaks.
-	//
-	// The separator is a middle dot rather than spacing because ui.WrapText
+
+	// The separator is a middle dot rather than spacing because wrapVisible
 	// splits on fields, so a two-space gap survives only until the value
 	// wraps and "epic show --table: ..." then reads as one run-on phrase.
 	parts := []string{}
 	if related.Type != "" {
 		parts = append(parts, tint.Render(related.Type))
 	}
-	parts = append(parts, ui.Muted.Render(id))
 	if related.Title != "" {
 		parts = append(parts, related.Title)
 	}
-	return strings.Join(parts, " · ")
+	return strings.Join(parts, " · "), ui.Muted.Render(id)
 }
