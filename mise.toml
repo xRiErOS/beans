@@ -32,7 +32,7 @@ run = ["go generate ./...", "cd frontend && pnpm codegen"]
 
 [tasks.test]
 depends = ["codegen", "test:e2e"]
-run = "go test ./..."
+run = "go test -count=1 ./..."
 
 [tasks."build:frontend"]
 description = "Build the SvelteKit frontend"
