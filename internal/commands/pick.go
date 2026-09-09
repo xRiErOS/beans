@@ -13,6 +13,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/pkg/candidates"
@@ -20,10 +21,13 @@ import (
 
 // errPickAborted is returned whenever nothing was selected -- the user
 // cancelled, or reached the end of the picker without pressing enter on an
-// item. R-11 AC3: stdout stays empty and the process exits non-zero either
-// way, so callers cannot tell "cancelled" from "picked nothing" and don't
-// need to.
-var errPickAborted = errors.New("beans pick: no bean selected")
+// item. R-11 AC3: stdout stays empty and the process still exits non-zero
+// either way, so callers cannot tell "cancelled" from "picked nothing" and
+// don't need to. It is an output.Silent error (beans-lk8t): backing out of
+// an interactive picker is expected, ordinary use, not a failure worth a
+// stderr line -- reportExecutionError still keeps quiet while Execute still
+// exits 1.
+var errPickAborted = output.Silent("beans pick: no bean selected")
 
 var pickCmd = &cobra.Command{
 	Use:   "pick",
