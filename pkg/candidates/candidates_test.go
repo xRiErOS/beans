@@ -109,7 +109,7 @@ func TestParentCandidates_ExcludesDescendants(t *testing.T) {
 	}
 }
 
-func TestBlockingCandidates_IncludesDescendants(t *testing.T) {
+func TestBlockingCandidates_ExcludesDescendants(t *testing.T) {
 	resolver, cfg := fixture(t)
 
 	got, err := BlockingCandidates(context.Background(), resolver, cfg, "beans-f1")
@@ -117,7 +117,15 @@ func TestBlockingCandidates_IncludesDescendants(t *testing.T) {
 		t.Fatalf("BlockingCandidates: %v", err)
 	}
 
-	mustEqual(t, ids(got), []string{"beans-m1", "beans-m2", "beans-m3", "beans-e1", "beans-e2", "beans-f2", "beans-t1"})
+	mustEqual(t, ids(got), []string{"beans-m1", "beans-m2", "beans-e1", "beans-e2", "beans-f2"})
+
+	for _, excluded := range []string{"beans-t1", "beans-m3"} {
+		for _, id := range ids(got) {
+			if id == excluded {
+				t.Fatalf("expected %s (descendant of beans-f1) to be excluded from blocking candidates, got %v", excluded, ids(got))
+			}
+		}
+	}
 }
 
 func TestStatusCandidates(t *testing.T) {
