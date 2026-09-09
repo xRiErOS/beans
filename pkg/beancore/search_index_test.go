@@ -81,6 +81,14 @@ func TestSearchIndexField_OnlyTouchedByKnownSeams(t *testing.T) {
 		"Update":                  true,
 		"Delete":                  true,
 		"Close":                   true,
+		// beans-4t2m's lazy-upgrade helpers: ensureWritableSearchIndexLocked
+		// is the single seam every write path (Create/Update/Delete, the
+		// watcher paths below, and loadFromDisk's resync) goes through
+		// before touching c.searchIndex, and upgradeSearchIndexLocked is
+		// the shared close-and-reopen-exclusively implementation it and
+		// ensureSearchIndexLocked both call.
+		"ensureWritableSearchIndexLocked": true,
+		"upgradeSearchIndexLocked":        true,
 		// The widened, whole-package scan also caught fsnotify-driven
 		// incremental maintenance in watcher.go/worktree_watcher.go for
 		// long-running processes (beans-serve, the TUI): the same
