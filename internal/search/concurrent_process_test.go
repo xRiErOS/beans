@@ -174,10 +174,12 @@ func TestHelperChildIndexUnderLock(t *testing.T) {
 		t.Skip("only runs as a reentrant child process spawned by TestOpen_LockLoserSkipsSidecarWrite")
 	}
 
-	idx, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open() error = %v", err)
-	}
+	// openWithTimeout guards this Open() call itself: a regression to a
+	// blocking flock must fail this reentrant test by name within 5s,
+	// rather than depending solely on runChild's -test.timeout=25s flag
+	// (whose own failure mode is a goroutine dump, not a named assertion,
+	// and which this pattern is meant to no longer be the only backstop).
+	idx := openWithTimeout(t, 5*time.Second, Open, dir)
 	defer idx.Close()
 
 	if idx.persistent {
