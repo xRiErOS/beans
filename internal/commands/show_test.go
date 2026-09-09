@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -64,7 +65,7 @@ func TestShowOutputSwitchesOnTTY(t *testing.T) {
 	b := showTestBean("beans-test1", "A test bean", "# Heading\n\nSome body text.\n")
 
 	t.Run("non-tty is byte-identical to raw", func(t *testing.T) {
-		got, err := showOutput(b, false)
+		got, err := showOutput(b, false, false)
 		if err != nil {
 			t.Fatalf("showOutput() error = %v", err)
 		}
@@ -79,7 +80,7 @@ func TestShowOutputSwitchesOnTTY(t *testing.T) {
 	// terminal, so lipgloss and glamour degrade their colour profile and emit
 	// no escape sequences. The horizontal rule is the stable marker.
 	t.Run("tty renders the styled representation", func(t *testing.T) {
-		got, err := showOutput(b, true)
+		got, err := showOutput(b, true, false)
 		if err != nil {
 			t.Fatalf("showOutput() error = %v", err)
 		}
@@ -103,7 +104,7 @@ func TestShowOutputAllSeparatorNonTTY(t *testing.T) {
 	b1 := showTestBean("beans-test4", "First bean", "First body.\n")
 	b2 := showTestBean("beans-test5", "Second bean", "Second body.\n")
 
-	got, err := showOutputAll([]*bean.Bean{b1, b2}, false)
+	got, err := showOutputAll([]*bean.Bean{b1, b2}, false, false)
 	if err != nil {
 		t.Fatalf("showOutputAll() error = %v", err)
 	}
@@ -122,7 +123,7 @@ func TestShowOutputAllSeparatorTTY(t *testing.T) {
 	b1 := showTestBean("beans-test6", "First bean", "First body.\n")
 	b2 := showTestBean("beans-test7", "Second bean", "Second body.\n")
 
-	got, err := showOutputAll([]*bean.Bean{b1, b2}, true)
+	got, err := showOutputAll([]*bean.Bean{b1, b2}, true, false)
 	if err != nil {
 		t.Fatalf("showOutputAll() error = %v", err)
 	}
@@ -132,11 +133,11 @@ func TestShowOutputAllSeparatorTTY(t *testing.T) {
 		t.Errorf("expected exactly 1 occurrence of the TTY separator, got %d", n)
 	}
 
-	first, err := showOutput(b1, true)
+	first, err := showOutput(b1, true, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
-	second, err := showOutput(b2, true)
+	second, err := showOutput(b2, true, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -152,7 +153,7 @@ func TestShowOutputEmptyBodyNonTTY(t *testing.T) {
 	setupShowTest(t)
 	b := showTestBean("beans-test2", "Bean without body", "")
 
-	got, err := showOutput(b, false)
+	got, err := showOutput(b, false, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -221,7 +222,7 @@ func TestShowNonTTYPreservesLineStructure(t *testing.T) {
 	longLine := strings.Repeat("lorem ipsum dolor sit amet ", 12) // 324 chars
 	b := showTestBean("beans-test3", "Bean with a long paragraph", longLine+"\n")
 
-	got, err := showOutput(b, false)
+	got, err := showOutput(b, false, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -246,7 +247,7 @@ func runShowInTestStore(t *testing.T, body string) string {
 	t.Helper()
 	setupShowTest(t)
 	b := showTestBean("beans-detail1", "A detail bean", body)
-	out, err := showOutput(b, true)
+	out, err := showOutput(b, true, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -333,7 +334,7 @@ func TestShowHeaderCarriesCreatedAndUpdatedTimestamps(t *testing.T) {
 	b.CreatedAt = &created
 	b.UpdatedAt = &updated
 
-	out, err := showOutput(b, true)
+	out, err := showOutput(b, true, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -361,7 +362,7 @@ func TestShowDetailShowsNormalPriority(t *testing.T) {
 	b := showTestBean("beans-detail3", "Detail priority bean", "body text")
 	b.Priority = "normal"
 
-	out, err := showOutput(b, true)
+	out, err := showOutput(b, true, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
@@ -382,12 +383,224 @@ func TestShowDetailShowsUnknownStatus(t *testing.T) {
 	b := showTestBean("beans-detail5", "Bean with an odd status", "body text")
 	b.Status = "wibble"
 
-	out, err := showOutput(b, true)
+	out, err := showOutput(b, true, false)
 	if err != nil {
 		t.Fatalf("showOutput() error = %v", err)
 	}
 	plain := stripANSITest(out)
 	if !strings.Contains(plain, "wibble") {
 		t.Errorf("detail view hides an unconfigured status:\n%s", plain)
+	}
+}
+
+// showFullBean returns a bean carrying every front matter field the format
+// allows -- tags, both blocking directions, order and unknown ("extra")
+// keys -- so a detail-view test can assert on the whole front matter rather
+// than the subset the header happened to render.
+func showFullBean(body string) *bean.Bean {
+	created := time.Date(2026, 9, 5, 10, 15, 5, 0, time.UTC)
+	updated := time.Date(2026, 9, 5, 20, 27, 9, 0, time.UTC)
+	return &bean.Bean{
+		ID:        "beans-full1",
+		Slug:      "a-full-bean",
+		Title:     "A full bean",
+		Status:    "todo",
+		Type:      "task",
+		Priority:  "high",
+		Tags:      []string{"reviewed", "backend"},
+		CreatedAt: &created,
+		UpdatedAt: &updated,
+		Order:     "a0",
+		Parent:    "beans-paren",
+		Blocking:  []string{"beans-block1"},
+		BlockedBy: []string{"beans-blkby1"},
+		Extra: map[string]any{
+			"branch":  "feature/beans-full1-a-full-bean",
+			"release": "0-9-0",
+			"reviews": []any{"beans-rev1", "beans-rev2"},
+			"gate":    map[string]any{"suite": "green", "reviewer": "ReviewSix"},
+		},
+		Body: body,
+	}
+}
+
+// TestShowHeaderCarriesWholeFrontMatter pins that the styled detail view
+// withholds nothing the file holds, and that it carries it *above* the body:
+// tags used to be printed after the rendered markdown, which put them below
+// a screenful of text on any real bean, and blocked_by and unknown keys were
+// not rendered at all. Splitting on the horizontal rule is what makes this a
+// placement assertion and not just a "appears somewhere" one.
+func TestShowHeaderCarriesWholeFrontMatter(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body text that mentions nothing else.\n")
+
+	out, err := showOutput(b, true, false)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	plain := stripANSITest(out)
+
+	rule := strings.Index(plain, strings.Repeat("─", 10))
+	if rule < 0 {
+		t.Fatalf("no horizontal rule in styled output:\n%s", plain)
+	}
+	header := plain[:rule]
+
+	for _, want := range []string{
+		"#reviewed", "#backend",
+		"parent: beans-paren",
+		"blocking: beans-block1",
+		"blocked by: beans-blkby1",
+		"branch: feature/beans-full1-a-full-bean",
+		"release: 0-9-0",
+		"gate: {reviewer: ReviewSix, suite: green}",
+		"reviews: [beans-rev1, beans-rev2]",
+		"order a0",
+	} {
+		if !strings.Contains(header, want) {
+			t.Errorf("header is missing %q\nheader:\n%s", want, header)
+		}
+	}
+}
+
+// TestShowMetaDropsBodyOnATerminal: --meta answers "what is this bean" for a
+// reader who does not want to page through the body. The header must survive
+// whole; the body and the rule that introduces it must be gone.
+func TestShowMetaDropsBodyOnATerminal(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Distinctive body sentinel.\n")
+
+	out, err := showOutput(b, true, true)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	plain := stripANSITest(out)
+
+	if strings.Contains(plain, "Distinctive body sentinel") {
+		t.Errorf("--meta printed the body:\n%s", plain)
+	}
+	if strings.Contains(plain, strings.Repeat("─", 10)) {
+		t.Errorf("--meta printed the body rule:\n%s", plain)
+	}
+	for _, want := range []string{"beans-full1", "A full bean", "#reviewed", "blocked by: beans-blkby1"} {
+		if !strings.Contains(plain, want) {
+			t.Errorf("--meta is missing %q\ngot:\n%s", want, plain)
+		}
+	}
+}
+
+// TestShowMetaOffATerminalParsesAsABean: off a terminal, show emits source
+// markdown a parser can read; --meta must not break that contract by
+// emitting a styled or truncated form. The output has to parse back into the
+// same front matter with an empty body.
+func TestShowMetaOffATerminalParsesAsABean(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Distinctive body sentinel.\n")
+
+	out, err := showOutput(b, false, true)
+	if err != nil {
+		t.Fatalf("showOutput() error = %v", err)
+	}
+	if strings.Contains(out, "Distinctive body sentinel") {
+		t.Errorf("--meta printed the body:\n%s", out)
+	}
+
+	got, err := bean.Parse(strings.NewReader(out))
+	if err != nil {
+		t.Fatalf("bean.Parse() error = %v, output:\n%s", err, out)
+	}
+	if strings.TrimSpace(got.Body) != "" {
+		t.Errorf("parsed body = %q, want empty", got.Body)
+	}
+	if strings.Join(got.Tags, ",") != "reviewed,backend" {
+		t.Errorf("parsed tags = %v, want [reviewed backend]", got.Tags)
+	}
+	if strings.Join(got.BlockedBy, ",") != "beans-blkby1" {
+		t.Errorf("parsed blocked_by = %v, want [beans-blkby1]", got.BlockedBy)
+	}
+	if got.Extra["release"] != "0-9-0" {
+		t.Errorf("parsed extra[release] = %v, want %q", got.Extra["release"], "0-9-0")
+	}
+
+	// The source bean must be untouched: --meta reads, it does not edit.
+	if b.Body != "Distinctive body sentinel.\n" {
+		t.Errorf("--meta mutated the bean's body to %q", b.Body)
+	}
+}
+
+// TestShowMetaOffATerminalEmitsNoEmptyDocument: each --meta block ends with
+// the front matter's own closing "---", so the raw separator on top of it
+// produced an empty document between every pair of beans -- a stream that
+// still "looks like" markdown but hands a parser a bean with no fields.
+func TestShowMetaOffATerminalEmitsNoEmptyDocument(t *testing.T) {
+	setupShowTest(t)
+	b1 := showFullBean("First body.\n")
+	b2 := showTestBean("beans-second", "A second bean", "Second body.\n")
+
+	got, err := showOutputAll([]*bean.Bean{b1, b2}, false, true)
+	if err != nil {
+		t.Fatalf("showOutputAll() error = %v", err)
+	}
+
+	// Two beans are exactly four delimiter lines: an opening and a closing
+	// "---" each. A fifth is the stray separator, and the empty document it
+	// opens is what a parser then reads as a bean with no fields.
+	var delimiters int
+	for _, line := range strings.Split(got, "\n") {
+		if line == "---" {
+			delimiters++
+		}
+	}
+	if delimiters != 4 {
+		t.Errorf("got %d \"---\" lines, want 4 (two per bean):\n%s", delimiters, got)
+	}
+	if !strings.Contains(got, "beans-full1") || !strings.Contains(got, "beans-second") {
+		t.Errorf("both beans must appear:\n%s", got)
+	}
+}
+
+// TestExtraValueStaysOnOneLine pins the header's one-line-per-key contract
+// against the YAML emitter's line-breaking. yaml.v3 does not break flow
+// output today -- yaml_emitter_initialize sets best_width to -1 and
+// emitterc.go raises that to MaxInt32, while the 80-column default only
+// applies when the width is set explicitly through the private
+// yaml_emitter_set_width -- so no whitespace collapsing is needed. That is a
+// property of the dependency, not of this code, which is exactly why it
+// belongs in a test: a yaml upgrade that starts wrapping at 80 columns would
+// silently tear one header line into several without one.
+//
+// The space-bearing values matter: a plain scalar containing spaces is the
+// only place the emitter has a break candidate at all (emitterc.go:1620).
+func TestExtraValueStaysOnOneLine(t *testing.T) {
+	wide := make([]any, 40)
+	for i := range wide {
+		wide[i] = fmt.Sprintf("beans-r%03d", i)
+	}
+
+	cases := map[string]any{
+		"wide sequence": wide,
+		"wide mapping": map[string]any{
+			"reviewer": "ReviewSix", "suite": "green", "commit": "8c08a5a",
+			"branch": "feature/beans-full1-a-rather-long-branch-name",
+			"note":   "a fairly long sentence value that contains spaces",
+		},
+		"nested":            map[string]any{"gate": map[string]any{"suite": "green"}, "reviews": wide},
+		"space-bearing seq": []any{"a fairly long sentence value that contains spaces and more", "and a second one to push well past eighty columns"},
+	}
+
+	for name, v := range cases {
+		got := formatExtraValue(v)
+		if strings.Contains(got, "\n") {
+			t.Errorf("formatExtraValue(%s) spans more than one line:\n%s", name, got)
+		}
+	}
+
+	// Flow style is what keeps it readable on that one line: block markers
+	// folded onto a single line ("- a - b") are not the value's notation.
+	if got := formatExtraValue([]any{"a", "b"}); got != "[a, b]" {
+		t.Errorf("formatExtraValue([a b]) = %q, want %q", got, "[a, b]")
+	}
+	if got := formatExtraValue(map[string]any{"k": "v"}); got != "{k: v}" {
+		t.Errorf("formatExtraValue({k: v}) = %q, want %q", got, "{k: v}")
 	}
 }
