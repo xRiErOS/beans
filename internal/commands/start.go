@@ -16,6 +16,12 @@ var (
 	startJSON bool
 )
 
+// startTargetStatus is the status start writes on success (RunE below) and
+// the status startCmd's completion narrowing excludes as already-there, so
+// the write path and the completion predicate can never drift onto two
+// different literals (beans-j5so).
+const startTargetStatus = "in-progress"
+
 var startCmd = &cobra.Command{
 	Use:   "start <id> [id...]",
 	Short: "Mark one or more beans as in-progress",
@@ -35,12 +41,12 @@ ID is resolved before the first bean is written.`,
 		}
 
 		// Validate the status
-		if !cfg.IsValidStatus("in-progress") {
-			return cmdError(startJSON, output.ErrValidation, "invalid status: in-progress (must be %s)", strings.Join(cfg.StatusNames(), ", "))
+		if !cfg.IsValidStatus(startTargetStatus) {
+			return cmdError(startJSON, output.ErrValidation, "invalid status: %s (must be %s)", startTargetStatus, strings.Join(cfg.StatusNames(), ", "))
 		}
 
 		// Build the update input
-		status := "in-progress"
+		status := startTargetStatus
 		input := model.UpdateBeanInput{
 			Status: &status,
 		}
@@ -75,6 +81,11 @@ ID is resolved before the first bean is written.`,
 
 func RegisterStartCmd(root *cobra.Command) {
 	startCmd.Flags().BoolVar(&startJSON, "json", false, "Output as JSON")
-	startCmd.ValidArgsFunction = completionUnbounded
+	// start excludes archived beans (already completed/scrapped) and beans
+	// already in-progress -- starting either again is not a valid action
+	// (beans-j5so).
+	startCmd.ValidArgsFunction = completionUnboundedFiltered(func(b *bean.Bean) bool {
+		return !isArchivedStatus(b.Status) && b.Status != startTargetStatus
+	})
 	root.AddCommand(startCmd)
 }

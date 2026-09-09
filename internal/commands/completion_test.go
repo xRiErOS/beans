@@ -777,6 +777,30 @@ func TestFlagCompletionOffersRealCandidates(t *testing.T) {
 		}
 	})
 
+	t.Run("roadmap --status", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "roadmapstatusflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "roadmap", "--status", ""})
+		if err != nil {
+			t.Fatalf("__complete roadmap --status \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "in-progress") {
+			t.Errorf("completion output = %q, want it to contain configured status %q", out, "in-progress")
+		}
+	})
+
+	t.Run("roadmap --no-status", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "roadmapnostatusflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "roadmap", "--no-status", ""})
+		if err != nil {
+			t.Fatalf("__complete roadmap --no-status \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "completed") {
+			t.Errorf("completion output = %q, want it to contain configured status %q", out, "completed")
+		}
+	})
+
 	t.Run("update --tag", func(t *testing.T) {
 		storeDir := t.TempDir()
 		writeTaggedFixtureStore(t, filepath.Join(storeDir, ".beans"))
@@ -810,6 +834,17 @@ func TestFlagCompletionOffersRealCandidates(t *testing.T) {
 		}
 		if !strings.Contains(out, "parentflag-epic") {
 			t.Errorf("completion output = %q, want it to contain the eligible parent %q", out, "parentflag-epic")
+		}
+		// candidates.ParentCandidates excludes the bean being updated from
+		// its own --parent candidates (a bean cannot be its own parent),
+		// unlike beanIDCandidates which lists every bean in the store with
+		// no such exclusion. A regression that swapped
+		// updateParentFlagCompletion's ParentCandidates call for
+		// beanIDCandidates would still pass the positive assertion above
+		// (parentflag-epic is in both sets) but would let
+		// parentflag-child leak back in here.
+		if strings.Contains(out, "parentflag-child") {
+			t.Errorf("completion output = %q, must not contain the bean's own ID %q as its own --parent candidate", out, "parentflag-child")
 		}
 	})
 
@@ -893,6 +928,114 @@ func TestFlagCompletionOffersRealCandidates(t *testing.T) {
 		// above).
 		if !strings.Contains(out, "parentflag-child") {
 			t.Errorf("completion output = %q, want next --parent to offer any bean ID including %q", out, "parentflag-child")
+		}
+	})
+}
+
+// writeStatusFilterFixtureStore creates one bean per status name in
+// statuses, IDs following the "filterstatus-<status>" pattern, for
+// beans-j5so's per-verb positional narrowing: complete/start/scrap must
+// each exclude some subset of these by status while show (and every other
+// completionUnbounded verb) must still offer all of them.
+func writeStatusFilterFixtureStore(t *testing.T, beansDir string, statuses []string) {
+	t.Helper()
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating fixture store dir: %v", err)
+	}
+	c := beancore.New(beansDir, config.Default())
+	if err := c.Load(); err != nil {
+		t.Fatalf("loading fixture core: %v", err)
+	}
+	for _, status := range statuses {
+		b := &bean.Bean{
+			ID:     "filterstatus-" + status,
+			Slug:   "fixture",
+			Title:  "Filter fixture " + status,
+			Status: status,
+			Type:   "task",
+		}
+		if err := c.Create(b); err != nil {
+			t.Fatalf("creating fixture bean %s: %v", b.ID, err)
+		}
+	}
+}
+
+// TestPositionalCompletionNarrowsPerVerb pins beans-j5so's per-verb
+// positional narrowing: complete/start/scrap must each exclude their own
+// invalid-target statuses from bean-ID completion, while show (and every
+// other completionUnbounded/completionUpTo verb, beans-sfle AC-02) keeps
+// offering every bean regardless of status -- a future over-eager
+// narrowing that leaked onto an unfiltered verb must turn this red.
+func TestPositionalCompletionNarrowsPerVerb(t *testing.T) {
+	statuses := []string{"todo", "in-progress", "draft", "completed", "scrapped"}
+
+	t.Run("complete excludes archived (completed/scrapped)", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeStatusFilterFixtureStore(t, filepath.Join(storeDir, ".beans"), statuses)
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "complete", ""})
+		if err != nil {
+			t.Fatalf("__complete complete \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"filterstatus-todo", "filterstatus-in-progress", "filterstatus-draft"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to still contain %q", out, want)
+			}
+		}
+		for _, exclude := range []string{"filterstatus-completed", "filterstatus-scrapped"} {
+			if strings.Contains(out, exclude) {
+				t.Errorf("completion output = %q, must not contain the already-archived %q", out, exclude)
+			}
+		}
+	})
+
+	t.Run("start excludes archived and already in-progress", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeStatusFilterFixtureStore(t, filepath.Join(storeDir, ".beans"), statuses)
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "start", ""})
+		if err != nil {
+			t.Fatalf("__complete start \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"filterstatus-todo", "filterstatus-draft"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to still contain %q", out, want)
+			}
+		}
+		for _, exclude := range []string{"filterstatus-in-progress", "filterstatus-completed", "filterstatus-scrapped"} {
+			if strings.Contains(out, exclude) {
+				t.Errorf("completion output = %q, must not contain the invalid start target %q", out, exclude)
+			}
+		}
+	})
+
+	t.Run("scrap excludes already scrapped", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeStatusFilterFixtureStore(t, filepath.Join(storeDir, ".beans"), statuses)
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "scrap", ""})
+		if err != nil {
+			t.Fatalf("__complete scrap \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"filterstatus-todo", "filterstatus-in-progress", "filterstatus-draft", "filterstatus-completed"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to still contain %q", out, want)
+			}
+		}
+		if strings.Contains(out, "filterstatus-scrapped") {
+			t.Errorf("completion output = %q, must not contain the already-scrapped bean", out)
+		}
+	})
+
+	t.Run("show stays unfiltered", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeStatusFilterFixtureStore(t, filepath.Join(storeDir, ".beans"), statuses)
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "show", ""})
+		if err != nil {
+			t.Fatalf("__complete show \"\": %v\nstdout: %s", err, out)
+		}
+		for _, status := range statuses {
+			want := "filterstatus-" + status
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want show to still offer every bean regardless of status, including %q", out, want)
+			}
 		}
 	})
 }
