@@ -5,10 +5,12 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/spf13/cobra"
 
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
@@ -28,6 +30,61 @@ func setupPickTest(t *testing.T) {
 
 func pickTestBean(id, title string) *bean.Bean {
 	return &bean.Bean{ID: id, Title: title, Type: "task", Status: "open"}
+}
+
+// setupPickScopeTest points core AND cfg together at a fresh temp store
+// and restores both afterward, then returns the shared root's own "pick"
+// command node with its flags reset. Scope derivation (parseScopeTypes,
+// roadmapScopeTypes) reads the package-level cfg, not core.Config(), so
+// swapping only core (as setupPickTest does) would validate a --scope
+// value or verb type-subset against a stale or unrelated config.
+func setupPickScopeTest(t *testing.T) *cobra.Command {
+	t.Helper()
+	dir := t.TempDir()
+	testCfg := config.Default()
+	testCore := beancore.New(dir, testCfg)
+	if err := testCore.Load(); err != nil {
+		t.Fatalf("failed to load core: %v", err)
+	}
+	oldCore, oldCfg := core, cfg
+	core, cfg = testCore, testCfg
+	t.Cleanup(func() { core, cfg = oldCore, oldCfg })
+
+	root := sharedTestRoot(t)
+	resetFlags(root)
+	t.Cleanup(func() { resetFlags(root) })
+	pick, _, err := root.Find([]string{"pick"})
+	if err != nil {
+		t.Fatalf("finding pick: %v", err)
+	}
+	return pick
+}
+
+// createScopeFixture seeds the current core with 2 milestones, 3 epics, 2
+// features, 2 bugs, and 3 tasks (12 beans total): one of every default
+// type, at more than one count where useful, so a scope filter's result
+// size is unambiguous.
+func createScopeFixture(t *testing.T) {
+	t.Helper()
+	seed := []*bean.Bean{
+		{ID: "beans-uq01", Title: "M1", Type: "milestone", Status: "todo"},
+		{ID: "beans-uq02", Title: "M2", Type: "milestone", Status: "todo"},
+		{ID: "beans-uq03", Title: "E1", Type: "epic", Status: "todo"},
+		{ID: "beans-uq04", Title: "E2", Type: "epic", Status: "todo"},
+		{ID: "beans-uq05", Title: "E3", Type: "epic", Status: "todo"},
+		{ID: "beans-uq06", Title: "F1", Type: "feature", Status: "todo"},
+		{ID: "beans-uq07", Title: "F2", Type: "feature", Status: "todo"},
+		{ID: "beans-uq08", Title: "B1", Type: "bug", Status: "todo"},
+		{ID: "beans-uq09", Title: "B2", Type: "bug", Status: "todo"},
+		{ID: "beans-uq10", Title: "T1", Type: "task", Status: "todo"},
+		{ID: "beans-uq11", Title: "T2", Type: "task", Status: "todo"},
+		{ID: "beans-uq12", Title: "T3", Type: "task", Status: "todo"},
+	}
+	for _, b := range seed {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("seeding %s: %v", b.ID, err)
+		}
+	}
 }
 
 // TestRunPickReflectsStoreResolvedPerInvocation pins SC-03/AC2.1: pick's
@@ -265,4 +322,373 @@ func TestPickModelViewNeverWritesToProvidedWriter(t *testing.T) {
 	}
 	var discard io.Writer = io.Discard
 	_ = discard
+}
+
+// TestPickResolveCandidatesDefaultsUnscoped pins the Note under R-12 AC5:
+// a bare invocation with no --scope and no --line is a legitimate
+// unscoped call, not an error.
+func TestPickResolveCandidatesDefaultsUnscoped(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	got, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() error = %v", err)
+	}
+	if len(got) != len(core.All()) {
+		t.Errorf("got %d candidates, want the full unscoped store (%d)", len(got), len(core.All()))
+	}
+}
+
+// TestPickScopeFlagNarrowsCandidates pins AC1/SC-01: --scope narrows the
+// candidate set to the named types, strictly smaller than the unscoped
+// call, on this test's own 12-bean fixture (2 milestone, 3 epic, 2
+// feature, 2 bug, 3 task).
+func TestPickScopeFlagNarrowsCandidates(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	if err := pick.Flags().Set("scope", "milestone,epic"); err != nil {
+		t.Fatalf("setting --scope: %v", err)
+	}
+
+	got, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() error = %v", err)
+	}
+
+	all := core.All()
+	if len(got) >= len(all) {
+		t.Fatalf("scoped candidates (%d) not strictly smaller than unscoped (%d)", len(got), len(all))
+	}
+	if len(got) != 5 {
+		t.Errorf("got %d milestone+epic candidates, want 5 (2 milestones + 3 epics)", len(got))
+	}
+	for _, b := range got {
+		if b.Type != "milestone" && b.Type != "epic" {
+			t.Errorf("candidate %s has type %q, want milestone or epic", b.ID, b.Type)
+		}
+	}
+}
+
+// TestPickScopeFlagRejectsUnknownType pins AC1/AC5: an unknown --scope
+// type is a visible error, never a silent ignore.
+func TestPickScopeFlagRejectsUnknownType(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	if err := pick.Flags().Set("scope", "bogus"); err != nil {
+		t.Fatalf("setting --scope: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for an unknown --scope type")
+	}
+	if !strings.Contains(err.Error(), "invalid --scope type") {
+		t.Errorf("error = %q, want it to mention the invalid type", err)
+	}
+}
+
+// TestPickScopeFlagRejectsBlankValue pins AC5's "never silently fall back"
+// rule for the degenerate --scope case: a value with no actual type names
+// must error, not silently resolve to zero types and an empty candidate
+// set masquerading as a deliberate result.
+func TestPickScopeFlagRejectsBlankValue(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	if err := pick.Flags().Set("scope", " , "); err != nil {
+		t.Fatalf("setting --scope: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for a --scope value with no types")
+	}
+	if !strings.Contains(err.Error(), "requires at least one bean type") {
+		t.Errorf("error = %q, want it to mention the missing type", err)
+	}
+}
+
+// TestPickPartialLineRoadmapVerbNarrowsToContainerRanks pins AC2/SC-02
+// (corrected 2026-09-09, K-11): a partial line equivalent to `beans
+// roadmap` narrows to the three container ranks (milestone, epic,
+// feature) -- not to `--scope milestone,epic`, which is a strictly
+// smaller, different set.
+func TestPickPartialLineRoadmapVerbNarrowsToContainerRanks(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	line := "roadmap"
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	got, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() error = %v", err)
+	}
+	if len(got) != 7 {
+		t.Errorf("got %d roadmap-scope candidates, want 7 (2 milestones + 3 epics + 2 features)", len(got))
+	}
+	for _, b := range got {
+		if b.Type != "milestone" && b.Type != "epic" && b.Type != "feature" {
+			t.Errorf("candidate %s has type %q, want a container-rank type", b.ID, b.Type)
+		}
+	}
+
+	scopeOnly, err := scopeFilteredCandidates("milestone,epic")
+	if err != nil {
+		t.Fatalf("scopeFilteredCandidates() error = %v", err)
+	}
+	if len(got) == len(scopeOnly) {
+		t.Error("roadmap-verb scope must not equal --scope milestone,epic (feature/rank 3 belongs to it too)")
+	}
+}
+
+// TestPickPartialLineUnknownVerbErrors pins AC5: a partial line whose verb
+// does not resolve against the real command tree is a visible error.
+func TestPickPartialLineUnknownVerbErrors(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	line := "bogus"
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for an unresolvable verb")
+	}
+	if !strings.Contains(err.Error(), "does not resolve") {
+		t.Errorf("error = %q, want it to mention verb resolution", err)
+	}
+}
+
+// TestPickPartialLinePlumbingVerbErrors pins AC4/AC5: scope derivation
+// reads IsUserFacing, so a plumbing verb (e.g. "path", markPlumbing'd in
+// register.go) is reported, not silently treated as unscoped.
+func TestPickPartialLinePlumbingVerbErrors(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	line := "path"
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for a plumbing verb")
+	}
+	if !strings.Contains(err.Error(), "not a user-facing verb") {
+		t.Errorf("error = %q, want it to mention user-facing", err)
+	}
+}
+
+// TestPickPartialLineParentCursorExcludesDescendants pins AC3/SC-03: a
+// cursor at a --parent value excludes both the edited bean and its
+// descendants, via candidates.ParentCandidates (R-03), from the candidate
+// set -- while a same-typed bean that is NOT a descendant stays in.
+func TestPickPartialLineParentCursorExcludesDescendants(t *testing.T) {
+	pick := setupPickScopeTest(t)
+
+	unrelatedMilestone := &bean.Bean{ID: "beans-uq20", Title: "Root milestone", Type: "milestone", Status: "todo"}
+	edited := &bean.Bean{ID: "beans-uq21", Title: "Edited feature", Type: "feature", Status: "todo"}
+	descendant := &bean.Bean{ID: "beans-uq22", Title: "Feature's epic child", Type: "epic", Status: "todo", Parent: "beans-uq21"}
+	unrelatedEpic := &bean.Bean{ID: "beans-uq23", Title: "Unrelated epic", Type: "epic", Status: "todo"}
+	for _, b := range []*bean.Bean{unrelatedMilestone, edited, descendant, unrelatedEpic} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("seeding %s: %v", b.ID, err)
+		}
+	}
+
+	line := "update beans-uq21 --parent "
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	got, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() error = %v", err)
+	}
+
+	gotIDs := make(map[string]bool, len(got))
+	for _, b := range got {
+		gotIDs[b.ID] = true
+	}
+	if !gotIDs["beans-uq20"] {
+		t.Error("expected the unrelated milestone in the candidate set")
+	}
+	if !gotIDs["beans-uq23"] {
+		t.Error("expected the unrelated epic in the candidate set")
+	}
+	if gotIDs["beans-uq21"] {
+		t.Error("edited bean must not be its own candidate")
+	}
+	if gotIDs["beans-uq22"] {
+		t.Error("descendant of the edited bean must be excluded (R-03)")
+	}
+	if len(got) != 2 {
+		t.Errorf("got %d candidates, want exactly 2 (unrelated milestone + unrelated epic)", len(got))
+	}
+}
+
+// TestPickPartialLineParentWithoutKnownBeanErrors pins AC5 for the
+// --parent path: a cursor at --parent with no positional token that
+// resolves to a known bean must error, never silently fall back to an
+// unscoped or empty result.
+func TestPickPartialLineParentWithoutKnownBeanErrors(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	line := "create --parent "
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error when no positional bean id precedes --parent")
+	}
+	if !strings.Contains(err.Error(), "cannot resolve --parent context") {
+		t.Errorf("error = %q, want it to mention the unresolved --parent context", err)
+	}
+}
+
+// TestPickLineRequiresCursor pins AC5: --line without --cursor is
+// unresolvable context, not a silent unscoped fallback.
+func TestPickLineRequiresCursor(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	if err := pick.Flags().Set("line", "roadmap"); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error when --line is set without --cursor")
+	}
+	if !strings.Contains(err.Error(), "requires --cursor") {
+		t.Errorf("error = %q, want it to mention the missing --cursor", err)
+	}
+}
+
+// TestPickLineRequiresCursorInRange pins AC5: an out-of-range --cursor is
+// unresolvable context, not a silent unscoped fallback.
+func TestPickLineRequiresCursorInRange(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	if err := pick.Flags().Set("line", "roadmap"); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", "999"); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for an out-of-range --cursor")
+	}
+	if !strings.Contains(err.Error(), "out of range") {
+		t.Errorf("error = %q, want it to mention the out-of-range cursor", err)
+	}
+}
+
+// TestPickPartialLineVerbWithoutScopeSemanticsErrors pins AC5's coverage
+// of the resolvedCmd-but-unmapped branch: a verb that resolves, and is
+// user-facing, but carries no known type-subset mapping (only roadmap
+// does) must still be a visible error -- never a silent fallback to the
+// full, unscoped candidate set. Coordinator fix-round (2026-09-09):
+// mutating that branch to fall back silently previously left every
+// existing test green.
+func TestPickPartialLineVerbWithoutScopeSemanticsErrors(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	line := "list"
+	if err := pick.Flags().Set("line", line); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(line))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+
+	_, err := resolvePickCandidates(pick)
+	if err == nil {
+		t.Fatal("expected an error for a resolved, user-facing verb with no known scope mapping")
+	}
+	if !strings.Contains(err.Error(), "no known scope-derivation mapping") {
+		t.Errorf("error = %q, want it to mention the missing scope-derivation mapping", err)
+	}
+}
+
+// TestPickPartialLineToleratesLeadingProgramName pins the fix-round
+// correction to AC2/SC-02: a live shell buffer's partial line carries the
+// program name as its first token ("beans roadmap "), not just the bare
+// verb ("roadmap "). Both forms must resolve to the identical candidate
+// set, and the program name is recognized via cmd.Root().Name(), never a
+// literal "beans" comparison (AC4).
+func TestPickPartialLineToleratesLeadingProgramName(t *testing.T) {
+	pick := setupPickScopeTest(t)
+	createScopeFixture(t)
+
+	bareLine := "roadmap"
+	if err := pick.Flags().Set("line", bareLine); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(bareLine))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+	bareGot, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() with bare verb error = %v", err)
+	}
+
+	prefixedLine := "beans roadmap"
+	if err := pick.Flags().Set("line", prefixedLine); err != nil {
+		t.Fatalf("setting --line: %v", err)
+	}
+	if err := pick.Flags().Set("cursor", strconv.Itoa(len(prefixedLine))); err != nil {
+		t.Fatalf("setting --cursor: %v", err)
+	}
+	prefixedGot, err := resolvePickCandidates(pick)
+	if err != nil {
+		t.Fatalf("resolvePickCandidates() with \"beans \"-prefixed verb error = %v", err)
+	}
+
+	if len(bareGot) == 0 {
+		t.Fatal("expected a non-empty candidate set for the bare-verb form")
+	}
+	if len(bareGot) != len(prefixedGot) {
+		t.Fatalf("bare verb gave %d candidates, \"beans \"-prefixed gave %d, want equal", len(bareGot), len(prefixedGot))
+	}
+	bareIDs := make(map[string]bool, len(bareGot))
+	for _, b := range bareGot {
+		bareIDs[b.ID] = true
+	}
+	for _, b := range prefixedGot {
+		if !bareIDs[b.ID] {
+			t.Errorf("prefixed-form candidate %s not present in bare-form result", b.ID)
+		}
+	}
 }
