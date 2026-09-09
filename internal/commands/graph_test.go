@@ -326,3 +326,216 @@ func TestGraphEmptyStoreIsNotAnError(t *testing.T) {
 		t.Errorf("ascii output on empty store = %q, want %q", out, "no relationships\n")
 	}
 }
+
+// TestGraphMermaidRendersEveryNodeAndEdge is the feature: the blocked-by
+// chain as a Mermaid flowchart, so it pastes into a Markdown document
+// instead of being derived by hand from --format json.
+func TestGraphMermaidRendersEveryNodeAndEdge(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", "--depth", "0", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	if !strings.HasPrefix(out, "flowchart LR\n") {
+		t.Errorf("output does not open with a flowchart header:\n%s", out)
+	}
+	for _, want := range []string{"beans-bbbb", "beans-cccc", "Child task", "Blocked task"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("output is missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "beans-aaaa") {
+		t.Errorf("--relation blocks leaked the parent edge:\n%s", out)
+	}
+	if n := strings.Count(out, "-->"); n != 1 {
+		t.Errorf("found %d edge arrows, want exactly the one block edge:\n%s", n, out)
+	}
+}
+
+// TestGraphMermaidNodeIDsAreSafe keeps the syntax parseable: a bean id
+// carries a hyphen, and an unsanitised `beans-bbbb --> beans-cccc` makes
+// Mermaid read the id's hyphen as part of the arrow. Ids are therefore
+// sanitised for the node handle while the label keeps the real id.
+func TestGraphMermaidNodeIDsAreSafe(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "-->") {
+			continue
+		}
+		handles := strings.Split(line, "-->")
+		if len(handles) != 2 {
+			t.Fatalf("edge line %q does not split into two handles", line)
+		}
+		for _, h := range handles {
+			h = strings.TrimSpace(h)
+			if i := strings.IndexAny(h, "|"); i >= 0 {
+				h = strings.TrimSpace(h[strings.LastIndex(h, "|")+1:])
+			}
+			if strings.Contains(h, "-") {
+				t.Errorf("node handle %q in %q still carries a hyphen", h, line)
+			}
+		}
+	}
+	if !strings.Contains(out, "beans-bbbb") {
+		t.Errorf("sanitising dropped the real id from the labels:\n%s", out)
+	}
+}
+
+// TestGraphMermaidEscapesLabelSyntax stops a title from ending the node: a
+// quote or a bracket in a title would otherwise close the label early and
+// produce a diagram that does not render at all.
+func TestGraphMermaidEscapesLabelSyntax(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	mkGraphBean(t, "beans-eeee", `Fix "q" [b] (p) {c} &quot; title`, "task", "", []string{"beans-ffff"}, nil)
+	mkGraphBean(t, "beans-ffff", "Plain", "task", "", nil, nil)
+
+	out, err := runGraph(t, "--format", "mermaid", "--depth", "0", "beans-eeee")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	label := ""
+	for _, line := range strings.Split(out, "\n") {
+		if strings.Contains(line, "beans-eeee") && strings.Contains(line, "[") && !strings.Contains(line, "-->") {
+			label = line
+		}
+	}
+	if label == "" {
+		t.Fatalf("no node line for beans-eeee:\n%s", out)
+	}
+	// The delimiters are checked inside the label text only -- the node's own
+	// ["..."] frame is made of the same characters -- and each on its own: an
+	// escaped ] beside a raw [ still breaks the node, while asserting on the
+	// pair "[bracket]" would let that half-escaped state pass.
+	open, close := strings.Index(label, `["`), strings.LastIndex(label, `"]`)
+	if open < 0 || close <= open {
+		t.Fatalf("node line %q has no quoted label", label)
+	}
+	text := label[open+2 : close]
+	for _, raw := range []string{"[", "]", "(", ")", "{", "}", `"`} {
+		if strings.Contains(text, raw) {
+			t.Errorf("raw %q survives into the label text %q", raw, text)
+		}
+	}
+	// An & is escaped too, so a title that literally spells out an entity is
+	// drawn as that text rather than as the character it names.
+	if !strings.Contains(text, "&amp;quot;") {
+		t.Errorf("a literal &quot; in the title was not neutralised: %q", text)
+	}
+	if !strings.Contains(label, "Fix") || !strings.Contains(label, "title") {
+		t.Errorf("escaping dropped the words themselves: %q", label)
+	}
+}
+
+// TestGraphMermaidDistinguishesRelations keeps the two edge kinds apart:
+// a parent edge and a block edge mean different things and a reader of the
+// diagram must not have to guess which is which.
+func TestGraphMermaidDistinguishesRelations(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--depth", "0", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+	if !strings.Contains(out, relBlocks) {
+		t.Errorf("block edge is unlabelled:\n%s", out)
+	}
+	if !strings.Contains(out, relParent) {
+		t.Errorf("parent edge is unlabelled:\n%s", out)
+	}
+}
+
+// TestGraphMermaidCarriesStatusColour holds the parity with --format dot,
+// which is the reason a native renderer beats a jq one-liner: the status is
+// visible in the picture rather than only in the label.
+func TestGraphMermaidCarriesStatusColour(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	out, err := runGraph(t, "--format", "mermaid", "--relation", "blocks", "beans-bbbb")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+
+	sc := cfg.GetStatus("todo")
+	if sc == nil || sc.Color == "" {
+		t.Skip("default config has no colour for status todo")
+	}
+	colour := string(ui.ResolveColor(sc.Color))
+	if !strings.HasPrefix(colour, "#") {
+		t.Skipf("status colour %q is not a hex value", colour)
+	}
+	if !strings.Contains(out, "classDef") {
+		t.Fatalf("no classDef in the output:\n%s", out)
+	}
+	if !strings.Contains(out, colour) {
+		t.Errorf("status colour %s is missing:\n%s", colour, out)
+	}
+	if !strings.Contains(out, "class ") && !strings.Contains(out, ":::") {
+		t.Errorf("nodes are never assigned to a status class:\n%s", out)
+	}
+}
+
+// TestGraphMermaidIsAValidFormat pins the flag surface: mermaid must pass
+// validation and a typo must still be rejected with the full list.
+func TestGraphMermaidIsAValidFormat(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	seedGraphFixtures(t)
+
+	if _, err := runGraph(t, "--format", "mermaid"); err != nil {
+		t.Errorf("runGraph(--format mermaid) error = %v, want nil", err)
+	}
+	_, err := runGraph(t, "--format", "mermaidd")
+	if err == nil {
+		t.Fatal("runGraph(--format mermaidd) error = nil, want a validation error")
+	}
+	if !strings.Contains(err.Error(), "mermaid") {
+		t.Errorf("error %q does not offer mermaid as a choice", err)
+	}
+}
+
+
+// TestGraphMermaidNeutralisesHTMLInLabels closes the gap the escaping had:
+// Mermaid renders node labels as HTML, so a title carrying markup would be
+// drawn as markup rather than as the title a user wrote. Angle brackets are
+// escaped for that reason, and the <br/> the renderer inserts itself has to
+// survive that escaping -- which fixes the order: escape the text first,
+// then join the parts.
+func TestGraphMermaidNeutralisesHTMLInLabels(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	mkGraphBean(t, "beans-hhhh", "A <b>bold</b> and <img src=x> title", "task", "", nil, nil)
+
+	out, err := runGraph(t, "--format", "mermaid", "beans-hhhh")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+	for _, markup := range []string{"<b>", "</b>", "<img"} {
+		if strings.Contains(out, markup) {
+			t.Errorf("markup %q reaches the label unescaped:\n%s", markup, out)
+		}
+	}
+	if !strings.Contains(out, "bold") || !strings.Contains(out, "title") {
+		t.Errorf("escaping dropped the words themselves:\n%s", out)
+	}
+	if !strings.Contains(out, "<br/>") {
+		t.Errorf("the renderer's own line break was escaped away:\n%s", out)
+	}
+}

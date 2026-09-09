@@ -190,8 +190,9 @@ var graphCmd = &cobra.Command{
 	Long: `Prints the parent and blocking relationships between beans.
 
 The default output is Graphviz DOT, which pipes into ` + "`dot -Tpng`" + ` for an
-image; --format ascii prints a plain edge list for reading in a terminal, and
---format json the same graph as data. Nodes are coloured by the status colour
+image; --format ascii prints a plain edge list for reading in a terminal,
+--format mermaid a Mermaid flowchart that pastes into a Markdown document,
+and --format json the same graph as data. Nodes are coloured by the status colour
 from the configuration.
 
 Naming a bean scopes the output to that bean's neighbourhood: --depth 1 (the
@@ -203,8 +204,8 @@ Links pointing at a bean that does not exist, and self-references, are left
 out here; ` + "`beans check`" + ` is what reports them.`,
 	Args: cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
-		if graphFormat != "dot" && graphFormat != "ascii" && graphFormat != "json" {
-			return fmt.Errorf("invalid --format %q (must be dot, ascii or json)", graphFormat)
+		if graphFormat != "dot" && graphFormat != "ascii" && graphFormat != "json" && graphFormat != "mermaid" {
+			return fmt.Errorf("invalid --format %q (must be dot, ascii, mermaid or json)", graphFormat)
 		}
 		jsonMode := graphFormat == "json"
 
@@ -247,6 +248,8 @@ out here; ` + "`beans check`" + ` is what reports them.`,
 		switch graphFormat {
 		case "ascii":
 			return renderGraphASCII(cmd, edges, rootID)
+		case "mermaid":
+			return renderGraphMermaid(cmd, all, edges)
 		case "json":
 			return renderGraphJSON(cmd, all, edges)
 		default:
@@ -286,6 +289,92 @@ func renderGraphDot(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdge) e
 		fmt.Fprintf(w, "  \"%s\" -> \"%s\" [label=\"%s\"];\n", dotQuote(e.From), dotQuote(e.To), dotQuote(e.Relation))
 	}
 	fmt.Fprintln(w, "}")
+	return nil
+}
+
+// mermaidHandle turns a bean id into a Mermaid node handle. Bean ids carry
+// a hyphen, and Mermaid reads `beans-a --> beans-b` as an id followed by a
+// malformed arrow, so anything outside [A-Za-z0-9_] becomes an underscore.
+// The real id stays in the label, which is where a reader looks for it.
+func mermaidHandle(id string) string {
+	var sb strings.Builder
+	sb.Grow(len(id) + 1)
+	sb.WriteByte('n')
+	for _, r := range id {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			sb.WriteRune(r)
+		default:
+			sb.WriteByte('_')
+		}
+	}
+	return sb.String()
+}
+
+// mermaidLabel escapes a string for a quoted Mermaid node label. A double
+// quote would close the label and a bracket would close the node, either of
+// which yields a diagram that does not render at all, so both become HTML
+// entities -- Mermaid resolves them back when it draws the label. Angle
+// brackets go the same way because Mermaid draws labels as HTML, so markup
+// in a title would otherwise be rendered as markup. The <br/> the caller
+// joins the label with is inserted after this escaping, never before.
+// Newlines become <br/> for the same reason they become \n in DOT.
+func mermaidLabel(s string) string {
+	s = strings.ReplaceAll(s, "&", "&amp;")
+	s = strings.ReplaceAll(s, `"`, "&quot;")
+	s = strings.ReplaceAll(s, "[", "&#91;")
+	s = strings.ReplaceAll(s, "]", "&#93;")
+	s = strings.ReplaceAll(s, "(", "&#40;")
+	s = strings.ReplaceAll(s, ")", "&#41;")
+	s = strings.ReplaceAll(s, "{", "&#123;")
+	s = strings.ReplaceAll(s, "}", "&#125;")
+	s = strings.ReplaceAll(s, "<", "&lt;")
+	s = strings.ReplaceAll(s, ">", "&gt;")
+	s = strings.ReplaceAll(s, "\r\n", "<br/>")
+	s = strings.ReplaceAll(s, "\n", "<br/>")
+	s = strings.ReplaceAll(s, "\r", "<br/>")
+	return s
+}
+
+// renderGraphMermaid prints the graph as a Mermaid flowchart, which pastes
+// straight into a Markdown document. It keeps --format dot's shape: LR
+// direction, id and truncated title in the label, and the status colour
+// from the configuration -- as a classDef per status, since Mermaid has no
+// per-node fill attribute.
+func renderGraphMermaid(cmd *cobra.Command, beans []*bean.Bean, edges []graphEdge) error {
+	w := cmd.OutOrStdout()
+	fmt.Fprintln(w, "flowchart LR")
+
+	classes := make(map[string]string)
+	var classOrder []string
+	for _, b := range beans {
+		fmt.Fprintf(w, "  %s[\"%s<br/>%s\"]\n",
+			mermaidHandle(b.ID), mermaidLabel(b.ID), mermaidLabel(ui.Truncate(b.Title, 40)))
+
+		sc := cfg.GetStatus(b.Status)
+		if sc == nil || sc.Color == "" {
+			continue
+		}
+		colour := string(ui.ResolveColor(sc.Color))
+		if !strings.HasPrefix(colour, "#") {
+			continue
+		}
+		name := "s" + mermaidHandle(b.Status)
+		if _, ok := classes[name]; !ok {
+			classes[name] = colour
+			classOrder = append(classOrder, name)
+		}
+		fmt.Fprintf(w, "  class %s %s;\n", mermaidHandle(b.ID), name)
+	}
+
+	for _, e := range edges {
+		fmt.Fprintf(w, "  %s -->|%s| %s\n",
+			mermaidHandle(e.From), mermaidLabel(e.Relation), mermaidHandle(e.To))
+	}
+
+	for _, name := range classOrder {
+		fmt.Fprintf(w, "  classDef %s fill:%s,stroke:#333;\n", name, classes[name])
+	}
 	return nil
 }
 
@@ -329,7 +418,7 @@ func RegisterGraphCmd(root *cobra.Command) {
 	// Flags are bound once: these are package-level vars and pflag panics on
 	// a second definition, while tests register into a throwaway root.
 	if graphCmd.Flags().Lookup("format") == nil {
-		graphCmd.Flags().StringVar(&graphFormat, "format", "dot", `Output format: "dot", "ascii" or "json"`)
+		graphCmd.Flags().StringVar(&graphFormat, "format", "dot", `Output format: "dot", "ascii", "mermaid" or "json"`)
 		graphCmd.Flags().StringArrayVar(&graphRelation, "relation", nil, `Only this relation kind: "parent" or "blocks" (can be repeated)`)
 		graphCmd.Flags().IntVar(&graphDepth, "depth", 1, "Hops from the named bean; 0 walks the whole connected component (requires a bean id)")
 	}
