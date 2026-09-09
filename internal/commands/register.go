@@ -20,6 +20,35 @@ const (
 	audiencePlumbing      = "plumbing"
 )
 
+// bootstrapSkipAnnotationKey carries a distinct, independent marker from
+// audienceAnnotationKey: whether a verb may run before PersistentPreRunE
+// has loaded a core (bootstrapSkip), as opposed to every other verb, which
+// requires a loaded store. It answers a different question than the
+// audience marker -- "can this run without a store" vs. "should a human
+// see this in a selection view" -- and the two sets differ: prime is
+// bootstrap-skip but audience-user-facing, while path and completion are
+// audience-plumbing but require a store. Folding one into the other would
+// silently change either prime's or path's/completion's runtime behaviour
+// (beans-bv90).
+const (
+	bootstrapSkipAnnotationKey = "beans.bootstrap-skip"
+	bootstrapSkip              = "skip"
+)
+
+func markBootstrapSkip(cmd *cobra.Command) {
+	if cmd.Annotations == nil {
+		cmd.Annotations = map[string]string{}
+	}
+	cmd.Annotations[bootstrapSkipAnnotationKey] = bootstrapSkip
+}
+
+// IsBootstrapSkip reports whether cmd was declared to run without a loaded
+// core, replacing the literal cmd.Name() == "init" || … comparison that
+// used to live in PersistentPreRunE (beans-bv90).
+func IsBootstrapSkip(cmd *cobra.Command) bool {
+	return cmd.Annotations[bootstrapSkipAnnotationKey] == bootstrapSkip
+}
+
 func markPlumbing(cmd *cobra.Command) {
 	if cmd.Annotations == nil {
 		cmd.Annotations = map[string]string{}
@@ -53,6 +82,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterGraphqlCmd(root)
 	RegisterInitCmd(root)
 	markPlumbing(initCmd)
+	markBootstrapSkip(initCmd)
 	RegisterListCmd(root)
 	RegisterMilestonesCmd(root)
 	RegisterNextCmd(root)
@@ -61,6 +91,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterPathCmd(root)
 	markPlumbing(pathCmd)
 	RegisterPrimeCmd(root)
+	markBootstrapSkip(primeCmd)
 	RegisterProgressCmd(root)
 	RegisterPromoteCmd(root)
 	RegisterRenameCmd(root)
@@ -72,6 +103,7 @@ func RegisterCoreCommands(root *cobra.Command) {
 	RegisterUpdateCmd(root)
 	RegisterVersionCmd(root)
 	markPlumbing(versionCmd)
+	markBootstrapSkip(versionCmd)
 
 	// Deprecated placeholders for commands that moved to separate binaries
 	registerDeprecatedCmd(root, "serve", "beans-serve")

@@ -96,3 +96,75 @@ func TestAudienceCoversDeprecatedStubs(t *testing.T) {
 		}
 	}
 }
+
+// TestBootstrapSkipMarksExactlyInitPrimeVersion pins beans-bv90 AC-2/AC-3
+// (SC-01): the bootstrap-skip marker is set if and only if the command is
+// init, prime, or version -- the exact set PersistentPreRunE used to decide
+// by comparing cmd.Name() against a literal string set.
+func TestBootstrapSkipMarksExactlyInitPrimeVersion(t *testing.T) {
+	root := sharedTestRoot(t)
+	skip := map[string]bool{
+		"init":    true,
+		"prime":   true,
+		"version": true,
+	}
+	for _, cmd := range root.Commands() {
+		want := skip[cmd.Name()]
+		got := IsBootstrapSkip(cmd)
+		if got != want {
+			t.Errorf("%q: bootstrap-skip=%v, want %v", cmd.Name(), got, want)
+		}
+	}
+}
+
+// TestBootstrapSkipMarkerIsDistinctFromAudienceMarker pins AC-4/AC-5: the
+// bootstrap-skip set {init, prime, version} and the audience-plumbing set
+// {completion, help, init, path, version} are independent axes -- prime is
+// bootstrap-skip but audience-user-facing, while path and completion are
+// audience-plumbing but not bootstrap-skip. Collapsing the two markers
+// would flip one of these four checks.
+func TestBootstrapSkipMarkerIsDistinctFromAudienceMarker(t *testing.T) {
+	root := sharedTestRoot(t)
+
+	prime, _, err := root.Find([]string{"prime"})
+	if err != nil {
+		t.Fatalf("finding %q: %v", "prime", err)
+	}
+	if !IsBootstrapSkip(prime) {
+		t.Error("prime: bootstrap-skip=false, want true")
+	}
+	if !IsUserFacing(prime) {
+		t.Error("prime: user-facing=false, want true (audience marker must be unaffected)")
+	}
+
+	for _, name := range []string{"path", "completion"} {
+		cmd, _, err := root.Find([]string{name})
+		if err != nil {
+			t.Fatalf("finding %q: %v", name, err)
+		}
+		if IsBootstrapSkip(cmd) {
+			t.Errorf("%q: bootstrap-skip=true, want false", name)
+		}
+		if IsUserFacing(cmd) {
+			t.Errorf("%q: user-facing=true, want false (still audience-plumbing)", name)
+		}
+	}
+
+	if bootstrapSkipAnnotationKey == audienceAnnotationKey {
+		t.Error("bootstrapSkipAnnotationKey must be distinct from audienceAnnotationKey")
+	}
+}
+
+// TestBootstrapSkipDoesNotMarkPick pins the beans-bv90 investigation: pick
+// reads from the already-loaded store (pick.go's own RunE comment) and adds
+// itself to no skip-list, so it must not carry the bootstrap-skip marker.
+func TestBootstrapSkipDoesNotMarkPick(t *testing.T) {
+	root := sharedTestRoot(t)
+	pick, _, err := root.Find([]string{"pick"})
+	if err != nil {
+		t.Fatalf("finding %q: %v", "pick", err)
+	}
+	if IsBootstrapSkip(pick) {
+		t.Error("pick: bootstrap-skip=true, want false (pick requires a loaded store)")
+	}
+}
