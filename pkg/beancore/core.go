@@ -428,7 +428,13 @@ func (c *Core) loadBean(path string) (*bean.Bean, error) {
 // Making Search itself pass false safely needs Core to know, at this call
 // site, whether it will ever be asked to write to the same cached index
 // later -- a distinction this Core does not currently track and beans-dfdw
-// leaves unresolved (see the completion report's open question).
+// leaves unresolved (see the completion report's open question). The
+// danger is not only later Create/Update/Delete calls: this function
+// itself unconditionally calls idx.Sync(allBeans) below before returning,
+// so passing false would already deadlock right here, inside
+// ensureSearchIndexLocked, on the very first call that actually obtains a
+// persisted (non-fallback) shared-mode index -- not merely on some later
+// bean write as the paragraph above might suggest in isolation.
 func (c *Core) ensureSearchIndexLocked(write bool) error {
 	if c.searchIndex != nil {
 		return nil
