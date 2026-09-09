@@ -109,12 +109,12 @@ the styled header on a terminal, the source YAML block off one.`,
 		}
 
 		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+		width := resolveWidth(showMaxWidth, cmd.Flags().Changed("max-width"), cfg)
 
 		// --table forces the grid in both directions, the way --raw forces
 		// raw markdown on a terminal: an explicit arrangement flag outranks
 		// the representation stdout would otherwise pick.
 		if showTable {
-			width := resolveWidth(showMaxWidth, cmd.Flags().Changed("max-width"), cfg)
 			for i, b := range beans {
 				if i > 0 {
 					fmt.Println()
@@ -129,7 +129,7 @@ the styled header on a terminal, the source YAML block off one.`,
 		}
 
 		// Default: styled for a terminal, raw markdown for a pipe or a file
-		out, err := showOutputAll(beans, isTTY, showMeta)
+		out, err := showOutputAll(beans, isTTY, showMeta, width)
 		if err != nil {
 			return err
 		}
@@ -144,7 +144,7 @@ the styled header on a terminal, the source YAML block off one.`,
 // representation, leaving the front matter -- styled off the header for a
 // terminal, and the source YAML block for a pipe, which still parses as a
 // bean file with an empty body.
-func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
+func showOutput(b *bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 	if !isTTY {
 		source := b
 		if metaOnly {
@@ -160,7 +160,7 @@ func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
 	if metaOnly {
 		return renderBeanHeader(b, cfg), nil
 	}
-	return styledBeanOutput(b)
+	return styledBeanOutput(b, width)
 }
 
 // showOutputAll joins the output of several beans with the separator that
@@ -170,7 +170,7 @@ func showOutput(b *bean.Bean, isTTY, metaOnly bool) (string, error) {
 // front matter's own closing "---" plus a blank line, and adding the raw
 // separator on top of that produced an empty third document between every
 // pair of beans.
-func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
+func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 	separator := "\n---\n\n"
 	switch {
 	case isTTY:
@@ -184,7 +184,7 @@ func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
 		if i > 0 {
 			out.WriteString(separator)
 		}
-		text, err := showOutput(b, isTTY, metaOnly)
+		text, err := showOutput(b, isTTY, metaOnly, width)
 		if err != nil {
 			return "", err
 		}
@@ -215,9 +215,12 @@ func showOutputTable(b *bean.Bean, metaOnly bool, width int) (string, error) {
 	return sb.String(), nil
 }
 
-// styledBeanOutput builds the styled representation of a single bean.
-func styledBeanOutput(b *bean.Bean) (string, error) {
-	return renderBeanDetail(b, cfg, resolveWidth(0, false, cfg)), nil
+// styledBeanOutput builds the styled representation of a single bean at the
+// width the caller resolved. It used to resolve its own width from
+// resolveWidth(0, false, cfg), which ignored --max-width unless --table was
+// also given -- a flag that works in one combination and not in another.
+func styledBeanOutput(b *bean.Bean, width int) (string, error) {
+	return renderBeanDetail(b, cfg, width), nil
 }
 
 // renderBeanDetail lays out one bean for the terminal: the attribute header,
@@ -429,8 +432,9 @@ func RegisterShowCmd(root *cobra.Command) {
 		"Arrange the front matter as a label/value grid (forces the grid into a pipe too)")
 	showCmd.Flags().IntVar(&showMaxWidth, "max-width", 0,
 		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
-	// --meta is deliberately absent from the exclusion set: --table --meta
-	// is the combination the grid exists for.
+	// Two groups rather than one: --meta and --table each exclude the four
+	// wholesale representations, but not each other -- "--meta --table" is
+	// the combination the grid exists for.
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "meta")
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "table")
 	showCmd.ValidArgsFunction = completionUnbounded

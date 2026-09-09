@@ -337,17 +337,21 @@ func describeRelated(id string, cfg *config.Config) string {
 			tint = tint.Foreground(ui.ResolveColor(tc.Color))
 		}
 	}
-	// The separator is a middle dot rather than spacing: ui.WrapText splits
-	// on fields, so a two-space gap between type and title survives only
-	// until the value wraps, and "epic show --table: ..." then reads as one
-	// run-on phrase.
+	// Type and id lead, the title trails: the cell wraps, and a trailing id
+	// ended up alone on the second line looking like a truncated remnant.
+	// What identifies the bean now sits on the first line in every case,
+	// and only the title -- the part a reader can stop reading -- breaks.
+	//
+	// The separator is a middle dot rather than spacing because ui.WrapText
+	// splits on fields, so a two-space gap survives only until the value
+	// wraps and "epic show --table: ..." then reads as one run-on phrase.
 	parts := []string{}
 	if related.Type != "" {
 		parts = append(parts, tint.Render(related.Type))
 	}
+	parts = append(parts, ui.Muted.Render(id))
 	if related.Title != "" {
 		parts = append(parts, related.Title)
 	}
-	parts = append(parts, ui.Muted.Render(id))
 	return strings.Join(parts, " · ")
 }
