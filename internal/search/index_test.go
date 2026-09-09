@@ -294,30 +294,6 @@ func TestDeleteBean(t *testing.T) {
 	}
 }
 
-func TestIndexBeans(t *testing.T) {
-	idx := setupTestIndex(t)
-
-	beans := []*bean.Bean{
-		{ID: "aaa1", Title: "Bean One", Body: "First content"},
-		{ID: "bbb2", Title: "Bean Two", Body: "Second content"},
-		{ID: "ccc3", Title: "Bean Three", Body: "Third content"},
-	}
-
-	if err := idx.IndexBeans(beans); err != nil {
-		t.Fatalf("IndexBeans() error = %v", err)
-	}
-
-	// All beans should be searchable
-	ids, err := idx.Search("Bean", 10)
-	if err != nil {
-		t.Fatalf("Search() error = %v", err)
-	}
-
-	if len(ids) != 3 {
-		t.Errorf("Search(Bean) returned %d results, want 3", len(ids))
-	}
-}
-
 func TestIndexBean_Update(t *testing.T) {
 	idx := setupTestIndex(t)
 

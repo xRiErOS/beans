@@ -265,7 +265,7 @@ func TestSync_UsesETagNotUpdatedAt(t *testing.T) {
 // TestSync_InMemoryIndexRebuildsColdFromScratch documents the fallback
 // index's cold-start behavior: a fresh in-memory index has an empty
 // idx.etags (see NewIndex), so its first Sync in a new process indexes
-// everything, same as IndexBeans.
+// everything.
 func TestSync_InMemoryIndexRebuildsColdFromScratch(t *testing.T) {
 	idx := setupTestIndex(t)
 	b := beanWith("aaa1", "Title", "body")
@@ -405,5 +405,29 @@ func TestSync_ReindexesOnPathChangeEvenWithUnchangedETag(t *testing.T) {
 
 	if got := storedSlug(t, idx, "aaa1"); got != "new-slug" {
 		t.Fatalf("stored slug after rename = %q, want %q: rename was not reflected despite an unchanged ETag", got, "new-slug")
+	}
+}
+
+// TestSaveETags_EmptyDirRejected guards the promise beans-8kqz hardens: an
+// in-memory index (dir == "", see NewIndex) must never let saveETags
+// succeed, because a success with an empty dir writes relative to the
+// caller's cwd instead of failing -- observed directly as a stray
+// beans-etags.json inside package source directories during the beans-6y60
+// re-measurement. The assertion is on saveETags's return value, not on the
+// absence of a file in idx.dir, because a location-only check would miss
+// the file landing elsewhere via the caller's cwd (see Scope in beans-8kqz).
+func TestSaveETags_EmptyDirRejected(t *testing.T) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("os.Getwd() error = %v", err)
+	}
+	strayPath := filepath.Join(cwd, etagsFileName)
+	t.Cleanup(func() { os.Remove(strayPath) })
+
+	if err := saveETags("", map[string]string{"aaa1": "etag"}); err == nil {
+		t.Fatalf("saveETags(\"\", ...) error = nil, want a non-nil error")
+	}
+	if _, statErr := os.Stat(strayPath); !os.IsNotExist(statErr) {
+		t.Fatalf("saveETags(\"\", ...) wrote %s despite returning an error (stat err = %v)", strayPath, statErr)
 	}
 }

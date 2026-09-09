@@ -420,6 +420,7 @@ func (c *Core) ensureSearchIndexLocked() error {
 		c.logWarn("opening persisted search index: %v", err)
 	} else {
 		idx = pidx
+		c.maintainIndexDir(dir)
 	}
 
 	if idx == nil {

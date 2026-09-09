@@ -116,6 +116,15 @@ func loadETags(dir string) (map[string]string, error) {
 // saveETags writes the sidecar atomically (write-temp then rename) so a
 // crash mid-write never leaves a partially-written, unparseable sidecar.
 func saveETags(dir string, etags map[string]string) error {
+	if dir == "" {
+		// An empty dir means an in-memory index (see NewIndex): dir joined
+		// with etagsFileName would resolve relative to the caller's cwd
+		// instead of failing, silently polluting whatever directory the
+		// process happens to run in. Reject it here so the promise is a
+		// return value Sync's caller (and this guard's own test) can
+		// assert on, not a filesystem location a test has to scan.
+		return fmt.Errorf("saveETags: empty dir (in-memory index must not persist a sidecar)")
+	}
 	data, err := json.Marshal(etags)
 	if err != nil {
 		return err
