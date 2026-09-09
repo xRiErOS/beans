@@ -26,6 +26,7 @@ var (
 	showMeta     bool
 	showTable    bool
 	showMaxWidth int
+	showParent   string
 )
 
 var showCmd = &cobra.Command{
@@ -39,14 +40,42 @@ raw markdown of the source file — the same text --raw produces, unpadded and
 unwrapped, so it can be fed to a parser.
 
 --meta drops the body from either representation and keeps the front matter:
-the styled header on a terminal, the source YAML block off one.`,
-	Args: cobra.MinimumNArgs(1),
+the styled header on a terminal, the source YAML block off one.
+
+--parent <id> adds that bean's children to the ids given, so a container and
+its children reach one page without naming each child. Given ids come first,
+then the children in the order list --parent uses; a bean named twice is shown
+once. Without ids, --parent shows the children alone.`,
+	// --parent supplies the ids, so a bare `show --parent <id>` is complete
+	// while a bare `show` is still a usage error.
+	Args: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 && showParent == "" {
+			return fmt.Errorf("requires at least 1 arg(s), only received 0")
+		}
+		return nil
+	},
 	RunE: func(cmd *cobra.Command, args []string) error {
 		resolver := &beangraph.CoreResolver{Core: core}
 
 		// Collect all beans
 		var beans []*bean.Bean
-		for _, id := range args {
+		ids := args
+		if showParent != "" {
+			children, err := showChildIDs(resolver, showParent)
+			if err != nil {
+				if showJSON {
+					return output.Error(output.ErrNotFound, err.Error())
+				}
+				return err
+			}
+			ids = append(ids, children...)
+		}
+		seen := make(map[string]bool, len(ids))
+		for _, id := range ids {
+			if seen[id] {
+				continue
+			}
+			seen[id] = true
 			b, err := resolver.Bean(context.Background(), id)
 			if err != nil {
 				if showJSON {
@@ -171,6 +200,36 @@ func showOutput(b *bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 // front matter's own closing "---" plus a blank line, and adding the raw
 // separator on top of that produced an empty third document between every
 // pair of beans.
+// showChildIDs resolves --parent to its children's ids, in the order the
+// resolver sorts them, so the page matches `list --parent` and `roadmap`
+// rather than inventing a third order. It goes through
+// CoreResolver.BeanChildren instead of re-deriving the parent link, which
+// keeps one definition of "child" in the codebase.
+//
+// Both empty cases are errors: an unknown parent is a typo, and a childless
+// one would render an empty page that reads like a broken command.
+func showChildIDs(resolver *beangraph.CoreResolver, parentID string) ([]string, error) {
+	parent, err := resolver.Bean(context.Background(), parentID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to find --parent bean: %w", err)
+	}
+	if parent == nil {
+		return nil, fmt.Errorf("bean not found: %s", parentID)
+	}
+	children, err := resolver.BeanChildren(context.Background(), parent, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to resolve children of %s: %w", parentID, err)
+	}
+	if len(children) == 0 {
+		return nil, fmt.Errorf("bean has no children: %s", parentID)
+	}
+	ids := make([]string, 0, len(children))
+	for _, c := range children {
+		ids = append(ids, c.ID)
+	}
+	return ids, nil
+}
+
 func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool, width int) (string, error) {
 	separator := "\n---\n\n"
 	switch {
@@ -469,6 +528,8 @@ func RegisterShowCmd(root *cobra.Command) {
 	showCmd.Flags().BoolVar(&showMeta, "meta", false, "Output only the front matter, without the body")
 	showCmd.Flags().BoolVar(&showTable, "table", false,
 		"Arrange the front matter as a label/value grid (forces the grid into a pipe too)")
+	showCmd.Flags().StringVar(&showParent, "parent", "",
+		"Also show the children of this bean, in the order list --parent uses")
 	showCmd.Flags().IntVar(&showMaxWidth, "max-width", 0,
 		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
 	// Two groups rather than one: --meta and --table each exclude the four
@@ -477,5 +538,8 @@ func RegisterShowCmd(root *cobra.Command) {
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "meta")
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "table")
 	showCmd.ValidArgsFunction = completionUnbounded
+	// --parent matches any existing bean ID, like list --parent and unlike
+	// create/update --parent, which offer type-eligible new parents.
+	_ = showCmd.RegisterFlagCompletionFunc("parent", listParentFlagCompletion)
 	root.AddCommand(showCmd)
 }
