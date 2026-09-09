@@ -35,6 +35,30 @@ func bandIDWidth(cfg *config.Config) int {
 	return ui.DisplayWidth(cfg.Beans.Prefix) + cfg.Beans.IDLength
 }
 
+// beanTableLabelWidth is the label column shared by every bean of one call.
+//
+// Sizing it per bean broke the view's only promise across several ids: a
+// bean carrying customer_value got a sixteen-cell column and its neighbour
+// an eleven-cell one, so consecutive grids stepped and no column could be
+// followed down the page. The width is therefore the widest label any of
+// the beans carries, never one bean's own.
+func beanTableLabelWidth(beans []*bean.Bean, cfg *config.Config) int {
+	width := 0
+	for _, l := range tableLabelVocabulary {
+		if w := ui.DisplayWidth(l); w > width {
+			width = w
+		}
+	}
+	for _, b := range beans {
+		for _, bl := range beanTableBlocks(b, cfg) {
+			if w := ui.DisplayWidth(bl.label); w > width {
+				width = w
+			}
+		}
+	}
+	return width
+}
+
 // tableBlock is one horizontally ruled section of the grid. A band spans the
 // full width and carries several label/value pairs, left-packed with one
 // right-aligned trailer; a field is the two-column label/value form whose
@@ -66,20 +90,8 @@ type tableBlock struct {
 // It is an arrangement of the same fields renderBeanHeader prints, not a
 // selection of them: dropping one here would reintroduce exactly the defect
 // beans-p1d0 fixed, and TestTableCarriesEveryFrontMatterField pins that.
-func renderBeanTable(b *bean.Bean, cfg *config.Config, width int) string {
+func renderBeanTable(b *bean.Bean, cfg *config.Config, width, labelWidth int) string {
 	blocks := beanTableBlocks(b, cfg)
-
-	labelWidth := 0
-	for _, l := range tableLabelVocabulary {
-		if w := ui.DisplayWidth(l); w > labelWidth {
-			labelWidth = w
-		}
-	}
-	for _, bl := range blocks {
-		if w := ui.DisplayWidth(bl.label); w > labelWidth {
-			labelWidth = w
-		}
-	}
 
 	// A field row is "│ " + label + " │ " + value + " │": seven cells of
 	// border and padding on top of the two text columns. A band row is
