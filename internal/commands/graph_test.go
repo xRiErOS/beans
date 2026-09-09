@@ -356,11 +356,12 @@ func TestGraphMermaidRendersEveryNodeAndEdge(t *testing.T) {
 	}
 }
 
-// TestGraphMermaidNodeIDsAreSafe keeps the syntax parseable: a bean id
-// carries a hyphen, and an unsanitised `beans-bbbb --> beans-cccc` makes
-// Mermaid read the id's hyphen as part of the arrow. Ids are therefore
-// sanitised for the node handle while the label keeps the real id.
-func TestGraphMermaidNodeIDsAreSafe(t *testing.T) {
+// TestGraphMermaidUsesTheBeanIDVerbatim keeps the handle mappable back to a
+// bean. Mermaid 11 accepts a hyphenated id, in `beans-a --> beans-b` as well
+// as in a class name, so rewriting the hyphen would buy nothing and cost
+// two things: a handle a reader cannot look up, and a collision between two
+// ids that differ only in `-` versus `_`.
+func TestGraphMermaidUsesTheBeanIDVerbatim(t *testing.T) {
 	setupGraphTest(t)
 	resetGraphFlags(t)
 	seedGraphFixtures(t)
@@ -370,26 +371,45 @@ func TestGraphMermaidNodeIDsAreSafe(t *testing.T) {
 		t.Fatalf("runGraph() error = %v", err)
 	}
 
+	var edgeLines []string
 	for _, line := range strings.Split(out, "\n") {
-		if !strings.Contains(line, "-->") {
-			continue
-		}
-		handles := strings.Split(line, "-->")
-		if len(handles) != 2 {
-			t.Fatalf("edge line %q does not split into two handles", line)
-		}
-		for _, h := range handles {
-			h = strings.TrimSpace(h)
-			if i := strings.IndexAny(h, "|"); i >= 0 {
-				h = strings.TrimSpace(h[strings.LastIndex(h, "|")+1:])
-			}
-			if strings.Contains(h, "-") {
-				t.Errorf("node handle %q in %q still carries a hyphen", h, line)
-			}
+		if strings.Contains(line, "-->") {
+			edgeLines = append(edgeLines, strings.TrimSpace(line))
 		}
 	}
-	if !strings.Contains(out, "beans-bbbb") {
-		t.Errorf("sanitising dropped the real id from the labels:\n%s", out)
+	if len(edgeLines) != 1 {
+		t.Fatalf("want one edge line, got %v", edgeLines)
+	}
+	if want := "beans-bbbb -->|blocks| beans-cccc"; edgeLines[0] != want {
+		t.Errorf("edge line = %q, want %q", edgeLines[0], want)
+	}
+
+	// The node handle is the id itself, not a rewritten form of it.
+	if !strings.Contains(out, `beans-bbbb["`) {
+		t.Errorf("node handle is not the verbatim id:\n%s", out)
+	}
+	if strings.Contains(out, "beans_bbbb") || strings.Contains(out, "nbeans") {
+		t.Errorf("output still carries a sanitised handle:\n%s", out)
+	}
+}
+
+// TestGraphMermaidClassNamesCarryTheStatus pairs with it for the second
+// user of the id escaping: a status like in-progress becomes a class name,
+// which Mermaid also accepts with its hyphen.
+func TestGraphMermaidClassNamesCarryTheStatus(t *testing.T) {
+	setupGraphTest(t)
+	resetGraphFlags(t)
+	running := &bean.Bean{ID: "beans-iiii", Slug: "running", Title: "Running", Status: "in-progress", Type: "task"}
+	if err := core.Create(running); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+
+	out, err := runGraph(t, "--format", "mermaid", "beans-iiii")
+	if err != nil {
+		t.Fatalf("runGraph() error = %v", err)
+	}
+	if !strings.Contains(out, "status-in-progress") {
+		t.Errorf("class name does not name the status verbatim:\n%s", out)
 	}
 }
 
@@ -399,7 +419,7 @@ func TestGraphMermaidNodeIDsAreSafe(t *testing.T) {
 func TestGraphMermaidEscapesLabelSyntax(t *testing.T) {
 	setupGraphTest(t)
 	resetGraphFlags(t)
-	mkGraphBean(t, "beans-eeee", `Fix "q" [b] (p) {c} &quot; title`, "task", "", []string{"beans-ffff"}, nil)
+	mkGraphBean(t, "beans-eeee", `Fix "q" [b] (p) {c} &quot; #91; title`, "task", "", []string{"beans-ffff"}, nil)
 	mkGraphBean(t, "beans-ffff", "Plain", "task", "", nil, nil)
 
 	out, err := runGraph(t, "--format", "mermaid", "--depth", "0", "beans-eeee")
@@ -416,24 +436,29 @@ func TestGraphMermaidEscapesLabelSyntax(t *testing.T) {
 	if label == "" {
 		t.Fatalf("no node line for beans-eeee:\n%s", out)
 	}
-	// The delimiters are checked inside the label text only -- the node's own
-	// ["..."] frame is made of the same characters -- and each on its own: an
-	// escaped ] beside a raw [ still breaks the node, while asserting on the
-	// pair "[bracket]" would let that half-escaped state pass.
-	open, close := strings.Index(label, `["`), strings.LastIndex(label, `"]`)
-	if open < 0 || close <= open {
+	// The label frame is made of the same characters as a title may carry, so
+	// the text is read out from between the quotes before anything is
+	// asserted about it.
+	openIdx, closeIdx := strings.Index(label, `["`), strings.LastIndex(label, `"]`)
+	if openIdx < 0 || closeIdx <= openIdx {
 		t.Fatalf("node line %q has no quoted label", label)
 	}
-	text := label[open+2 : close]
-	for _, raw := range []string{"[", "]", "(", ")", "{", "}", `"`} {
-		if strings.Contains(text, raw) {
-			t.Errorf("raw %q survives into the label text %q", raw, text)
-		}
+	text := label[openIdx+2 : closeIdx]
+	if strings.Contains(text, `"`) {
+		t.Errorf("a raw double quote survives and closes the label: %q", text)
 	}
-	// An & is escaped too, so a title that literally spells out an entity is
-	// drawn as that text rather than as the character it names.
-	if !strings.Contains(text, "&amp;quot;") {
-		t.Errorf("a literal &quot; in the title was not neutralised: %q", text)
+
+	// The whole label is pinned, not substrings of it: an escaping pass that
+	// runs its rules in the wrong order mangles its own entities into
+	// visible text -- &#91; becoming &amp;#35;91; -- and every substring
+	// assertion still passes on that. The literal &quot; and #91; in the
+	// title are here for the same reason: Mermaid resolves both spellings,
+	// so both have to survive as text.
+	// Brackets stay verbatim on purpose: Mermaid renders them as written
+	// inside a quoted label, and the HTML entity form came out as "&[".
+	wantText := "beans-eeee<br/>Fix &quot;q&quot; [b] (p) {c} &amp;quot; #35;91; title"
+	if text != wantText {
+		t.Errorf("label text  = %q\nwant          %q", text, wantText)
 	}
 	if !strings.Contains(label, "Fix") || !strings.Contains(label, "title") {
 		t.Errorf("escaping dropped the words themselves: %q", label)
