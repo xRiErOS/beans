@@ -265,7 +265,7 @@ func TestSync_UsesETagNotUpdatedAt(t *testing.T) {
 // TestSync_InMemoryIndexRebuildsColdFromScratch documents the fallback
 // index's cold-start behavior: a fresh in-memory index has an empty
 // idx.etags (see NewIndex), so its first Sync in a new process indexes
-// everything, same as IndexBeans.
+// everything.
 func TestSync_InMemoryIndexRebuildsColdFromScratch(t *testing.T) {
 	idx := setupTestIndex(t)
 	b := beanWith("aaa1", "Title", "body")

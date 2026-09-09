@@ -158,23 +158,6 @@ func (idx *Index) Search(queryStr string, limit int) ([]string, error) {
 	return ids, nil
 }
 
-// IndexBeans indexes multiple beans in a batch for efficiency.
-func (idx *Index) IndexBeans(beans []*bean.Bean) error {
-	batch := idx.index.NewBatch()
-	for _, b := range beans {
-		doc := beanDocument{
-			ID:    b.ID,
-			Slug:  b.Slug,
-			Title: b.Title,
-			Body:  b.Body,
-		}
-		if err := batch.Index(b.ID, doc); err != nil {
-			return err
-		}
-	}
-	return idx.index.Batch(batch)
-}
-
 // Sync brings the index up to date with the given beans, indexing only what
 // changed since the last Sync (AC-02): a bean whose staleness key (ETag plus
 // Path, see staleKey) differs from the recorded value -- new, edited by this
