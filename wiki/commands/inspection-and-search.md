@@ -30,12 +30,20 @@ The styled header carries the whole front matter, not a selection of it: type an
 
 Flags: `--raw` forces raw Markdown output even on a terminal; `--json` returns the bean's front matter and body as JSON instead of Markdown; `--body-only` prints only the body content; `--meta` prints only the front matter without the body — the styled header on a terminal, and the source YAML block off one, which still parses as a bean file with an empty body; `--etag-only` prints only the etag, which is useful for detecting whether a bean changed between two reads. These five output-mode flags are mutually exclusive.
 
+`--table` arranges the same front matter as a label/value grid instead of the flowing header: a fixed label column on the left, values on the right, `type`/`status`/`priority` sharing one row and `created`/`updated`/`order` sharing another, long free text wrapping inside its own cell. The column geometry comes from the label and config vocabulary rather than from the bean at hand, so two beans rendered in one call line up and a reader scans down a column instead of reading every line. `parent`, `blocking` and `blocked by` name the related bean's type and title next to its id, falling back to the bare id when it cannot be resolved. Unlike the default view, `--table` forces the grid into a pipe as well — the way `--raw` forces raw markdown onto a terminal — and it combines with `--meta` to give the grid alone.
+
+`--max-width <n>` caps the rendered width at `n` cells and follows the same policy as `beans list`: the flag outranks `display.max_width` in the config, which outranks the built-in default of 110, and `0` disables the cap.
+
 ```
 beans show beans-vvat beans-gng9
 ```
 
 ```
 beans show --meta beans-vvat
+```
+
+```
+beans show --meta --table --max-width 72 beans-vvat beans-gng9
 ```
 
 ```

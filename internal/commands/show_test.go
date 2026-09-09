@@ -604,3 +604,308 @@ func TestExtraValueStaysOnOneLine(t *testing.T) {
 		t.Errorf("formatExtraValue({k: v}) = %q, want %q", got, "{k: v}")
 	}
 }
+
+// tableLabels returns the label of every row in a rendered table, in order.
+// Every table assertion goes through this rather than matching raw substrings:
+// the point of the view is that a label sits in its own left column, and a
+// substring match would pass just as happily on the flowing header.
+func tableLabels(out string) []string {
+	var labels []string
+	for _, line := range strings.Split(out, "\n") {
+		cells := strings.Split(line, "│")
+		if len(cells) < 3 {
+			continue
+		}
+		if label := strings.TrimSpace(cells[1]); label != "" {
+			labels = append(labels, label)
+		}
+	}
+	return labels
+}
+
+// TestTableCarriesEveryFrontMatterField is the table view's half of
+// TestShowHeaderCarriesWholeFrontMatter: the grid is a different arrangement
+// of the whole front matter, not a smaller selection of it. Without this the
+// renderer could quietly drop blocked_by or an extra key and only the flowing
+// header would notice.
+func TestTableCarriesEveryFrontMatterField(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body text.\n")
+
+	out := renderBeanTable(b, cfg, 110)
+
+	for _, want := range []string{
+		"title:", "id:", "type:", "status:", "priority:", "tags:",
+		"parent:", "blocked by:", "blocking:",
+		"branch:", "gate:", "release:", "reviews:",
+		"created:", "updated:", "order:",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table is missing label %q\n%s", want, out)
+		}
+	}
+	for _, want := range []string{
+		"A full bean", "beans-full1", "high", "#reviewed", "#backend",
+		"beans-paren", "beans-block1", "beans-blkby1",
+		"feature/beans-full1-a-full-bean", "0-9-0", "a0",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("table is missing value %q\n%s", want, out)
+		}
+	}
+}
+
+// TestTableRowOrderFollowsTheSketch pins the PO's row order. A grid whose
+// rows move between beans buys nothing over the flowing header -- reading a
+// column only works when the same label sits on the same row every time.
+func TestTableRowOrderFollowsTheSketch(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+
+	got := tableLabels(renderBeanTable(b, cfg, 110))
+	want := []string{
+		"title:", "id:", "type:", "tags:", "parent:",
+		"blocked by:", "blocking:",
+		"branch:", "gate:", "release:", "reviews:",
+		"created:",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("row labels = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("row %d label = %q, want %q (all: %v)", i, got[i], want[i], got)
+		}
+	}
+}
+
+// TestTablePairsShareOneRow guards the sketch's paired rows: type, status and
+// priority belong on one line, and so do created, updated and order. Three
+// rows each would push the interesting fields off the first screen, which is
+// the density this view exists to buy.
+func TestTablePairsShareOneRow(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+
+	out := renderBeanTable(b, cfg, 110)
+	for _, want := range []struct{ label, mate string }{
+		{"type:", "status:"},
+		{"type:", "priority:"},
+		{"created:", "updated:"},
+		{"created:", "order:"},
+	} {
+		var found bool
+		for _, line := range strings.Split(out, "\n") {
+			if strings.Contains(line, want.label) && strings.Contains(line, want.mate) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("%s and %s are not on one row\n%s", want.label, want.mate, out)
+		}
+	}
+}
+
+// TestTableRasterIsIdenticalAcrossBeans is the whole promise of the view: two
+// beans with wildly different content produce the same column geometry, so a
+// reader scans down one column instead of reading every line. A renderer that
+// sized its columns from the data it happens to hold would fail here while
+// looking perfectly fine on a single bean.
+func TestTableRasterIsIdenticalAcrossBeans(t *testing.T) {
+	setupShowTest(t)
+
+	narrow := &bean.Bean{ID: "beans-n1", Title: "x", Status: "todo", Type: "task"}
+	wide := showFullBean("Body.\n")
+
+	// The measurement is the *position of the column separator*, not the
+	// total row width: a renderer that sizes the label column from its own
+	// data still produces rows of the requested total width, because the
+	// value column absorbs the difference. Only the boundary moves, and
+	// only the boundary is what a reader's eye follows down the page.
+	geometry := func(out string) []int {
+		var boundaries []int
+		for _, line := range strings.Split(out, "\n") {
+			plain := stripANSI(line)
+			if !strings.Contains(plain, "│") {
+				continue
+			}
+			inner := strings.TrimPrefix(plain, "│")
+			boundaries = append(boundaries, ui.DisplayWidth(inner[:strings.Index(inner, "│")]))
+		}
+		return boundaries
+	}
+
+	gotNarrow, gotWide := geometry(renderBeanTable(narrow, cfg, 110)), geometry(renderBeanTable(wide, cfg, 110))
+	if len(gotNarrow) == 0 || len(gotWide) == 0 {
+		t.Fatalf("no bordered rows rendered")
+	}
+	for _, b := range append(gotNarrow, gotWide...) {
+		if b != gotWide[0] {
+			t.Errorf("label column boundary moves: narrow %v vs wide %v", gotNarrow, gotWide)
+			break
+		}
+	}
+}
+
+// TestTableWrapsLongValuesInsideTheColumn is the case that motivated the
+// view: a customer_value of a few sentences must fold inside its cell. A
+// renderer that let it run would push the right border off the screen and
+// destroy the raster the other tests pin.
+func TestTableWrapsLongValuesInsideTheColumn(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+	b.Extra = map[string]any{"goal": strings.Repeat("Lorem ipsum dolor sit amet. ", 12)}
+
+	out := renderBeanTable(b, cfg, 72)
+
+	var rows int
+	for _, line := range strings.Split(out, "\n") {
+		if !strings.Contains(line, "│") {
+			continue
+		}
+		rows++
+		if w := ui.DisplayWidth(line); w > 72 {
+			t.Errorf("row is %d cells wide, want <= 72: %q", w, line)
+		}
+	}
+	if rows < 3 {
+		t.Fatalf("expected the long value to occupy several rows, got %d\n%s", rows, out)
+	}
+	// The continuation rows carry no label -- the value keeps flowing in
+	// its own column instead of restating "goal:" on every line.
+	labels := tableLabels(out)
+	var goals int
+	for _, l := range labels {
+		if l == "goal:" {
+			goals++
+		}
+	}
+	if goals != 1 {
+		t.Errorf("label goal: appears %d times, want 1\n%s", goals, out)
+	}
+}
+
+// TestTableMaxWidthCapsTheGrid is --max-width's own guard. resolveWidth is
+// already tested for list; what is untested is that show's table actually
+// honours the number instead of rendering at the default and letting the
+// terminal wrap.
+func TestTableMaxWidthCapsTheGrid(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body.\n")
+
+	for _, width := range []int{40, 60, 100} {
+		out := renderBeanTable(b, cfg, width)
+		for _, line := range strings.Split(out, "\n") {
+			if !strings.Contains(line, "│") {
+				continue
+			}
+			if w := ui.DisplayWidth(line); w != width {
+				t.Errorf("at max-width %d a row is %d cells: %q", width, w, line)
+				break
+			}
+		}
+	}
+}
+
+// TestTableForcesTheGridOffATerminal pins that --table is a forcing flag in
+// both directions, the way --raw forces raw markdown on a terminal. Piping
+// the grid into less or a file is exactly what a reader comparing beans does.
+//
+// It runs the command rather than the renderer, because the forcing decision
+// lives in RunE: showOutputTable itself cannot tell a pipe from a terminal,
+// and a unit-level call would assert nothing about the dispatch. Test stdout
+// is a pipe, so term.IsTerminal is genuinely false here.
+func TestTableForcesTheGridOffATerminal(t *testing.T) {
+	setupShowTest(t)
+
+	b := &bean.Bean{
+		ID:     "beans-grid1",
+		Slug:   bean.Slugify("A gridded bean"),
+		Title:  "A gridded bean",
+		Status: "todo",
+		Type:   "task",
+		Body:   "Body text.\n",
+	}
+	if err := core.Create(b); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+
+	oldTable, oldMeta := showTable, showMeta
+	showTable, showMeta = true, true
+	t.Cleanup(func() { showTable, showMeta = oldTable, oldMeta })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	runErr := showCmd.RunE(showCmd, []string{b.ID})
+	os.Stdout = oldStdout
+	w.Close()
+	captured, _ := io.ReadAll(r)
+	if runErr != nil {
+		t.Fatalf("showCmd.RunE() error = %v", runErr)
+	}
+
+	out := string(captured)
+	if !strings.Contains(out, "│") {
+		t.Errorf("--table off a terminal did not render the grid:\n%s", out)
+	}
+	if strings.Contains(out, "Body text.") {
+		t.Errorf("--table --meta kept the body:\n%s", out)
+	}
+}
+
+// TestTableWithoutMetaKeepsTheBody guards the other combination: --table on
+// its own replaces the header with the grid and still renders the body, so
+// the flag is an arrangement of the front matter, not a body switch.
+func TestTableWithoutMetaKeepsTheBody(t *testing.T) {
+	setupShowTest(t)
+	b := showFullBean("Body text that is unmistakable.\n")
+
+	out, err := showOutputTable(b, false, 110)
+	if err != nil {
+		t.Fatalf("showOutputTable() error = %v", err)
+	}
+	if !strings.Contains(out, "│") {
+		t.Errorf("no grid rendered:\n%s", out)
+	}
+	if !strings.Contains(out, "unmistakable") {
+		t.Errorf("body missing:\n%s", out)
+	}
+}
+
+// TestTableRelationsNameTypeAndTitle covers the third leaf: a parent shows as
+// type and title, and an unresolvable id degrades to the bare id rather than
+// erroring or blanking the cell.
+func TestTableRelationsNameTypeAndTitle(t *testing.T) {
+	setupShowTest(t)
+
+	parent := &bean.Bean{
+		ID:     "beans-pare1",
+		Slug:   bean.Slugify("The parent epic"),
+		Title:  "The parent epic",
+		Status: "todo",
+		Type:   "epic",
+	}
+	if err := core.Create(parent); err != nil {
+		t.Fatalf("core.Create() error = %v", err)
+	}
+
+	b := showFullBean("Body.\n")
+	b.Parent = parent.ID
+	b.BlockedBy = []string{"beans-gone1"}
+
+	out := renderBeanTable(b, cfg, 110)
+	if !strings.Contains(out, "The parent epic") {
+		t.Errorf("parent row does not name the title:\n%s", out)
+	}
+	if !strings.Contains(out, "epic") {
+		t.Errorf("parent row does not name the type:\n%s", out)
+	}
+	if !strings.Contains(out, "beans-gone1") {
+		t.Errorf("unresolvable id was dropped instead of shown bare:\n%s", out)
+	}
+}
