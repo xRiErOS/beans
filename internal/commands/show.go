@@ -24,6 +24,8 @@ var (
 	showBodyOnly bool
 	showETagOnly bool
 	showMeta     bool
+	showTable    bool
+	showMaxWidth int
 )
 
 var showCmd = &cobra.Command{
@@ -106,8 +108,28 @@ the styled header on a terminal, the source YAML block off one.`,
 			return nil
 		}
 
+		isTTY := term.IsTerminal(int(os.Stdout.Fd()))
+
+		// --table forces the grid in both directions, the way --raw forces
+		// raw markdown on a terminal: an explicit arrangement flag outranks
+		// the representation stdout would otherwise pick.
+		if showTable {
+			width := resolveWidth(showMaxWidth, cmd.Flags().Changed("max-width"), cfg)
+			for i, b := range beans {
+				if i > 0 {
+					fmt.Println()
+				}
+				out, err := showOutputTable(b, showMeta, width)
+				if err != nil {
+					return err
+				}
+				fmt.Print(out)
+			}
+			return nil
+		}
+
 		// Default: styled for a terminal, raw markdown for a pipe or a file
-		out, err := showOutputAll(beans, term.IsTerminal(int(os.Stdout.Fd())), showMeta)
+		out, err := showOutputAll(beans, isTTY, showMeta)
 		if err != nil {
 			return err
 		}
@@ -169,6 +191,28 @@ func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool) (string, error) {
 		out.WriteString(text)
 	}
 	return out.String(), nil
+}
+
+// showOutputTable renders one bean as the label/value grid. metaOnly keeps
+// the grid alone; otherwise the body follows, separated by the same rule the
+// styled detail view uses.
+//
+// The width is resolved by the caller through resolveWidth, so --max-width,
+// display.max_width and the built-in default rank exactly as they do for
+// beans list -- one width policy for the whole CLI rather than a second one
+// here. Taking it as a parameter also keeps this function out of showCmd's
+// initialisation cycle, which a flag lookup from here would create.
+func showOutputTable(b *bean.Bean, metaOnly bool, width int) (string, error) {
+	var sb strings.Builder
+	sb.WriteString(renderBeanTable(b, cfg, width))
+	if metaOnly {
+		return sb.String(), nil
+	}
+
+	if body := ui.RenderMarkdown(b.Body, min(width, 90)); body != "" {
+		sb.WriteString("\n" + body + "\n")
+	}
+	return sb.String(), nil
 }
 
 // styledBeanOutput builds the styled representation of a single bean.
@@ -381,7 +425,14 @@ func RegisterShowCmd(root *cobra.Command) {
 	showCmd.Flags().BoolVar(&showBodyOnly, "body-only", false, "Output only the body content")
 	showCmd.Flags().BoolVar(&showETagOnly, "etag-only", false, "Output only the etag")
 	showCmd.Flags().BoolVar(&showMeta, "meta", false, "Output only the front matter, without the body")
+	showCmd.Flags().BoolVar(&showTable, "table", false,
+		"Arrange the front matter as a label/value grid (forces the grid into a pipe too)")
+	showCmd.Flags().IntVar(&showMaxWidth, "max-width", 0,
+		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
+	// --meta is deliberately absent from the exclusion set: --table --meta
+	// is the combination the grid exists for.
 	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "meta")
+	showCmd.MarkFlagsMutuallyExclusive("json", "raw", "body-only", "etag-only", "table")
 	showCmd.ValidArgsFunction = completionUnbounded
 	root.AddCommand(showCmd)
 }
