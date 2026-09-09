@@ -548,11 +548,24 @@ func isRank(b *bean.Bean, rank int) bool {
 	return cfg.RankOf(b.Type) == rank
 }
 
-// isContainerRank reports whether a bean sits on one of the three container
-// ranks. Leaves (rank 4) are rendered inside a container, never as one.
+// containerTypeNames returns the names of every type occupying a
+// container rank (1 through config.MaxContainerRank), in TypesAtRank's
+// per-rank order. isContainerRank and pick.go's roadmapScopeTypes both
+// route through this one loop instead of each looping 1..MaxContainerRank
+// on its own (beans-v2ox).
+func containerTypeNames() []string {
+	var names []string
+	for rank := 1; rank <= config.MaxContainerRank; rank++ {
+		names = append(names, cfg.TypesAtRank(rank)...)
+	}
+	return names
+}
+
+// isContainerRank reports whether a bean sits on a container rank. Leaves
+// (rank config.LeafRank) are rendered inside a container, never as one.
 func isContainerRank(b *bean.Bean) bool {
 	r := cfg.RankOf(b.Type)
-	return r >= 1 && r <= 3
+	return r >= 1 && r <= config.MaxContainerRank
 }
 
 // childrenIndex maps each bean ID to the beans that have it as a parent.
@@ -654,16 +667,13 @@ func buildScopedRoadmap(allBeans []*bean.Bean, includeDone bool, root *bean.Bean
 	}
 }
 
-// validateRoadmapRootType returns an error if b does not sit on one of the
-// three container ranks (rank 1 through 3).
+// validateRoadmapRootType returns an error if b does not sit on a
+// container rank (rank 1 through config.MaxContainerRank).
 func validateRoadmapRootType(b *bean.Bean) error {
 	if isContainerRank(b) {
 		return nil
 	}
-	var containers []string
-	for rank := 1; rank <= 3; rank++ {
-		containers = append(containers, cfg.TypesAtRank(rank)...)
-	}
+	containers := containerTypeNames()
 	if len(containers) == 0 {
 		return fmt.Errorf("this project defines no container types (ranks 1-3), so %s (%s) cannot be a roadmap root",
 			b.Type, b.ID)
@@ -1078,6 +1088,8 @@ func RegisterRoadmapCmd(root *cobra.Command) {
 	roadmapCmd.Flags().BoolVar(&roadmapIncludeDone, "include-done", false, "Include completed items")
 	roadmapCmd.Flags().StringArrayVar(&roadmapStatus, "status", nil, "Filter milestones by status (can be repeated)")
 	roadmapCmd.Flags().StringArrayVar(&roadmapNoStatus, "no-status", nil, "Exclude milestones by status (can be repeated)")
+	_ = roadmapCmd.RegisterFlagCompletionFunc("status", statusFlagCompletion)
+	_ = roadmapCmd.RegisterFlagCompletionFunc("no-status", statusFlagCompletion)
 	roadmapCmd.Flags().BoolVar(&roadmapNoLinks, "no-links", false, "Don't render bean IDs as markdown links")
 	roadmapCmd.Flags().StringVar(&roadmapLinkPrefix, "link-prefix", "", "URL prefix for links")
 	roadmapCmd.Flags().IntVar(&roadmapDepth, "depth", 0, "Limit output to n levels below the roadmap root (default: no limit)")

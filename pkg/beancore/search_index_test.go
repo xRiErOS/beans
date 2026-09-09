@@ -81,6 +81,14 @@ func TestSearchIndexField_OnlyTouchedByKnownSeams(t *testing.T) {
 		"Update":                  true,
 		"Delete":                  true,
 		"Close":                   true,
+		// beans-4t2m's lazy-upgrade helpers: ensureWritableSearchIndexLocked
+		// is the single seam every write path (Create/Update/Delete, the
+		// watcher paths below, and loadFromDisk's resync) goes through
+		// before touching c.searchIndex, and upgradeSearchIndexLocked is
+		// the shared close-and-reopen-exclusively implementation it and
+		// ensureSearchIndexLocked both call.
+		"ensureWritableSearchIndexLocked": true,
+		"upgradeSearchIndexLocked":        true,
 		// The widened, whole-package scan also caught fsnotify-driven
 		// incremental maintenance in watcher.go/worktree_watcher.go for
 		// long-running processes (beans-serve, the TUI): the same
@@ -483,5 +491,55 @@ func TestIndexDir_PruneOnOpen_KeepsLiveStore(t *testing.T) {
 
 	if _, err := os.Stat(dirA); err != nil {
 		t.Fatalf("live store's index dir %s was pruned: stat err = %v", dirA, err)
+	}
+}
+
+// TestIndexDir_PruneOnOpen_ContinuesPastRemoveFailure proves pruneOrphanIndexDirs
+// does not abort on the first os.RemoveAll failure: with two orphaned
+// siblings and the first (in os.ReadDir sorted order) made undeletable, the
+// second orphan must still be removed, and the returned error must mention
+// the first sibling's failure rather than being swallowed.
+func TestIndexDir_PruneOnOpen_ContinuesPastRemoveFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod does not prevent removal")
+	}
+
+	home := t.TempDir()
+	indexRoot := filepath.Join(home, ".beans", "index")
+	siblingA := filepath.Join(indexRoot, "sibling-a-undeletable")
+	siblingB := filepath.Join(indexRoot, "sibling-b-removable")
+
+	for _, dir := range []string{siblingA, siblingB} {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+		}
+		goneRoot := filepath.Join(home, "gone-"+filepath.Base(dir))
+		if err := os.WriteFile(filepath.Join(dir, indexMarkerFileName), []byte(goneRoot), 0o644); err != nil {
+			t.Fatalf("WriteFile(marker, %s) error = %v", dir, err)
+		}
+	}
+
+	if err := os.Chmod(siblingA, 0o500); err != nil {
+		t.Fatalf("Chmod(siblingA) error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chmod(siblingA, 0o755); err != nil {
+			t.Logf("Chmod(siblingA) cleanup error = %v", err)
+		}
+	})
+
+	err := pruneOrphanIndexDirs(indexRoot)
+	if err == nil {
+		t.Fatalf("pruneOrphanIndexDirs() error = nil, want non-nil mentioning %s", siblingA)
+	}
+	if !strings.Contains(err.Error(), "sibling-a-undeletable") {
+		t.Fatalf("pruneOrphanIndexDirs() error = %q, want it to mention the undeletable sibling", err.Error())
+	}
+
+	if _, statErr := os.Stat(siblingB); !os.IsNotExist(statErr) {
+		t.Fatalf("orphaned sibling %s still present after prune (stat err = %v), want it removed despite siblingA's failure", siblingB, statErr)
+	}
+	if _, statErr := os.Stat(siblingA); statErr != nil {
+		t.Fatalf("undeletable sibling %s missing entirely (stat err = %v), want it left in place after the failed removal", siblingA, statErr)
 	}
 }

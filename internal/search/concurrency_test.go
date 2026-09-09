@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
+	"time"
 )
 
 // TestOpen_FallsBackWhenLockContended forces the AC-07 contention case
@@ -32,10 +33,11 @@ func TestOpen_FallsBackWhenLockContended(t *testing.T) {
 	}
 	defer syscall.Flock(int(holder.Fd()), syscall.LOCK_UN)
 
-	idx, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open() with lock contended returned an error instead of degrading: %v", err)
-	}
+	// Open must not block while the lock is contended (AC-07):
+	// openWithTimeout fails this test itself, by name, if it has not
+	// returned within 5s, instead of trusting the package's own
+	// -test.timeout to notice a regression to a blocking flock call.
+	idx := openWithTimeout(t, 5*time.Second, Open, dir)
 	defer idx.Close()
 
 	if idx.persistent {
@@ -71,10 +73,11 @@ func TestOpen_FallsBackWhenLockContended(t *testing.T) {
 func TestOpen_SecondCallerAcquiresAfterFirstReleases(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "idx")
 
-	idx1, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open() #1 error = %v", err)
-	}
+	// openWithTimeout guards this Open() the same way: on an uncontended
+	// directory it should return almost instantly, so a regression to a
+	// blocking flock call still fails this test by name rather than
+	// hanging until the package's own -test.timeout.
+	idx1 := openWithTimeout(t, 5*time.Second, Open, dir)
 	if !idx1.persistent {
 		t.Fatal("Open() #1 on an uncontended directory should have acquired the persistent index")
 	}
@@ -82,10 +85,7 @@ func TestOpen_SecondCallerAcquiresAfterFirstReleases(t *testing.T) {
 		t.Fatalf("Close() error = %v", err)
 	}
 
-	idx2, err := Open(dir)
-	if err != nil {
-		t.Fatalf("Open() #2 error = %v", err)
-	}
+	idx2 := openWithTimeout(t, 5*time.Second, Open, dir)
 	defer idx2.Close()
 	if !idx2.persistent {
 		t.Fatal("Open() #2 after the first holder released should have acquired the persistent index")

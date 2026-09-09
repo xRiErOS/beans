@@ -325,9 +325,14 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 					c.removeBeanLocked(id)
 					delete(c.mainPaths, id)
 
-					// Update search index
+					// Update search index. ensureWritableSearchIndexLocked
+					// upgrades a cached shared, read-only handle first
+					// (beans-4t2m): DeleteBean would otherwise hang forever
+					// on one.
 					if c.searchIndex != nil {
-						if err := c.searchIndex.DeleteBean(id); err != nil {
+						if err := c.ensureWritableSearchIndexLocked(); err != nil {
+							c.logWarn("failed to upgrade search index for bean %s: %v", id, err)
+						} else if err := c.searchIndex.DeleteBean(id); err != nil {
 							c.logWarn("failed to remove bean %s from search index: %v", id, err)
 						}
 					}
@@ -359,9 +364,13 @@ func (c *Core) handleChanges(changes map[string]fsnotify.Op) {
 			c.mainPaths[newBean.ID] = newBean.Path
 			delete(c.dirty, newBean.ID) // Disk is now up-to-date
 
-			// Update search index
+			// Update search index. ensureWritableSearchIndexLocked upgrades
+			// a cached shared, read-only handle first (beans-4t2m):
+			// IndexBean would otherwise hang forever on one.
 			if c.searchIndex != nil {
-				if err := c.searchIndex.IndexBean(newBean); err != nil {
+				if err := c.ensureWritableSearchIndexLocked(); err != nil {
+					c.logWarn("failed to upgrade search index for bean %s: %v", newBean.ID, err)
+				} else if err := c.searchIndex.IndexBean(newBean); err != nil {
 					c.logWarn("failed to index bean %s: %v", newBean.ID, err)
 				}
 			}

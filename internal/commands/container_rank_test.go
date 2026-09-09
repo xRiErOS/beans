@@ -1,0 +1,59 @@
+package commands
+
+import (
+	"reflect"
+	"testing"
+
+	"github.com/xRiErOS/beans/pkg/bean"
+	"github.com/xRiErOS/beans/pkg/config"
+)
+
+// TestContainerTypeNamesMatchesTypesAtRank pins beans-v2ox's shared
+// container-rank helper against cfg.TypesAtRank itself, for every
+// configured rank up to config.MaxContainerRank: containerTypeNames is the
+// one place that loops 1..MaxContainerRank, and pick.go's roadmapScopeTypes
+// plus roadmap.go's validateRoadmapRootType both route through it now.
+func TestContainerTypeNamesMatchesTypesAtRank(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	var want []string
+	for rank := 1; rank <= config.MaxContainerRank; rank++ {
+		want = append(want, cfg.TypesAtRank(rank)...)
+	}
+
+	got := containerTypeNames()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("containerTypeNames() = %v, want %v (cfg.TypesAtRank(1..MaxContainerRank))", got, want)
+	}
+	if len(got) == 0 {
+		t.Fatal("expected at least one container-rank type from the default config")
+	}
+}
+
+// TestIsContainerRankFalseForLeafRank pins the behavioral half of
+// beans-v2ox: a bean whose type sits at config.LeafRank is never a
+// container, regardless of the exact bound isContainerRank now reads from
+// config.MaxContainerRank instead of a repeated literal.
+func TestIsContainerRankFalseForLeafRank(t *testing.T) {
+	oldCfg := cfg
+	defer func() { cfg = oldCfg }()
+	cfg = config.Default()
+
+	leafType := ""
+	for _, name := range cfg.TypeNames() {
+		if cfg.RankOf(name) == config.LeafRank {
+			leafType = name
+			break
+		}
+	}
+	if leafType == "" {
+		t.Fatal("expected the default config to have a leaf-rank type")
+	}
+
+	b := &bean.Bean{Type: leafType}
+	if isContainerRank(b) {
+		t.Errorf("isContainerRank(%q) = true, want false", leafType)
+	}
+}

@@ -84,7 +84,7 @@ type typePickerModel struct {
 
 func newTypePickerModel(beanIDs []string, beanTitle, currentType string, cfg *config.Config, width, height int) typePickerModel {
 	// Get all types
-	types := candidates.TypeCandidates()
+	types := candidates.TypeCandidates(cfg)
 
 	delegate := typeItemDelegate{}
 

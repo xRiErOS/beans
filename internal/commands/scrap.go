@@ -17,6 +17,12 @@ var (
 	scrapJSON   bool
 )
 
+// scrapTargetStatus is the status scrap writes on success (RunE below) and
+// the status scrapCmd's completion narrowing excludes as already-there, so
+// the write path and the completion predicate can never drift onto two
+// different literals (beans-j5so).
+const scrapTargetStatus = "scrapped"
+
 var scrapCmd = &cobra.Command{
 	Use:   "scrap <id> [id...]",
 	Short: "Mark one or more beans as scrapped",
@@ -40,12 +46,12 @@ the first bean is written, so an unknown ID leaves the whole batch alone.`,
 		}
 
 		// Validate the status
-		if !cfg.IsValidStatus("scrapped") {
-			return cmdError(scrapJSON, output.ErrValidation, "invalid status: scrapped (must be %s)", strings.Join(cfg.StatusNames(), ", "))
+		if !cfg.IsValidStatus(scrapTargetStatus) {
+			return cmdError(scrapJSON, output.ErrValidation, "invalid status: %s (must be %s)", scrapTargetStatus, strings.Join(cfg.StatusNames(), ", "))
 		}
 
 		// Build the update input
-		status := "scrapped"
+		status := scrapTargetStatus
 		input := model.UpdateBeanInput{
 			Status: &status,
 		}
@@ -87,6 +93,11 @@ func RegisterScrapCmd(root *cobra.Command) {
 	scrapCmd.Flags().StringVar(&scrapReason, "reason", "", "Reason for scrapping, applied to every bean in the call (required)")
 	scrapCmd.MarkFlagRequired("reason")
 	scrapCmd.Flags().BoolVar(&scrapJSON, "json", false, "Output as JSON")
-	scrapCmd.ValidArgsFunction = completionUnbounded
+	// scrap excludes beans already scrapped -- scrapping again is not a
+	// valid action. A completed bean stays offered: scrap remains a valid
+	// way to close out a completed bean differently (beans-j5so).
+	scrapCmd.ValidArgsFunction = completionUnboundedFiltered(func(b *bean.Bean) bool {
+		return b.Status != scrapTargetStatus
+	})
 	root.AddCommand(scrapCmd)
 }

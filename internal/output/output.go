@@ -111,6 +111,32 @@ func Emitted(err error) bool {
 	return errors.As(err, &e)
 }
 
+// silentError marks an error that reached the top-level failure path but
+// carries no message worth a stderr line -- e.g. an interactive picker the
+// user backed out of. Distinct from emittedError: Emitted means a
+// machine-readable document was already written; Silent means there is no
+// document and none is needed either, because the outcome (a non-zero
+// exit) already says everything the caller needs.
+type silentError struct {
+	message string
+}
+
+func (e *silentError) Error() string { return e.message }
+
+// Silent wraps message as an error reportExecutionError will not print to
+// stderr. The process still exits non-zero (R-11 AC3): only the redundant
+// human-readable line is suppressed.
+func Silent(message string) error {
+	return &silentError{message: message}
+}
+
+// IsSilent reports whether err, or any error it wraps, was built by
+// Silent.
+func IsSilent(err error) bool {
+	var e *silentError
+	return errors.As(err, &e)
+}
+
 // Error outputs an error response and returns an error for command handling.
 func Error(code string, message string) error {
 	_ = JSON(Response{

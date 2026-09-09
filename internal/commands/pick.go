@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
+	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/pkg/candidates"
@@ -20,10 +22,13 @@ import (
 
 // errPickAborted is returned whenever nothing was selected -- the user
 // cancelled, or reached the end of the picker without pressing enter on an
-// item. R-11 AC3: stdout stays empty and the process exits non-zero either
-// way, so callers cannot tell "cancelled" from "picked nothing" and don't
-// need to.
-var errPickAborted = errors.New("beans pick: no bean selected")
+// item. R-11 AC3: stdout stays empty and the process still exits non-zero
+// either way, so callers cannot tell "cancelled" from "picked nothing" and
+// don't need to. It is an output.Silent error (beans-lk8t): backing out of
+// an interactive picker is expected, ordinary use, not a failure worth a
+// stderr line -- reportExecutionError still keeps quiet while Execute still
+// exits 1.
+var errPickAborted = output.Silent("beans pick: no bean selected")
 
 var pickCmd = &cobra.Command{
 	Use:   "pick",
@@ -155,17 +160,26 @@ func runPick(cmd *cobra.Command, _ []string) error {
 		return errors.New("beans pick: stdin is not a terminal")
 	}
 
-	sort.Slice(beans, func(i, j int) bool {
-		return strings.ToLower(beans[i].Title) < strings.ToLower(beans[j].Title)
-	})
-
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("beans pick: opening controlling terminal: %w", err)
 	}
 	defer tty.Close()
 
-	program := tea.NewProgram(newPickModel(beans), tea.WithInput(tty), tea.WithOutput(tty), tea.WithAltScreen())
+	return runPickWith(cmd, beans, tty, tty)
+}
+
+// runPickWith is runPick's testable core: it drives the picker's
+// bubbletea program against the supplied input/output pair instead of
+// reaching for /dev/tty itself, so a test can inject in-memory pipes
+// (beans-gofn). runPick is the sole production caller and always points
+// both in and out at the same already-opened controlling terminal.
+func runPickWith(cmd *cobra.Command, beans []*bean.Bean, in io.Reader, out io.Writer) error {
+	sort.Slice(beans, func(i, j int) bool {
+		return strings.ToLower(beans[i].Title) < strings.ToLower(beans[j].Title)
+	})
+
+	program := tea.NewProgram(newPickModel(beans), tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
 	final, err := program.Run()
 	if err != nil {
 		return fmt.Errorf("beans pick: %w", err)
@@ -246,17 +260,17 @@ func parseScopeTypes(scope string) (map[string]bool, error) {
 	return types, nil
 }
 
-// roadmapScopeTypes returns the bean types occupying the three container
-// ranks (1-3) that roadmap.go's own validateRoadmapRootType/isContainerRank
-// already define as the roadmap command's root-type constraint. It reads
-// cfg.TypesAtRank -- the same mechanism isContainerRank reads via
-// cfg.RankOf -- rather than defining a type table of its own (AC4).
+// roadmapScopeTypes returns the bean types occupying the container ranks
+// that roadmap.go's own validateRoadmapRootType/isContainerRank already
+// define as the roadmap command's root-type constraint. It reads
+// roadmap.go's containerTypeNames -- the single, shared loop over
+// config.MaxContainerRank that isContainerRank and validateRoadmapRootType
+// also route through (beans-v2ox) -- rather than defining a type table, or
+// a second 1..MaxContainerRank loop, of its own (AC4).
 func roadmapScopeTypes() map[string]bool {
 	types := make(map[string]bool)
-	for rank := 1; rank <= 3; rank++ {
-		for _, name := range cfg.TypesAtRank(rank) {
-			types[name] = true
-		}
+	for _, name := range containerTypeNames() {
+		types[name] = true
 	}
 	return types
 }

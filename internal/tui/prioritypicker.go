@@ -85,7 +85,7 @@ type priorityPickerModel struct {
 
 func newPriorityPickerModel(beanIDs []string, beanTitle, currentPriority string, cfg *config.Config, width, height int) priorityPickerModel {
 	// Get all priorities
-	priorities := candidates.PriorityCandidates()
+	priorities := candidates.PriorityCandidates(cfg)
 
 	delegate := priorityItemDelegate{}
 

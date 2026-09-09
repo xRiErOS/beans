@@ -123,19 +123,24 @@ func sortByTypeThenTitle(beans []*bean.Bean, cfg *config.Config) {
 	})
 }
 
-// StatusCandidates returns the available bean statuses.
-func StatusCandidates() []config.StatusConfig {
-	return config.DefaultStatuses
+// StatusCandidates returns the available bean statuses, merged from cfg's
+// configured overrides onto the built-in defaults (*config.Config's
+// StatusList, beans-b2v8). A nil cfg is not an error: StatusList tolerates
+// it and falls back to the built-in defaults, so callers that have no
+// config in hand yet (e.g. a picker constructed before one loads) still
+// get a usable, if unconfigured, candidate list rather than a panic.
+func StatusCandidates(cfg *config.Config) []config.StatusConfig {
+	return cfg.StatusList()
 }
 
-// TypeCandidates returns the available bean types.
-func TypeCandidates() []config.TypeConfig {
-	return config.DefaultTypes
+// TypeCandidates is StatusCandidates' --type counterpart.
+func TypeCandidates(cfg *config.Config) []config.TypeConfig {
+	return cfg.TypeList()
 }
 
-// PriorityCandidates returns the available bean priorities.
-func PriorityCandidates() []config.PriorityConfig {
-	return config.DefaultPriorities
+// PriorityCandidates is StatusCandidates' --priority counterpart.
+func PriorityCandidates(cfg *config.Config) []config.PriorityConfig {
+	return cfg.PriorityList()
 }
 
 // TagCount holds a tag and its usage count across all beans.

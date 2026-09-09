@@ -128,39 +128,67 @@ func TestBlockingCandidates_ExcludesDescendants(t *testing.T) {
 	}
 }
 
-func TestStatusCandidates(t *testing.T) {
-	got := StatusCandidates()
-	if len(got) != len(config.DefaultStatuses) {
-		t.Fatalf("got %d statuses, want %d", len(got), len(config.DefaultStatuses))
-	}
-	for i, s := range config.DefaultStatuses {
-		if got[i].Name != s.Name {
-			t.Fatalf("status %d = %q, want %q", i, got[i].Name, s.Name)
+// TestStatusCandidates_ReflectsConfigOverride builds a *config.Config
+// carrying a status override the built-in defaults do not know about
+// (mirrors pkg/config/config_test.go's TestAnUnknownNameIsAppended
+// pattern) and asserts it surfaces through StatusCandidates. A
+// StatusCandidates that returned a hardcoded copy of config.DefaultStatuses
+// instead of delegating to cfg.StatusList() would pass a same-length,
+// same-names-as-defaults check but never see this override -- so the
+// assertion is specifically that the override is present, not merely that
+// the length matches the defaults.
+func TestStatusCandidates_ReflectsConfigOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.Statuses = []config.StatusOverride{{Name: "blocked", Color: "red"}}
+	got := StatusCandidates(cfg)
+	found := false
+	for _, s := range got {
+		if s.Name == "blocked" {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("StatusCandidates(cfg) = %v, want it to include the configured override %q", got, "blocked")
+	}
+	if len(got) != len(config.DefaultStatuses)+1 {
+		t.Errorf("StatusCandidates(cfg) has %d entries, want defaults plus the override", len(got))
 	}
 }
 
-func TestTypeCandidates(t *testing.T) {
-	got := TypeCandidates()
-	if len(got) != len(config.DefaultTypes) {
-		t.Fatalf("got %d types, want %d", len(got), len(config.DefaultTypes))
-	}
-	for i, ty := range config.DefaultTypes {
-		if got[i].Name != ty.Name {
-			t.Fatalf("type %d = %q, want %q", i, got[i].Name, ty.Name)
+// TestTypeCandidates_ReflectsConfigOverride is StatusCandidates_
+// ReflectsConfigOverride's --type counterpart.
+func TestTypeCandidates_ReflectsConfigOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.Types = []config.TypeOverride{{Name: "spike", Color: "red"}}
+	got := TypeCandidates(cfg)
+	found := false
+	for _, ty := range got {
+		if ty.Name == "spike" {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("TypeCandidates(cfg) = %v, want it to include the configured override %q", got, "spike")
+	}
+	if len(got) != len(config.DefaultTypes)+1 {
+		t.Errorf("TypeCandidates(cfg) has %d entries, want defaults plus the override", len(got))
 	}
 }
 
-func TestPriorityCandidates(t *testing.T) {
-	got := PriorityCandidates()
-	if len(got) != len(config.DefaultPriorities) {
-		t.Fatalf("got %d priorities, want %d", len(got), len(config.DefaultPriorities))
-	}
-	for i, p := range config.DefaultPriorities {
-		if got[i].Name != p.Name {
-			t.Fatalf("priority %d = %q, want %q", i, got[i].Name, p.Name)
+// TestPriorityCandidates_ReflectsConfigOverride is StatusCandidates_
+// ReflectsConfigOverride's --priority counterpart.
+func TestPriorityCandidates_ReflectsConfigOverride(t *testing.T) {
+	cfg := config.Default()
+	cfg.Priorities = []config.PriorityOverride{{Name: "critical", Color: "#ff00ff"}}
+	got := PriorityCandidates(cfg)
+	found := false
+	for _, p := range got {
+		if p.Name == "critical" && p.Color == "#ff00ff" {
+			found = true
 		}
+	}
+	if !found {
+		t.Errorf("PriorityCandidates(cfg) = %v, want it to include the configured override %q", got, "critical")
 	}
 }
 

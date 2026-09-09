@@ -251,7 +251,7 @@ func resolveAnchoredPath(c *config.Config) (string, error) {
 // exactly one artifact, while an error raised before a command reached the
 // output layer — a broken config, a missing store — still reaches the user.
 func reportExecutionError(cmd *cobra.Command, err error) {
-	if output.Emitted(err) {
+	if output.Emitted(err) || output.IsSilent(err) {
 		return
 	}
 	cmd.PrintErrln(cmd.ErrPrefix(), err.Error())
