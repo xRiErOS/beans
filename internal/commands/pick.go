@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -159,17 +160,26 @@ func runPick(cmd *cobra.Command, _ []string) error {
 		return errors.New("beans pick: stdin is not a terminal")
 	}
 
-	sort.Slice(beans, func(i, j int) bool {
-		return strings.ToLower(beans[i].Title) < strings.ToLower(beans[j].Title)
-	})
-
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
 		return fmt.Errorf("beans pick: opening controlling terminal: %w", err)
 	}
 	defer tty.Close()
 
-	program := tea.NewProgram(newPickModel(beans), tea.WithInput(tty), tea.WithOutput(tty), tea.WithAltScreen())
+	return runPickWith(cmd, beans, tty, tty)
+}
+
+// runPickWith is runPick's testable core: it drives the picker's
+// bubbletea program against the supplied input/output pair instead of
+// reaching for /dev/tty itself, so a test can inject in-memory pipes
+// (beans-gofn). runPick is the sole production caller and always points
+// both in and out at the same already-opened controlling terminal.
+func runPickWith(cmd *cobra.Command, beans []*bean.Bean, in io.Reader, out io.Writer) error {
+	sort.Slice(beans, func(i, j int) bool {
+		return strings.ToLower(beans[i].Title) < strings.ToLower(beans[j].Title)
+	})
+
+	program := tea.NewProgram(newPickModel(beans), tea.WithInput(in), tea.WithOutput(out), tea.WithAltScreen())
 	final, err := program.Run()
 	if err != nil {
 		return fmt.Errorf("beans pick: %w", err)
