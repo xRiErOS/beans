@@ -1,6 +1,8 @@
 package commands
 
 import (
+	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
@@ -166,5 +168,44 @@ func TestBootstrapSkipDoesNotMarkPick(t *testing.T) {
 	}
 	if IsBootstrapSkip(pick) {
 		t.Error("pick: bootstrap-skip=true, want false (pick requires a loaded store)")
+	}
+}
+
+// TestPersistentPreRunEOnlySkipsStoreForBootstrapSkipVerbs exercises
+// PersistentPreRunE itself (internal/commands/root.go:39-45), not just the
+// IsBootstrapSkip annotation read in isolation, over a directory with no
+// reachable store. A bootstrap-skip verb (version) must return with no
+// store-load error; a non-skip verb (list) must fail with the store-load
+// error resolveBeansPath produces. This is the observable difference a
+// mutation of root.go:43 back to `if false` or the old cmd.Name() literal
+// would erase without any of this file's other tests noticing, since they
+// only assert the annotation, never PersistentPreRunE's own behaviour.
+func TestPersistentPreRunEOnlySkipsStoreForBootstrapSkipVerbs(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("BEANS_PATH", "")
+
+	root := sharedTestRoot(t)
+
+	resetFlags(root)
+	var outBuf, errBuf bytes.Buffer
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetArgs([]string{"version"})
+	if _, err := root.ExecuteC(); err != nil {
+		t.Errorf("version: got error %v over a storeless directory, want nil (bootstrap-skip)", err)
+	}
+
+	resetFlags(root)
+	outBuf.Reset()
+	errBuf.Reset()
+	root.SetOut(&outBuf)
+	root.SetErr(&errBuf)
+	root.SetArgs([]string{"list"})
+	_, err := root.ExecuteC()
+	if err == nil {
+		t.Fatal("list: got nil error over a storeless directory, want the store-load error")
+	}
+	if !strings.Contains(err.Error(), "no .beans directory found") {
+		t.Errorf("list: error %q does not report the missing store", err.Error())
 	}
 }
