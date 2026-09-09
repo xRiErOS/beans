@@ -647,7 +647,7 @@ func TestTableCarriesEveryFrontMatterField(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Body text.\n")
 
-	out := renderBeanTable(b, cfg, 110)
+	out := renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 
 	for _, want := range []string{
 		"title:", "id:", "type:", "status:", "priority:", "tags:",
@@ -722,7 +722,7 @@ func TestTablePairsShareOneRow(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Body.\n")
 
-	out := renderBeanTable(b, cfg, 110)
+	out := renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 	for _, want := range []struct{ label, mate string }{
 		{"type:", "status:"},
 		{"type:", "priority:"},
@@ -770,7 +770,7 @@ func TestTableRasterIsIdenticalAcrossBeans(t *testing.T) {
 		return boundaries
 	}
 
-	gotNarrow, gotWide := geometry(renderBeanTable(narrow, cfg, 110)), geometry(renderBeanTable(wide, cfg, 110))
+	gotNarrow, gotWide := geometry(renderBeanTable(narrow, cfg, 110, beanTableLabelWidth([]*bean.Bean{narrow}, cfg))), geometry(renderBeanTable(wide, cfg, 110, beanTableLabelWidth([]*bean.Bean{wide}, cfg)))
 	if len(gotNarrow) == 0 || len(gotWide) == 0 {
 		t.Fatalf("no bordered rows rendered")
 	}
@@ -791,7 +791,7 @@ func TestTableWrapsLongValuesInsideTheColumn(t *testing.T) {
 	b := showFullBean("Body.\n")
 	b.Extra = map[string]any{"goal": strings.Repeat("Lorem ipsum dolor sit amet. ", 12)}
 
-	out := renderBeanTable(b, cfg, 72)
+	out := renderBeanTable(b, cfg, 72, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 
 	var rows int
 	for _, line := range strings.Split(out, "\n") {
@@ -829,7 +829,7 @@ func TestTableMaxWidthCapsTheGrid(t *testing.T) {
 	b := showFullBean("Body.\n")
 
 	for _, width := range []int{40, 60, 100} {
-		out := renderBeanTable(b, cfg, width)
+		out := renderBeanTable(b, cfg, width, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 		for _, line := range strings.Split(out, "\n") {
 			if !strings.Contains(line, "│") {
 				continue
@@ -899,7 +899,7 @@ func TestTableWithoutMetaKeepsTheBody(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Body text that is unmistakable.\n")
 
-	out, err := showOutputTable(b, false, 110)
+	out, err := showOutputTable(b, false, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 	if err != nil {
 		t.Fatalf("showOutputTable() error = %v", err)
 	}
@@ -932,7 +932,7 @@ func TestTableRelationsNameTypeAndTitle(t *testing.T) {
 	b.Parent = parent.ID
 	b.BlockedBy = []string{"beans-gone1"}
 
-	out := renderBeanTable(b, cfg, 110)
+	out := renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 	if !strings.Contains(out, "The parent epic") {
 		t.Errorf("parent row does not name the title:\n%s", out)
 	}
@@ -1123,7 +1123,7 @@ func TestBandIDWidthFollowsTheConfiguredPrefix(t *testing.T) {
 
 		b := showFullBean("Body.\n")
 		b.ID = tc.prefix + strings.Repeat("z", tc.idLength)
-		band := stripANSI(strings.Split(renderBeanTable(b, cfg, 110), "\n")[1])
+		band := stripANSI(strings.Split(renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg)), "\n")[1])
 		cfg.Beans = old
 
 		// "│ " + "id: " + <id cell> + "    " + "type:"
@@ -1144,7 +1144,7 @@ func TestBandIDWidthFollowsTheConfiguredPrefix(t *testing.T) {
 	b1, b2 := showFullBean("x\n"), showFullBean("y\n")
 	b1.ID, b2.ID = "beans-aaaa", "beans-b"
 	col := func(b *bean.Bean) int {
-		return strings.Index(stripANSI(strings.Split(renderBeanTable(b, cfg, 110), "\n")[1]), "type:")
+		return strings.Index(stripANSI(strings.Split(renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg)), "\n")[1]), "type:")
 	}
 	if col(b1) != col(b2) {
 		t.Errorf("type: moves between beans of one store: %d vs %d", col(b1), col(b2))
@@ -1192,7 +1192,7 @@ func TestTableRulesConnectTheColumn(t *testing.T) {
 	setupShowTest(t)
 	b := showFullBean("Body.\n")
 
-	lines := strings.Split(strings.TrimRight(renderBeanTable(b, cfg, 110), "\n"), "\n")
+	lines := strings.Split(strings.TrimRight(renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg)), "\n"), "\n")
 	if len(lines) < 5 {
 		t.Fatalf("grid too small to have interior rules:\n%s", strings.Join(lines, "\n"))
 	}
@@ -1303,7 +1303,7 @@ func TestTableStaysAlignedWithColour(t *testing.T) {
 	// carry keys like customer_value.
 	b.Extra["customer_value"] = "Recognisable without relying on colour."
 
-	out := renderBeanTable(b, cfg, 100)
+	out := renderBeanTable(b, cfg, 100, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 	if !strings.Contains(out, "\x1b[") {
 		t.Fatalf("no colour in output, so the test proves nothing")
 	}
@@ -1359,7 +1359,7 @@ func TestTableBoldTitleClosesOnEveryLine(t *testing.T) {
 
 	// The width has to force the title to wrap: on one line lipgloss's own
 	// reset lands before the border and the defect cannot appear.
-	rendered := renderBeanTable(b, cfg, 80)
+	rendered := renderBeanTable(b, cfg, 80, beanTableLabelWidth([]*bean.Bean{b}, cfg))
 	if !strings.Contains(rendered, "visible") || len(strings.Split(rendered, "\n")) < 6 {
 		t.Fatalf("title did not wrap, so the test proves nothing:\n%s", stripANSI(rendered))
 	}
@@ -1395,6 +1395,111 @@ func TestTableBoldTitleClosesOnEveryLine(t *testing.T) {
 			default:
 				i++
 			}
+		}
+	}
+}
+
+// TestTableSharesTheLabelColumnAcrossBeans is the promise the view exists
+// for, applied to the case that actually breaks it: several ids in one call.
+// The label column was sized per bean, so a bean carrying customer_value got
+// a 16-cell column and its neighbour an 11-cell one -- rendered one after
+// the other, the grids stepped and a reader could not follow a column down
+// the page, which is the whole reason for a grid over the flowing header.
+func TestTableSharesTheLabelColumnAcrossBeans(t *testing.T) {
+	setupShowTest(t)
+
+	rich := showFullBean("Body.\n")
+	rich.ID = "beans-rich1"
+	rich.Extra = map[string]any{"customer_value": "A sentence."}
+
+	plain := &bean.Bean{ID: "beans-plai1", Title: "Plain", Status: "todo", Type: "task"}
+
+	labelWidth := beanTableLabelWidth([]*bean.Bean{rich, plain}, cfg)
+	boundary := func(b *bean.Bean) int {
+		for _, line := range strings.Split(renderBeanTable(b, cfg, 100, labelWidth), "\n") {
+			if !tableIsFieldRow(line) {
+				continue
+			}
+			runes := []rune(stripANSI(line))
+			for i := 1; i < len(runes)-1; i++ {
+				if runes[i] == '│' {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+
+	got, want := boundary(plain), boundary(rich)
+	if want < 1 {
+		t.Fatalf("no field row in the rich bean")
+	}
+	if got != want {
+		t.Errorf("label column is %d cells for the plain bean and %d for the rich one; "+
+			"beans shown in one call do not line up", got, want)
+	}
+	if want < len("customer_value:") {
+		t.Errorf("shared column %d is narrower than the widest label", want)
+	}
+}
+
+// TestTableCommandSharesTheColumnAcrossIDs covers the dispatch rather than
+// the renderer: `beans show <a> <b> --table` is the call that exposed the
+// stepping grids, and a renderer that accepts a shared width proves nothing
+// if RunE does not compute one. Test stdout is a pipe, so this also
+// exercises --table's forcing path.
+func TestTableCommandSharesTheColumnAcrossIDs(t *testing.T) {
+	setupShowTest(t)
+
+	rich := &bean.Bean{
+		ID: "beans-rich2", Slug: "rich", Title: "Rich", Status: "todo", Type: "task",
+		Extra: map[string]any{"customer_value": "A sentence."},
+	}
+	plain := &bean.Bean{ID: "beans-plai2", Slug: "plain", Title: "Plain", Status: "todo", Type: "task"}
+	for _, b := range []*bean.Bean{rich, plain} {
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create() error = %v", err)
+		}
+	}
+
+	oldTable, oldMeta := showTable, showMeta
+	showTable, showMeta = true, true
+	t.Cleanup(func() { showTable, showMeta = oldTable, oldMeta })
+
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() error = %v", err)
+	}
+	oldStdout := os.Stdout
+	os.Stdout = w
+	runErr := showCmd.RunE(showCmd, []string{rich.ID, plain.ID})
+	os.Stdout = oldStdout
+	w.Close()
+	captured, _ := io.ReadAll(r)
+	if runErr != nil {
+		t.Fatalf("showCmd.RunE() error = %v", runErr)
+	}
+
+	var boundaries []int
+	for _, line := range strings.Split(string(captured), "\n") {
+		if !tableIsFieldRow(line) {
+			continue
+		}
+		runes := []rune(stripANSI(line))
+		for i := 1; i < len(runes)-1; i++ {
+			if runes[i] == '│' {
+				boundaries = append(boundaries, i)
+				break
+			}
+		}
+	}
+	if len(boundaries) < 2 {
+		t.Fatalf("expected field rows from both beans:\n%s", captured)
+	}
+	for _, got := range boundaries {
+		if got != boundaries[0] {
+			t.Errorf("column boundaries differ across the two grids: %v\n%s", boundaries, captured)
+			break
 		}
 	}
 }

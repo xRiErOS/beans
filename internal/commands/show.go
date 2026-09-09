@@ -115,11 +115,12 @@ the styled header on a terminal, the source YAML block off one.`,
 		// raw markdown on a terminal: an explicit arrangement flag outranks
 		// the representation stdout would otherwise pick.
 		if showTable {
+			labelWidth := beanTableLabelWidth(beans, cfg)
 			for i, b := range beans {
 				if i > 0 {
 					fmt.Println()
 				}
-				out, err := showOutputTable(b, showMeta, width)
+				out, err := showOutputTable(b, showMeta, width, labelWidth)
 				if err != nil {
 					return err
 				}
@@ -202,9 +203,9 @@ func showOutputAll(beans []*bean.Bean, isTTY, metaOnly bool, width int) (string,
 // beans list -- one width policy for the whole CLI rather than a second one
 // here. Taking it as a parameter also keeps this function out of showCmd's
 // initialisation cycle, which a flag lookup from here would create.
-func showOutputTable(b *bean.Bean, metaOnly bool, width int) (string, error) {
+func showOutputTable(b *bean.Bean, metaOnly bool, width, labelWidth int) (string, error) {
 	var sb strings.Builder
-	sb.WriteString(renderBeanTable(b, cfg, width))
+	sb.WriteString(renderBeanTable(b, cfg, width, labelWidth))
 	if metaOnly {
 		return sb.String(), nil
 	}
