@@ -3,6 +3,7 @@ package beancore
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"hash/fnv"
 	"os"
 	"path/filepath"
@@ -95,6 +96,7 @@ func pruneOrphanIndexDirs(indexRoot string) error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -110,9 +112,10 @@ func pruneOrphanIndexDirs(indexRoot string) error {
 		}
 		if _, statErr := os.Stat(root); os.IsNotExist(statErr) {
 			if err := os.RemoveAll(siblingDir); err != nil {
-				return err
+				errs = append(errs, err)
+				continue
 			}
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
