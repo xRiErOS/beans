@@ -852,6 +852,49 @@ func TestFlagCompletionOffersRealCandidates(t *testing.T) {
 			t.Errorf("completion output = %q, want it to contain the other bean %q", out, "blockflag-b")
 		}
 	})
+
+	t.Run("next --type", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "nexttypeflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "next", "--type", ""})
+		if err != nil {
+			t.Fatalf("__complete next --type \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"milestone", "epic", "feature", "bug", "task"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to contain configured type %q", out, want)
+			}
+		}
+	})
+
+	t.Run("next --tag", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeTaggedFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "next", "--tag", ""})
+		if err != nil {
+			t.Fatalf("__complete next --tag \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "urgent") {
+			t.Errorf("completion output = %q, want it to contain the in-use tag %q", out, "urgent")
+		}
+	})
+
+	t.Run("next --parent", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeParentFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "next", "--parent", ""})
+		if err != nil {
+			t.Fatalf("__complete next --parent \"\": %v\nstdout: %s", err, out)
+		}
+		// next --parent mirrors list --parent's filter-by-existing-ID
+		// semantics (next.go:29), so the child itself must also appear --
+		// candidates.ParentCandidates for parentflag-child would have
+		// excluded it as a cycle risk (mirrors the "list --parent" sub-test
+		// above).
+		if !strings.Contains(out, "parentflag-child") {
+			t.Errorf("completion output = %q, want next --parent to offer any bean ID including %q", out, "parentflag-child")
+		}
+	})
 }
 
 // writeTaggedFixtureStore creates a store with one bean carrying the tag

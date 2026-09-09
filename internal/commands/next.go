@@ -104,5 +104,13 @@ func RegisterNextCmd(root *cobra.Command) {
 	nextCmd.Flags().StringVar(&nextSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent, so pair it with --parent) (default: status, priority, type, title)")
 	nextCmd.Flags().BoolVar(&nextDesc, "desc", false, "Reverse the sort order")
 	nextCmd.Flags().BoolVar(&nextJSON, "json", false, "Output as JSON")
+	// next's doc comment (:29) states --type/--tag/--parent "mean the same
+	// as in `beans list`" -- --parent is therefore list's single-value
+	// filter-by-existing-ID semantics (listParentFlagCompletion,
+	// beanIDCandidates), not update's type-eligible-new-parent chooser
+	// (candidates.ParentCandidates) -- beans-pkq3 Auflage 1.
+	_ = nextCmd.RegisterFlagCompletionFunc("type", typeFlagCompletion)
+	_ = nextCmd.RegisterFlagCompletionFunc("tag", tagFlagCompletion)
+	_ = nextCmd.RegisterFlagCompletionFunc("parent", listParentFlagCompletion)
 	root.AddCommand(nextCmd)
 }
