@@ -777,6 +777,30 @@ func TestFlagCompletionOffersRealCandidates(t *testing.T) {
 		}
 	})
 
+	t.Run("roadmap --status", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "roadmapstatusflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "roadmap", "--status", ""})
+		if err != nil {
+			t.Fatalf("__complete roadmap --status \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "in-progress") {
+			t.Errorf("completion output = %q, want it to contain configured status %q", out, "in-progress")
+		}
+	})
+
+	t.Run("roadmap --no-status", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "roadmapnostatusflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "roadmap", "--no-status", ""})
+		if err != nil {
+			t.Fatalf("__complete roadmap --no-status \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "completed") {
+			t.Errorf("completion output = %q, want it to contain configured status %q", out, "completed")
+		}
+	})
+
 	t.Run("update --tag", func(t *testing.T) {
 		storeDir := t.TempDir()
 		writeTaggedFixtureStore(t, filepath.Join(storeDir, ".beans"))
