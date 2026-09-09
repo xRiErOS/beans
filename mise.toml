@@ -30,8 +30,12 @@ sources = ["frontend/package.json", "frontend/pnpm-lock.yaml"]
 [tasks.codegen]
 run = ["go generate ./...", "cd frontend && pnpm codegen"]
 
+[tasks."test:zsh"]
+description = "Assert the zsh pick widget mutates LBUFFER and forwards context"
+run = "bash scripts/test-zsh-widget.sh"
+
 [tasks.test]
-depends = ["codegen", "test:e2e"]
+depends = ["codegen", "test:e2e", "test:zsh"]
 run = "go test -count=1 ./..."
 
 [tasks."build:frontend"]
