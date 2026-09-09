@@ -392,8 +392,8 @@ func TestCompletionUnboundedNeverStops(t *testing.T) {
 		}
 		// beans-sfle AC-01: the directive must also request KeepOrder so
 		// the shell preserves beanIDCandidates' actionable-first ordering.
-		if directive != completionDirective {
-			t.Errorf("argc=%d: directive = %v, want %v", argc, directive, completionDirective)
+		if directive != (cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder) {
+			t.Errorf("argc=%d: directive = %v, want %v", argc, directive, cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder)
 		}
 	}
 }
@@ -430,8 +430,8 @@ func TestCompletionUpToStopsAtBoundary(t *testing.T) {
 			}
 			// beans-sfle AC-01: KeepOrder must survive both the
 			// candidate-producing and the exhausted-position branch.
-			if directive != completionDirective {
-				t.Errorf("n=%d argc=%d: directive = %v, want %v", n, tc.argc, directive, completionDirective)
+			if directive != (cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder) {
+				t.Errorf("n=%d argc=%d: directive = %v, want %v", n, tc.argc, directive, cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder)
 			}
 		}
 	}
@@ -724,5 +724,234 @@ func TestOnlyPromoteFallsToDefaultDirective(t *testing.T) {
 	want := []string{"promote"}
 	if !reflect.DeepEqual(defaulted, want) {
 		t.Fatalf("verbs falling to ShellCompDirectiveDefault = %v, want exactly %v", defaulted, want)
+	}
+}
+
+// beans-pkq3 AC-05/AC-06/AC-07/SC-02: seven enum-valued flags across
+// create/update/list/tag must each answer __complete with real candidates
+// instead of falling to ShellCompDirectiveDefault's empty ":0". Each sub-test
+// below drives the compiled binary's __complete path for exactly one flag on
+// one verb that declares it (SC-02's "at least one verb" bar), against a
+// fixture store built once per sub-test so relationships (tag/parent/
+// blocking/blocked-by) are unambiguous.
+func TestFlagCompletionOffersRealCandidates(t *testing.T) {
+	t.Run("update --status", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "statusflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "statusflag-only", "--status", ""})
+		if err != nil {
+			t.Fatalf("__complete update --status \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"todo", "in-progress", "draft", "completed", "scrapped"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to contain configured status %q", out, want)
+			}
+		}
+	})
+
+	t.Run("update --type", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "typeflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "typeflag-only", "--type", ""})
+		if err != nil {
+			t.Fatalf("__complete update --type \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"milestone", "epic", "feature", "bug", "task"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to contain configured type %q", out, want)
+			}
+		}
+	})
+
+	t.Run("update --priority", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "priorityflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "priorityflag-only", "--priority", ""})
+		if err != nil {
+			t.Fatalf("__complete update --priority \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"critical", "high", "normal", "low", "deferred"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to contain configured priority %q", out, want)
+			}
+		}
+	})
+
+	t.Run("update --tag", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeTaggedFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "tagged-one", "--tag", ""})
+		if err != nil {
+			t.Fatalf("__complete update --tag \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "urgent") {
+			t.Errorf("completion output = %q, want it to contain the in-use tag %q", out, "urgent")
+		}
+	})
+
+	t.Run("tag --tag", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeTaggedFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "tag", "tagged-one", "--tag", ""})
+		if err != nil {
+			t.Fatalf("__complete tag --tag \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "urgent") {
+			t.Errorf("completion output = %q, want it to contain the in-use tag %q", out, "urgent")
+		}
+	})
+
+	t.Run("update --parent", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeParentFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "parentflag-child", "--parent", ""})
+		if err != nil {
+			t.Fatalf("__complete update --parent \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "parentflag-epic") {
+			t.Errorf("completion output = %q, want it to contain the eligible parent %q", out, "parentflag-epic")
+		}
+	})
+
+	t.Run("list --parent", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeParentFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "list", "--parent", ""})
+		if err != nil {
+			t.Fatalf("__complete list --parent \"\": %v\nstdout: %s", err, out)
+		}
+		// list --parent is a single-value filter over ANY existing bean ID
+		// (beanIDCandidates), not ParentCandidates' type-eligible set -- the
+		// child itself must also appear, which candidates.ParentCandidates
+		// for parentflag-child would have excluded as a cycle risk.
+		if !strings.Contains(out, "parentflag-child") {
+			t.Errorf("completion output = %q, want list --parent to offer any bean ID including %q (not the type-filtered ParentCandidates set)", out, "parentflag-child")
+		}
+	})
+
+	t.Run("update --blocked-by", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeBlockingFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "blockflag-a", "--blocked-by", ""})
+		if err != nil {
+			t.Fatalf("__complete update --blocked-by \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "blockflag-b") {
+			t.Errorf("completion output = %q, want it to contain the other bean %q", out, "blockflag-b")
+		}
+	})
+
+	t.Run("update --blocking", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeBlockingFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "update", "blockflag-a", "--blocking", ""})
+		if err != nil {
+			t.Fatalf("__complete update --blocking \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "blockflag-b") {
+			t.Errorf("completion output = %q, want it to contain the other bean %q", out, "blockflag-b")
+		}
+	})
+
+	t.Run("next --type", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeFixtureStore(t, filepath.Join(storeDir, ".beans"), "nexttypeflag")
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "next", "--type", ""})
+		if err != nil {
+			t.Fatalf("__complete next --type \"\": %v\nstdout: %s", err, out)
+		}
+		for _, want := range []string{"milestone", "epic", "feature", "bug", "task"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("completion output = %q, want it to contain configured type %q", out, want)
+			}
+		}
+	})
+
+	t.Run("next --tag", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeTaggedFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "next", "--tag", ""})
+		if err != nil {
+			t.Fatalf("__complete next --tag \"\": %v\nstdout: %s", err, out)
+		}
+		if !strings.Contains(out, "urgent") {
+			t.Errorf("completion output = %q, want it to contain the in-use tag %q", out, "urgent")
+		}
+	})
+
+	t.Run("next --parent", func(t *testing.T) {
+		storeDir := t.TempDir()
+		writeParentFixtureStore(t, filepath.Join(storeDir, ".beans"))
+		out, err := runBeansCompletion(t, storeDir, nil, []string{"__complete", "next", "--parent", ""})
+		if err != nil {
+			t.Fatalf("__complete next --parent \"\": %v\nstdout: %s", err, out)
+		}
+		// next --parent mirrors list --parent's filter-by-existing-ID
+		// semantics (next.go:29), so the child itself must also appear --
+		// candidates.ParentCandidates for parentflag-child would have
+		// excluded it as a cycle risk (mirrors the "list --parent" sub-test
+		// above).
+		if !strings.Contains(out, "parentflag-child") {
+			t.Errorf("completion output = %q, want next --parent to offer any bean ID including %q", out, "parentflag-child")
+		}
+	})
+}
+
+// writeTaggedFixtureStore creates a store with one bean carrying the tag
+// "urgent", for --tag completion (candidates.TagCandidates, beans-v725).
+func writeTaggedFixtureStore(t *testing.T, beansDir string) {
+	t.Helper()
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating fixture store dir: %v", err)
+	}
+	c := beancore.New(beansDir, config.Default())
+	if err := c.Load(); err != nil {
+		t.Fatalf("loading fixture core: %v", err)
+	}
+	b := &bean.Bean{ID: "tagged-one", Slug: "fixture", Title: "Tagged fixture", Status: "todo", Type: "task", Tags: []string{"urgent"}}
+	if err := c.Create(b); err != nil {
+		t.Fatalf("creating fixture bean: %v", err)
+	}
+}
+
+// writeParentFixtureStore creates an epic (valid parent type for task) and
+// a task, for --parent completion (candidates.ParentCandidates, beans-v725).
+func writeParentFixtureStore(t *testing.T, beansDir string) {
+	t.Helper()
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating fixture store dir: %v", err)
+	}
+	c := beancore.New(beansDir, config.Default())
+	if err := c.Load(); err != nil {
+		t.Fatalf("loading fixture core: %v", err)
+	}
+	epic := &bean.Bean{ID: "parentflag-epic", Slug: "fixture", Title: "Parent fixture epic", Status: "todo", Type: "epic"}
+	if err := c.Create(epic); err != nil {
+		t.Fatalf("creating fixture epic: %v", err)
+	}
+	child := &bean.Bean{ID: "parentflag-child", Slug: "fixture", Title: "Parent fixture child", Status: "todo", Type: "task"}
+	if err := c.Create(child); err != nil {
+		t.Fatalf("creating fixture child: %v", err)
+	}
+}
+
+// writeBlockingFixtureStore creates two unrelated beans, for --blocked-by
+// and --blocking completion (candidates.BlockingCandidates, beans-v725).
+func writeBlockingFixtureStore(t *testing.T, beansDir string) {
+	t.Helper()
+	if err := os.MkdirAll(beansDir, 0755); err != nil {
+		t.Fatalf("creating fixture store dir: %v", err)
+	}
+	c := beancore.New(beansDir, config.Default())
+	if err := c.Load(); err != nil {
+		t.Fatalf("loading fixture core: %v", err)
+	}
+	a := &bean.Bean{ID: "blockflag-a", Slug: "fixture", Title: "Blocking fixture A", Status: "todo", Type: "task"}
+	if err := c.Create(a); err != nil {
+		t.Fatalf("creating fixture bean a: %v", err)
+	}
+	b := &bean.Bean{ID: "blockflag-b", Slug: "fixture", Title: "Blocking fixture B", Status: "todo", Type: "task"}
+	if err := c.Create(b); err != nil {
+		t.Fatalf("creating fixture bean b: %v", err)
 	}
 }

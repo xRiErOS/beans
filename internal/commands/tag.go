@@ -69,5 +69,6 @@ func RegisterTagCmd(root *cobra.Command) {
 	tagCmd.Flags().StringArrayVar(&tagRemove, "remove-tag", nil, "Remove tag (can be repeated)")
 	tagCmd.Flags().BoolVar(&tagJSON, "json", false, "Output as JSON")
 	tagCmd.ValidArgsFunction = completionUnbounded
+	_ = tagCmd.RegisterFlagCompletionFunc("tag", tagFlagCompletion)
 	root.AddCommand(tagCmd)
 }

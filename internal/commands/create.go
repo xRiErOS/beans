@@ -11,7 +11,7 @@ import (
 	"github.com/xRiErOS/beans/pkg/beancore"
 	"github.com/xRiErOS/beans/pkg/beangraph"
 	"github.com/xRiErOS/beans/pkg/beangraph/model"
-	"github.com/xRiErOS/beans/pkg/config"
+	"github.com/xRiErOS/beans/pkg/candidates"
 	"github.com/spf13/cobra"
 	"github.com/spf13/pflag"
 )
@@ -163,19 +163,12 @@ var createCmd = &cobra.Command{
 }
 
 func RegisterCreateCmd(root *cobra.Command) {
-	// Build help text with allowed values from hardcoded config
-	statusNames := make([]string, len(config.DefaultStatuses))
-	for i, s := range config.DefaultStatuses {
-		statusNames[i] = s.Name
-	}
-	typeNames := make([]string, len(config.DefaultTypes))
-	for i, t := range config.DefaultTypes {
-		typeNames[i] = t.Name
-	}
-	priorityNames := make([]string, len(config.DefaultPriorities))
-	for i, p := range config.DefaultPriorities {
-		priorityNames[i] = p.Name
-	}
+	// Help text sources its allowed values from cfg's canonical accessors --
+	// see RegisterUpdateCmd's identical comment (update.go) for why cfg may
+	// be nil here and why that is safe (beans-pkq3 AC-02/AC-08, SC-01).
+	statusNames := cfg.StatusNames()
+	typeNames := cfg.TypeNames()
+	priorityNames := cfg.PriorityNames()
 
 	createCmd.Flags().StringVarP(&createStatus, "status", "s", "", "Initial status ("+strings.Join(statusNames, ", ")+")")
 	createCmd.Flags().StringVarP(&createType, "type", "t", "", "Bean type ("+strings.Join(typeNames, ", ")+")")
@@ -193,11 +186,45 @@ func RegisterCreateCmd(root *cobra.Command) {
 	createCmd.Flags().BoolVar(&createJSON, "json", false, "Output as JSON")
 	createCmd.MarkFlagsMutuallyExclusive("body", "body-file")
 	createCmd.ValidArgsFunction = createValidArgs
+	_ = createCmd.RegisterFlagCompletionFunc("status", statusFlagCompletion)
+	_ = createCmd.RegisterFlagCompletionFunc("type", typeFlagCompletion)
+	_ = createCmd.RegisterFlagCompletionFunc("priority", priorityFlagCompletion)
+	_ = createCmd.RegisterFlagCompletionFunc("tag", tagFlagCompletion)
+	_ = createCmd.RegisterFlagCompletionFunc("parent", createParentFlagCompletion)
+	_ = createCmd.RegisterFlagCompletionFunc("blocked-by", createBlockingLikeFlagCompletion)
+	_ = createCmd.RegisterFlagCompletionFunc("blocking", createBlockingLikeFlagCompletion)
 	createFlagNames = nil
 	createCmd.Flags().VisitAll(func(f *pflag.Flag) {
 		createFlagNames = append(createFlagNames, "--"+f.Name)
 	})
 	root.AddCommand(createCmd)
+}
+
+// createParentFlagCompletion offers create --parent candidates: beans whose
+// type is a valid parent for the type the new bean will have (--type if
+// already given, else cfg's configured default -- beancore.ValidParentTypes
+// via candidates.ParentCandidates, beans-v725). The bean being created has
+// no ID yet, so there is no self/descendant exclusion (beanIDs is nil,
+// unlike updateParentFlagCompletion in update.go) -- beans-pkq3 AC-04.
+func createParentFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	beanType := createType
+	if beanType == "" {
+		beanType = cfg.GetDefaultType()
+	}
+	resolver := &beangraph.CoreResolver{Core: core}
+	eligible, err := candidates.ParentCandidates(context.Background(), resolver, cfg, nil, []string{beanType})
+	if err != nil {
+		return nil, completionDirective
+	}
+	return beanFlagCandidates(eligible), completionDirective
+}
+
+// createBlockingLikeFlagCompletion serves create's --blocked-by and
+// --blocking: every bean in the store (candidates.BlockingCandidates,
+// beans-v725), since the bean being created has no ID yet to exclude --
+// beans-pkq3 AC-04.
+func createBlockingLikeFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+	return blockingLikeFlagCompletion(nil)
 }
 
 // createFlagNames holds the names of create's own registered flags,
