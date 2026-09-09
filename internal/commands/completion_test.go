@@ -392,8 +392,8 @@ func TestCompletionUnboundedNeverStops(t *testing.T) {
 		}
 		// beans-sfle AC-01: the directive must also request KeepOrder so
 		// the shell preserves beanIDCandidates' actionable-first ordering.
-		if directive != completionDirective {
-			t.Errorf("argc=%d: directive = %v, want %v", argc, directive, completionDirective)
+		if directive != (cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder) {
+			t.Errorf("argc=%d: directive = %v, want %v", argc, directive, cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder)
 		}
 	}
 }
@@ -430,8 +430,8 @@ func TestCompletionUpToStopsAtBoundary(t *testing.T) {
 			}
 			// beans-sfle AC-01: KeepOrder must survive both the
 			// candidate-producing and the exhausted-position branch.
-			if directive != completionDirective {
-				t.Errorf("n=%d argc=%d: directive = %v, want %v", n, tc.argc, directive, completionDirective)
+			if directive != (cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder) {
+				t.Errorf("n=%d argc=%d: directive = %v, want %v", n, tc.argc, directive, cobra.ShellCompDirectiveNoFileComp|cobra.ShellCompDirectiveKeepOrder)
 			}
 		}
 	}
