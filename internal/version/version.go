@@ -7,6 +7,14 @@ var (
 	Version = "dev"
 	Commit  = "unknown"
 	Date    = "unknown"
+
+	// Tree is the absolute path of the git worktree this binary was built
+	// from. Set only by `mise run build` (local/dev builds); left empty by
+	// .goreleaser.yaml so a published release binary never carries a host
+	// path (rule 4). TreeKind is "main" or "worktree" and is set alongside
+	// it (beans-yl2q).
+	Tree     = ""
+	TreeKind = ""
 )
 
 // CustomFrontMatter reports whether this binary preserves unknown ("custom")
@@ -22,6 +30,8 @@ type Info struct {
 	Commit            string `json:"commit"`
 	Date              string `json:"date"`
 	CustomFrontMatter bool   `json:"custom_front_matter"`
+	Tree              string `json:"tree,omitempty"`
+	TreeKind          string `json:"tree_kind,omitempty"`
 }
 
 // JSON returns the version information as a struct ready for JSON encoding.
@@ -31,15 +41,26 @@ func JSON() Info {
 		Commit:            Commit,
 		Date:              Date,
 		CustomFrontMatter: CustomFrontMatter,
+		Tree:              Tree,
+		TreeKind:          TreeKind,
 	}
 }
 
 // String returns a formatted version string, including whether the binary
-// preserves custom front matter keys.
+// preserves custom front matter keys and, for local builds, which tree it
+// was built from.
 func String() string {
 	status := "not preserved"
 	if CustomFrontMatter {
 		status = "preserved"
 	}
-	return fmt.Sprintf("beans %s (%s) built %s\ncustom front matter: %s", Version, Commit, Date, status)
+	s := fmt.Sprintf("beans %s (%s) built %s\ncustom front matter: %s", Version, Commit, Date, status)
+	if Tree != "" {
+		kind := TreeKind
+		if kind == "" {
+			kind = "unknown"
+		}
+		s += fmt.Sprintf("\ntree: %s (%s)", Tree, kind)
+	}
+	return s
 }
