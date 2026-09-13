@@ -84,6 +84,34 @@ func TestJustfileTestRaceRecipeHasCountFlag(t *testing.T) {
 	requireCountBeforeArgs(t, recipeBody(t, justfile, "test-race"))
 }
 
+// TestJustfileInstallRecipeCallsGuard bewacht beans-nm1j: `just install`
+// muss vor dem eigentlichen `install`-Aufruf scripts/install-guard.sh
+// laufen lassen. Ein spaeterer Edit, der den Aufruf verliert, wuerde den
+// Ort-Guard still abschalten -- genau der Fehler, den beans-kjf3 vermeiden
+// soll.
+func TestJustfileInstallRecipeCallsGuard(t *testing.T) {
+	justfile := read(t, repoRoot(t)+"/justfile")
+	body := recipeBody(t, justfile, "install")
+	if !strings.Contains(body, "scripts/install-guard.sh") {
+		t.Errorf("expected install recipe to call scripts/install-guard.sh, got:\n%s", body)
+	}
+}
+
+// TestJustfileInstallWipRecipeNeverWritesPlainNames bewacht beans-nji1:
+// `install-wip` darf keines der drei regulaeren Binaries (beans,
+// beans-serve, beans-tui) unter ihrem Klarnamen schreiben -- sonst wuerde
+// ein Wegwerf-/Container-Build genau das systemweite Binary ersetzen, das
+// der Ort-Guard in `install` schuetzt.
+func TestJustfileInstallWipRecipeNeverWritesPlainNames(t *testing.T) {
+	justfile := read(t, repoRoot(t)+"/justfile")
+	body := recipeBody(t, justfile, "install-wip")
+	for _, plain := range []string{`"{{bin_dir}}/beans"`, `"{{bin_dir}}/beans-serve"`, `"{{bin_dir}}/beans-tui"`} {
+		if strings.Contains(body, plain) {
+			t.Errorf("install-wip must never target %s, got:\n%s", plain, body)
+		}
+	}
+}
+
 func read(t *testing.T, path string) string {
 	t.Helper()
 	out, err := os.ReadFile(path)
