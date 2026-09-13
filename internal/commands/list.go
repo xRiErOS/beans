@@ -138,7 +138,7 @@ Search Syntax (--search/-S):
 		// --ready: beans available to start (not blocked, excludes in-progress/completed/scrapped/draft,
 		// and excludes beans with implicit terminal status from a scrapped/completed ancestor)
 		if listReady {
-			applyReadyFilter(filter)
+			applyReadyFilter(filter, cfg)
 		}
 
 		// Execute query via core resolver
@@ -225,16 +225,25 @@ Search Syntax (--search/-S):
 }
 
 // applyReadyFilter mutates filter in place to express "--ready": not
-// blocked, excludes in-progress/completed/scrapped/draft, and excludes
-// beans with implicit terminal status from a scrapped/completed ancestor.
-// It mutates an already partially-built *model.BeanFilter (e.g. one that
-// already carries --type/--status flags) rather than constructing a fresh
-// one, so callers keep whatever filters they set beforehand.
-func applyReadyFilter(filter *model.BeanFilter) {
+// blocked, excludes in-progress/draft plus every configured archive status
+// (default: completed/scrapped, but any custom status marked `archive:
+// true` is picked up too -- a hardcoded literal list would silently treat
+// a future archive-flagged status, e.g. a project-defined "po-review", as
+// still ready), and excludes beans with implicit terminal status from a
+// scrapped/completed ancestor. It mutates an already partially-built
+// *model.BeanFilter (e.g. one that already carries --type/--status flags)
+// rather than constructing a fresh one, so callers keep whatever filters
+// they set beforehand.
+func applyReadyFilter(filter *model.BeanFilter, cfg *config.Config) {
 	isBlocked := false
 	excludeImplicitTerminal := true
 	filter.IsBlocked = &isBlocked
-	filter.ExcludeStatus = append(filter.ExcludeStatus, "in-progress", "completed", "scrapped", "draft")
+	filter.ExcludeStatus = append(filter.ExcludeStatus, "in-progress", "draft")
+	for _, s := range cfg.StatusList() {
+		if s.Archive {
+			filter.ExcludeStatus = append(filter.ExcludeStatus, s.Name)
+		}
+	}
 	filter.ExcludeImplicitTerminal = &excludeImplicitTerminal
 }
 

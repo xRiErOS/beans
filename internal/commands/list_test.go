@@ -14,6 +14,7 @@ import (
 	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beancore"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
 	"github.com/xRiErOS/beans/pkg/config"
 	"github.com/spf13/cobra"
 )
@@ -450,6 +451,32 @@ func TestListCmdReadyEndToEnd(t *testing.T) {
 	}
 	if len(got) != 1 || got[0].ID != readyTask.ID {
 		t.Fatalf("expected only [%s] for --ready --type task, got %v", readyTask.ID, got)
+	}
+}
+
+// TestApplyReadyFilterExcludesCustomArchiveStatus is a regression test: a
+// project-defined status marked archive: true (not just the built-in
+// "completed"/"scrapped") must be excluded from --ready, since a
+// hardcoded literal exclude list would silently treat it as still ready.
+func TestApplyReadyFilterExcludesCustomArchiveStatus(t *testing.T) {
+	archive := true
+	testCfg := &config.Config{
+		Statuses: []config.StatusOverride{
+			{Name: "po-review", Archive: &archive},
+		},
+	}
+
+	filter := &model.BeanFilter{}
+	applyReadyFilter(filter, testCfg)
+
+	found := false
+	for _, s := range filter.ExcludeStatus {
+		if s == "po-review" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("ExcludeStatus = %v, want it to contain custom archive status %q", filter.ExcludeStatus, "po-review")
 	}
 }
 
