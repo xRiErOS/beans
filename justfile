@@ -11,10 +11,10 @@ bin_dir := env_var_or_default("BEANS_BIN_DIR", "/opt/homebrew/bin")
 # picks `fork` when present and falls back to `origin` otherwise.
 release_remote := env_var_or_default("BEANS_RELEASE_REMOTE", `git remote get-url fork >/dev/null 2>&1 && echo fork || echo origin`)
 
-# Name des WIP-Binaries für Testläufe. Bewusst ein eigener Name statt eines
-# zweiten Zielverzeichnisses: in Eriks PATH gewinnt {{bin_dir}}, ein dort
-# abgelegter Teststand würde also das reguläre Binary verdecken.
-wip_bin := env_var_or_default("BEANS_WIP_BIN", "beanst")
+# Name-Suffix des WIP-Binaries für Testläufe. Bewusst ein eigener Name statt
+# eines zweiten Zielverzeichnisses: in Eriks PATH gewinnt {{bin_dir}}, ein
+# dort abgelegter Teststand würde also das reguläre Binary verdecken.
+wip_suffix := env_var_or_default("BEANS_WIP_SUFFIX", "wip")
 
 # List available recipes
 default:
@@ -24,22 +24,25 @@ default:
 build:
     mise run build
 
-# Build und Installation nach {{bin_dir}} — macht den Stand systemweit wirksam
+# Build und Installation nach {{bin_dir}} — macht den Stand systemweit wirksam.
+# Guard (beans-nm1j, scripts/install-guard.sh): bricht ab, wenn dieser Baum
+# nicht der als Installationsquelle markierte Hauptbaum ist, und nennt
+# `just install-wip` als Alternative. Override: BEANS_BIN_DIR umleiten oder
+# BEANS_INSTALL_FORCE=1.
 install: build
+    bash scripts/install-guard.sh
     install -m 755 beans beans-serve beans-tui "{{bin_dir}}/"
     @"{{bin_dir}}/beans" version
 
-# Liegt neben dem regulären Binary statt es zu ersetzen: nach dem Merge auf
-# main wirkt `just install` wieder regulär, dieses Rezept ist kein Ersatz
-# dafür. Stempelt denselben Version/Commit/Date-Stand wie `build`.
-
-# Teststand des ungemergten CLI als {{wip_bin}} nach {{bin_dir}} installieren
+# Teststand des ungemergten CLI unter eigenem Namen nach {{bin_dir}}
+# installieren — aus jedem Baum erlaubt, auch aus Container-Worktrees
+# (beans-nji1). Alle drei Binaries folgen derselben Namensregel, keines
+# überschreibt je sein reguläres Gegenstück.
 install-wip: build
-    install -m 755 beans "{{bin_dir}}/{{wip_bin}}"
-    @"{{bin_dir}}/{{wip_bin}}" version
-
-# Ein liegengebliebenes {{wip_bin}} täuscht in einem späteren Testlauf einen
-# Stand vor, den das Repo nicht mehr hat.
+    install -m 755 beans "{{bin_dir}}/beans-{{wip_suffix}}"
+    install -m 755 beans-serve "{{bin_dir}}/beans-serve-{{wip_suffix}}"
+    install -m 755 beans-tui "{{bin_dir}}/beans-tui-{{wip_suffix}}"
+    @"{{bin_dir}}/beans-{{wip_suffix}}" version
 
 # Wegwerf-Store plus zsh mit geladener Vervollständigung in einer
 # tmux-Sitzung. Für Hand-Tests der interaktiven Oberfläche; das `beans`
@@ -58,9 +61,9 @@ demo-stop SESSION='beans-demo':
     -tmux kill-session -t "{{ SESSION }}"
     rm -rf "{{ demo_root }}"
 
-# Teststand {{wip_bin}} wieder aus {{bin_dir}} entfernen
+# Teststand wieder aus {{bin_dir}} entfernen
 uninstall-wip:
-    rm -f "{{bin_dir}}/{{wip_bin}}"
+    rm -f "{{bin_dir}}/beans-{{wip_suffix}}" "{{bin_dir}}/beans-serve-{{wip_suffix}}" "{{bin_dir}}/beans-tui-{{wip_suffix}}"
 
 # Run the Go test suite, e.g. `just test ./internal/bean/...`
 test ARGS='./...':
