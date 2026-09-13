@@ -42,7 +42,7 @@ query can be moved between the two commands unchanged.`,
 		if nextParent != "" {
 			filter.ParentID = &nextParent
 		}
-		applyReadyFilter(filter)
+		applyReadyFilter(filter, cfg)
 
 		beans, err := resolver.Beans(ctx, filter)
 		if err != nil {
