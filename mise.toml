@@ -56,10 +56,23 @@ touch internal/web/dist/.gitkeep
 [tasks.build]
 depends = ["codegen", "build:embed"]
 run = """
+GIT_DIR=$(git rev-parse --git-dir 2>/dev/null || echo "")
+GIT_COMMON_DIR=$(git rev-parse --git-common-dir 2>/dev/null || echo "")
+TREE_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || echo "")
+TREE_KIND=""
+if [ -n "$TREE_ROOT" ]; then
+  if [ "$GIT_DIR" = "$GIT_COMMON_DIR" ]; then
+    TREE_KIND="main"
+  else
+    TREE_KIND="worktree"
+  fi
+fi
 LDFLAGS="\
   -X github.com/xRiErOS/beans/internal/version.Version=$(git describe --tags --always --dirty 2>/dev/null || echo dev) \
   -X github.com/xRiErOS/beans/internal/version.Commit=$(git rev-parse --short HEAD 2>/dev/null || echo unknown) \
-  -X github.com/xRiErOS/beans/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  -X github.com/xRiErOS/beans/internal/version.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
+  -X github.com/xRiErOS/beans/internal/version.Tree=$TREE_ROOT \
+  -X github.com/xRiErOS/beans/internal/version.TreeKind=$TREE_KIND"
 go build -ldflags "$LDFLAGS" -o beans ./cmd/beans
 go build -ldflags "$LDFLAGS" -o beans-serve ./cmd/beans-serve
 go build -ldflags "$LDFLAGS" -o beans-tui ./cmd/beans-tui

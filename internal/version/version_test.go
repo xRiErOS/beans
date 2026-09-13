@@ -44,3 +44,66 @@ func TestJSONReportsCustomFrontMatterCapability(t *testing.T) {
 		t.Errorf("custom_front_matter = %v, want true", v)
 	}
 }
+
+// AC1 (beans-yl2q): WHEN Tree is set (local/dev build) THE CLI SHALL report
+// the tree path and whether it is the main worktree.
+func TestStringReportsTreeWhenSet(t *testing.T) {
+	origTree, origKind := Tree, TreeKind
+	defer func() { Tree, TreeKind = origTree, origKind }()
+
+	Tree = "/Users/erik/dev/example/repo"
+	TreeKind = "main"
+
+	got := String()
+	if !strings.Contains(got, "tree: /Users/erik/dev/example/repo (main)") {
+		t.Errorf("String() = %q, want it to report the tree and kind", got)
+	}
+}
+
+// AC1 (beans-yl2q): WHEN Tree is empty (release build, or ldflags never set
+// it) THE CLI SHALL NOT print a tree line, so a published binary never
+// carries a host path (rule 4).
+func TestStringOmitsTreeWhenUnset(t *testing.T) {
+	origTree, origKind := Tree, TreeKind
+	defer func() { Tree, TreeKind = origTree, origKind }()
+
+	Tree = ""
+	TreeKind = ""
+
+	got := String()
+	if strings.Contains(got, "tree:") {
+		t.Errorf("String() = %q, want no tree line when Tree is unset", got)
+	}
+}
+
+// AC2 (beans-yl2q): WHEN Tree is set THE CLI SHALL report the same fact in
+// the machine-readable field, and SHALL omit it entirely when unset.
+func TestJSONReportsTree(t *testing.T) {
+	origTree, origKind := Tree, TreeKind
+	defer func() { Tree, TreeKind = origTree, origKind }()
+
+	Tree = "/Users/erik/dev/example/repo"
+	TreeKind = "worktree"
+
+	info := JSON()
+	if info.Tree != Tree || info.TreeKind != TreeKind {
+		t.Errorf("JSON() = %+v, want Tree=%q TreeKind=%q", info, Tree, TreeKind)
+	}
+
+	b, err := json.Marshal(info)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(b), `"tree":"/Users/erik/dev/example/repo"`) {
+		t.Errorf("marshaled JSON = %s, want a tree field", b)
+	}
+
+	Tree, TreeKind = "", ""
+	b, err = json.Marshal(JSON())
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	if strings.Contains(string(b), `"tree"`) {
+		t.Errorf("marshaled JSON = %s, want tree field omitted when unset", b)
+	}
+}
