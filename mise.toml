@@ -105,7 +105,7 @@ set -e
 NEW_VERSION=$(svu patch)
 git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
 echo "Created annotated tag: $NEW_VERSION"
-echo "Run 'just release patch' to push and watch CI, or 'git tag -d $NEW_VERSION' to undo."
+echo "Push: git push && git push <remote> $NEW_VERSION (oder 'git tag -d $NEW_VERSION' zum Rueckgaengigmachen)."
 """
 
 [tasks."release:minor"]
@@ -115,7 +115,7 @@ set -e
 NEW_VERSION=$(svu minor)
 git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
 echo "Created annotated tag: $NEW_VERSION"
-echo "Run 'just release minor' to push and watch CI, or 'git tag -d $NEW_VERSION' to undo."
+echo "Push: git push && git push <remote> $NEW_VERSION (oder 'git tag -d $NEW_VERSION' zum Rueckgaengigmachen)."
 """
 
 [tasks."release:major"]
@@ -125,7 +125,7 @@ set -e
 NEW_VERSION=$(svu major)
 git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
 echo "Created annotated tag: $NEW_VERSION"
-echo "Run 'just release major' to push and watch CI, or 'git tag -d $NEW_VERSION' to undo."
+echo "Push: git push && git push <remote> $NEW_VERSION (oder 'git tag -d $NEW_VERSION' zum Rueckgaengigmachen)."
 """
 
 
