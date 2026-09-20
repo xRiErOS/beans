@@ -85,12 +85,20 @@ func TestPrimeCmdDocumentsManualOrdering(t *testing.T) {
 // `beans promote` invocation, and rename's attachment carry-along -- every
 // other surface (starting with skill:use-beans) cites this heading instead
 // of restating its content.
+//
+// beans-q2g5 revised what the directory may hold. The prior wording sent
+// human knowledge to `docs/archive/<slug>/` and forbade it here; the sink
+// is now the container's own attachment directory, so the ban is gone and
+// the two consequences an agent cannot guess -- no front matter key, and
+// delete taking the directory with it -- are pinned instead.
 func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 	out := renderPrimeTemplate(t)
 	for _, want := range []string{
 		"## Review Findings and Attachments",
 		".beans/attachments/<bean-id>/",
-		"docs/archive/<slug>/",
+		"Attach to the container, not to a leaf",
+		"No front matter key lists attachments",
+		"There is no read verb and no read flag",
 		"beans promote <artifact> <finding-id> [<finding-id>...]",
 		"review=<artifact-path>",
 		"finding=<finding-id>",
@@ -101,12 +109,18 @@ func TestPrimeCmdDocumentsReviewFindingsAndAttachments(t *testing.T) {
 		"--dry-run",
 		"Archiving a bean leaves its attachment directory in place",
 		"`beans archive` itself is a batch verb with no `<id>` argument",
+		"`beans delete` removes the attachment directory together with the bean",
 		"`beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure",
 		"moving every bean already in an archive status",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("prime output missing %q (review findings/attachments undocumented)", want)
 		}
+	}
+	// The revised sink replaces the old one; leaving the retired sentence
+	// in place would have the canon state both answers at once.
+	if strings.Contains(out, "never duplicated into the attachments directory") {
+		t.Error("prime output still bans human knowledge from the attachments directory")
 	}
 }
 

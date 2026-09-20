@@ -372,6 +372,13 @@ func beanTableBlocks(b *bean.Bean, cfg *config.Config) []tableBlock {
 		}
 	}
 
+	// Same row the header carries, in the grid's shape: the two views are
+	// one arrangement of the same fields, and a row present in only one of
+	// them is the drift TestTableCarriesEveryFrontMatterField guards.
+	if att := attachmentValue(b.ID); att != "" {
+		blocks = append(blocks, tableBlock{label: "attachments:", value: att})
+	}
+
 	stamps := tableBlock{band: true}
 	if b.CreatedAt != nil {
 		stamps.left = append(stamps.left, ui.Muted.Render("created:")+" "+

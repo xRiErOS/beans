@@ -396,6 +396,12 @@ func renderBeanHeader(b *bean.Bean, cfg *config.Config, width int) string {
 		}
 	}
 
+	// Attachments sit with the extra keys rather than with the stamps:
+	// they are content the bean carries, not bookkeeping the tool wrote.
+	if att := attachmentValue(b.ID); att != "" {
+		sb.WriteString(ui.Muted.Render("attachments:") + " " + att + "\n")
+	}
+
 	// created/updated/order: managed metadata, muted on one trailing line.
 	var stamps []string
 	if b.CreatedAt != nil {
@@ -518,6 +524,24 @@ func formatRelationships(b *bean.Bean) string {
 			ui.ID.Render(blocker)))
 	}
 	return strings.Join(parts, "\n")
+}
+
+// attachmentValue is the displayed value of the attachments row: the file
+// names in .beans/attachments/<id>/, space-separated, empty when the bean
+// has none.
+//
+// It reads the directory on every render instead of a front matter key.
+// The directory is already keyed by the bean id, so a key would be a second
+// list of the same files that goes stale at the first edit outside the CLI
+// -- derived, not asserted. A read failure is shown rather than swallowed,
+// the same choice attachmentOrphanIssues makes: an unreadable directory is
+// exactly the case where silence hides the drift.
+func attachmentValue(id string) string {
+	names, err := core.AttachmentNames(id)
+	if err != nil {
+		return fmt.Sprintf("<unreadable: %v>", err)
+	}
+	return strings.Join(names, " ")
 }
 
 func RegisterShowCmd(root *cobra.Command) {

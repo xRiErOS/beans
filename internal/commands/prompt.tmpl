@@ -205,7 +205,9 @@ Surface every policy violation across the workspace: `beans check --strict` (war
 
 ## Review Findings and Attachments
 
-`.beans/attachments/<bean-id>/` carries machine evidence artifacts only -- findings documents, diffs, guard drafts. Human knowledge (`PLAN`, `DESIGN`, `DECISIONS`, `REQUIREMENTS`) drains to `docs/archive/<slug>/` on closure and is cited by path from the bean body, never duplicated into the attachments directory. No check finding, write-time guard, or schema constraint enforces what goes into the directory -- it holds by agreement only; `beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure.
+`.beans/attachments/<bean-id>/` carries the files that belong to one bean: machine evidence during the work -- findings documents, diffs, guard drafts -- and, on closure, the finished knowledge artifacts of the container itself (`DESIGN`, `REQUIREMENTS`, `DECISIONS`, `PLAN`). While a topic is still being worked, those documents live in the workspace's working folder and are edited there; closing the container moves them into its attachment directory, keyed by the container's bean ID rather than by a folder slug, so the path stays valid for as long as the bean does. Attach to the container, not to a leaf -- a design document belongs to the tree, and the container is the one bean that spans its whole lifecycle.
+
+No front matter key lists attachments. The directory is already keyed by the bean ID, so `beans show` derives the list from it and names the files in the terminal views; a key would be a second list of the same files that goes stale the first time one is added outside the CLI. There is no read verb and no read flag -- the paths are stable and an editor opens them. No check finding, write-time guard, or schema constraint enforces what goes into the directory -- it holds by agreement only; `beans check` reports an attachment directory whose bean no longer resolves, or, if the directory itself cannot be read, that read failure.
 
 Promote selected findings from a review artifact into beans:
 
@@ -216,6 +218,8 @@ beans promote <artifact> <finding-id> [<finding-id>...]
 Every bean it creates carries `review=<artifact-path>` (the artifact path exactly as given on the command line) and `finding=<finding-id>` as extra front matter -- the pair a rerun checks before creating a duplicate, and the pair `beans list --where review=<path>` queries to audit everything promoted from one artifact.
 
 `beans rename` carries a bean's attachment directory along under all three ID-changing modes -- `beans rename <id> <new-id>`, `beans rename <id> --suffix <suffix>`, and `beans rename --prefix <prefix>` -- and shows the move in `--dry-run` output as `attachments: <old-path> -> <new-path>`. Archiving a bean leaves its attachment directory in place: archiving does not change the bean's ID, so the directory it is keyed by stays valid -- `beans archive` itself is a batch verb with no `<id>` argument, moving every bean already in an archive status to `.beans/archive/` in one call.
+
+`beans delete` removes the attachment directory together with the bean, and names the files it is about to destroy in the confirmation prompt. Leaving the directory behind would turn every deletion into a `beans check` orphan finding, and under this sink those files are the container's documents rather than a review JSON -- git holds their history.
 
 ## Manual Ordering
 
