@@ -1163,6 +1163,14 @@ func (c *Core) Delete(id string) error {
 		return err
 	}
 
+	// The attachment directory goes with the bean. Leaving it behind makes
+	// every deletion a `beans check` orphan finding, and under the current
+	// sink that directory carries the container's design documents rather
+	// than a review JSON. Git holds the history for whoever needs it.
+	if err := os.RemoveAll(filepath.Join(c.root, AttachmentsDir, targetID)); err != nil {
+		return err
+	}
+
 	// Remove from in-memory map
 	c.removeBeanLocked(targetID)
 	delete(c.mainPaths, targetID)

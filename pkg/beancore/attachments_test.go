@@ -251,3 +251,29 @@ func TestAttachmentNames_skipsSubdirectories(t *testing.T) {
 		t.Fatalf("names = %v, want only [DESIGN.md]", names)
 	}
 }
+
+// Deleting a bean has to take its attachment directory with it. Before this,
+// Delete removed only the bean file and left a directory that `beans check`
+// then reports as an orphan -- under the new sink that directory holds the
+// container's design documents, not a review JSON, so leaving it behind
+// turns every deletion into a red check.
+func TestDelete_removesAttachments(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--host.md": "---\n# tp-aaaa\ntitle: Host Bean\nstatus: todo\ntype: task\n---\nBody.\n",
+	})
+	writeAttachment(t, c, "tp-aaaa", "DESIGN.md", "# Design\n")
+
+	if err := c.Delete("tp-aaaa"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root(), AttachmentsDir, "tp-aaaa")); !os.IsNotExist(err) {
+		t.Fatalf("attachment directory survived the delete: %v", err)
+	}
+	orphans, err := c.OrphanAttachments()
+	if err != nil {
+		t.Fatalf("OrphanAttachments: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("delete left orphans %v", orphans)
+	}
+}

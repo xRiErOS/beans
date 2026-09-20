@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xRiErOS/beans/pkg/bean"
@@ -146,5 +147,81 @@ func TestDeleteRemovesEveryNamedBean(t *testing.T) {
 		if _, err := core.Get(id); err == nil {
 			t.Errorf("bean %s still resolves after delete", id)
 		}
+	}
+}
+
+// answerDeletePrompt runs fn with os.Stdin replaced by answer and returns
+// what the prompt wrote.
+func answerDeletePrompt(t *testing.T, answer string, fn func()) string {
+	t.Helper()
+	in, err := os.CreateTemp(t.TempDir(), "stdin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.WriteString(answer); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := in.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdin
+	os.Stdin = in
+	t.Cleanup(func() { os.Stdin = old })
+	return string(captureDeleteStdout(t, fn))
+}
+
+// Delete takes the attachment directory with the bean, so the prompt has to
+// say which files that is before the operator consents. Under the current
+// sink those are the container's design documents, and a confirmation that
+// names only the bean understates what it destroys -- the same reason
+// rename's --dry-run names the attachment move.
+func TestDeletePromptNamesAttachments(t *testing.T) {
+	setupDeleteTest(t)
+	resetDeleteFlags(t)
+	b := mkDeleteBean(t, "beans-del6", "Host bean")
+	dir := filepath.Join(core.Root(), beancore.AttachmentsDir, b.ID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "DESIGN.md"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := answerDeletePrompt(t, "n\n", func() {
+		if confirmDeleteMultiple([]beanWithLinks{{bean: b, attachments: []string{"DESIGN.md"}}}) {
+			t.Fatal("prompt accepted a declined deletion")
+		}
+	})
+
+	if !strings.Contains(out, "DESIGN.md") {
+		t.Fatalf("prompt does not name the attachment:\n%s", out)
+	}
+}
+
+// The command has to collect the names itself; a prompt that is only fed by
+// its caller's test would pass while the real run says nothing.
+func TestDeleteRunNamesAttachments(t *testing.T) {
+	setupDeleteTest(t)
+	resetDeleteFlags(t)
+	b := mkDeleteBean(t, "beans-del7", "Host bean")
+	dir := filepath.Join(core.Root(), beancore.AttachmentsDir, b.ID)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "REQUIREMENTS.md"), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := answerDeletePrompt(t, "n\n", func() {
+		if err := deleteCmd.RunE(deleteCmd, []string{b.ID}); err != nil {
+			t.Fatalf("deleteCmd.RunE() error = %v", err)
+		}
+	})
+
+	if !strings.Contains(out, "REQUIREMENTS.md") {
+		t.Fatalf("delete run does not name the attachment:\n%s", out)
+	}
+	if _, err := core.Get(b.ID); err != nil {
+		t.Fatalf("declined deletion still removed the bean: %v", err)
 	}
 }
