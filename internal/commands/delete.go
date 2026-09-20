@@ -19,10 +19,13 @@ var (
 	deleteJSON  bool
 )
 
-// beanWithLinks holds a bean and its incoming links for batch processing
+// beanWithLinks holds a bean, its incoming links and the attachment files
+// that go with it, all collected before the first write so the prompt can
+// state the whole consequence.
 type beanWithLinks struct {
-	bean  *bean.Bean
-	links []beancore.IncomingLink
+	bean        *bean.Bean
+	links       []beancore.IncomingLink
+	attachments []string
 }
 
 var deleteCmd = &cobra.Command{
@@ -48,9 +51,14 @@ warned and those references will be removed after confirmation. Use -f to skip a
 			if b == nil {
 				return cmdError(deleteJSON, output.ErrNotFound, "bean not found: %s", id)
 			}
+			atts, err := core.AttachmentNames(b.ID)
+			if err != nil {
+				return cmdError(deleteJSON, output.ErrFileError, "cannot read attachments of %s: %v", b.ID, err)
+			}
 			targets = append(targets, beanWithLinks{
-				bean:  b,
-				links: core.FindIncomingLinks(b.ID),
+				bean:        b,
+				links:       core.FindIncomingLinks(b.ID),
+				attachments: atts,
 			})
 		}
 
@@ -113,18 +121,36 @@ func confirmDeleteMultiple(targets []beanWithLinks) bool {
 			for _, link := range t.links {
 				fmt.Printf("  - %s (%s) via %s\n", link.FromBean.ID, link.FromBean.Title, link.LinkType)
 			}
+		}
+		// The attachment directory goes with the bean, so the files are
+		// named before the question rather than counted after it: they
+		// are the container's documents, and a consent given to "delete
+		// this bean" is not consent to delete those unseen.
+		if len(t.attachments) > 0 {
+			fmt.Printf("Attachments to be deleted with '%s':\n", t.bean.Title)
+			for _, name := range t.attachments {
+				fmt.Printf("  - %s\n", name)
+			}
+		}
+		if len(t.links) > 0 {
 			fmt.Print("Delete anyway and remove references? [y/N] ")
 		} else {
 			fmt.Printf("Delete '%s' (%s)? [y/N] ", t.bean.Title, t.bean.Path)
 		}
 	} else {
-		// Multiple beans: show batch summary
+		// Multiple beans: show batch summary. Attachments are counted
+		// here rather than listed -- a batch of twenty beans would bury
+		// the question under file names.
 		fmt.Printf("About to delete %d bean(s):\n", len(targets))
 		for _, t := range targets {
+			suffix := ""
+			if len(t.attachments) > 0 {
+				suffix = fmt.Sprintf(" + %d attachment(s)", len(t.attachments))
+			}
 			if len(t.links) > 0 {
-				fmt.Printf("  - %s (%s) ← %d incoming link(s)\n", t.bean.ID, t.bean.Title, len(t.links))
+				fmt.Printf("  - %s (%s) ← %d incoming link(s)%s\n", t.bean.ID, t.bean.Title, len(t.links), suffix)
 			} else {
-				fmt.Printf("  - %s (%s)\n", t.bean.ID, t.bean.Title)
+				fmt.Printf("  - %s (%s)%s\n", t.bean.ID, t.bean.Title, suffix)
 			}
 		}
 		if beansWithLinks > 0 {

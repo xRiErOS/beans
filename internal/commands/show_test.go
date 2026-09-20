@@ -1737,3 +1737,84 @@ func TestTableLongCustomKeyWidensTheColumn(t *testing.T) {
 		t.Errorf("grid does not show the long key in full:\n%s", rendered)
 	}
 }
+
+// writeShowAttachment drops a file into the throwaway core's attachment
+// directory for the bean id.
+func writeShowAttachment(t *testing.T, id, name string) {
+	t.Helper()
+	dir := filepath.Join(core.Root(), beancore.AttachmentsDir, id)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, name), []byte("x\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The attachment directory is where a closed container's design documents
+// live, so the detail view has to name them: D16 recorded "no show section"
+// as the reason the sink could not carry them, and this is that section.
+// The names come from the directory, not from front matter -- there is no
+// key to drift.
+func TestHeaderNamesAttachments(t *testing.T) {
+	setupShowTest(t)
+	writeShowAttachment(t, "beans-aaaa", "DESIGN.md")
+	writeShowAttachment(t, "beans-aaaa", "REQUIREMENTS.md")
+	b := showTestBean("beans-aaaa", "Host Bean", "Body.\n")
+
+	out := stripANSI(renderBeanHeader(b, cfg, 110))
+
+	if !strings.Contains(out, "attachments:") {
+		t.Fatalf("header carries no attachments row:\n%s", out)
+	}
+	for _, want := range []string{"DESIGN.md", "REQUIREMENTS.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("header does not name %q:\n%s", want, out)
+		}
+	}
+}
+
+// Most beans have no attachments, and an empty row would cost every one of
+// them a line to say nothing.
+func TestHeaderOmitsEmptyAttachments(t *testing.T) {
+	setupShowTest(t)
+	b := showTestBean("beans-aaaa", "Host Bean", "Body.\n")
+
+	if out := stripANSI(renderBeanHeader(b, cfg, 110)); strings.Contains(out, "attachments:") {
+		t.Fatalf("header invents an attachments row:\n%s", out)
+	}
+}
+
+// The grid is an arrangement of the same fields the header prints, not a
+// selection of them (TestTableCarriesEveryFrontMatterField); a row the
+// header gained and the grid did not is exactly the drift that guard exists
+// for.
+func TestTableNamesAttachments(t *testing.T) {
+	setupShowTest(t)
+	writeShowAttachment(t, "beans-aaaa", "DESIGN.md")
+	b := showTestBean("beans-aaaa", "Host Bean", "Body.\n")
+
+	out := stripANSI(renderBeanTable(b, cfg, 110, beanTableLabelWidth([]*bean.Bean{b}, cfg)))
+
+	if !strings.Contains(out, "attachments:") || !strings.Contains(out, "DESIGN.md") {
+		t.Fatalf("grid does not name the attachment:\n%s", out)
+	}
+}
+
+// The piped representation is the bean file itself and "still parses as a
+// bean file" is its contract, so the derived row must not reach it: a
+// reader that round-trips the output would otherwise write the row back as
+// front matter and create exactly the second truth this design avoids.
+func TestPipedOutputHasNoAttachmentsRow(t *testing.T) {
+	setupShowTest(t)
+	writeShowAttachment(t, "beans-aaaa", "DESIGN.md")
+	b := showTestBean("beans-aaaa", "Host Bean", "Body.\n")
+
+	out, err := showOutput(b, false, false, 110)
+	if err != nil {
+		t.Fatalf("showOutput: %v", err)
+	}
+	if strings.Contains(out, "attachments:") {
+		t.Fatalf("piped output carries the derived row:\n%s", out)
+	}
+}

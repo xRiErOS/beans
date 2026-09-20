@@ -195,3 +195,85 @@ func TestOrphanAttachments_absentDirectory(t *testing.T) {
 		t.Fatalf("orphans = %v, want none", orphans)
 	}
 }
+
+// AttachmentNames is the read path D16 said beans did not have. It reads the
+// directory rather than a front matter key on purpose: the directory is
+// already keyed by bean ID, and a second list in the bean file is a second
+// truth that drifts from the first edit onwards (D25 -- derived, not
+// asserted).
+func TestAttachmentNames(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--host.md": "---\n# tp-aaaa\ntitle: Host Bean\nstatus: todo\ntype: task\n---\nBody.\n",
+	})
+	writeAttachment(t, c, "tp-aaaa", "review.json", "{}\n")
+	writeAttachment(t, c, "tp-aaaa", "DESIGN.md", "# Design\n")
+
+	names, err := c.AttachmentNames("tp-aaaa")
+	if err != nil {
+		t.Fatalf("AttachmentNames: %v", err)
+	}
+	if len(names) != 2 || names[0] != "DESIGN.md" || names[1] != "review.json" {
+		t.Fatalf("names = %v, want sorted [DESIGN.md review.json]", names)
+	}
+}
+
+// A bean without attachments is the normal case and must not error, so the
+// caller can render nothing rather than branch on a sentinel.
+func TestAttachmentNames_absentDirectory(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--host.md": "---\n# tp-aaaa\ntitle: Host Bean\nstatus: todo\ntype: task\n---\nBody.\n",
+	})
+	names, err := c.AttachmentNames("tp-aaaa")
+	if err != nil {
+		t.Fatalf("absent attachments dir errored: %v", err)
+	}
+	if len(names) != 0 {
+		t.Fatalf("names = %v, want none", names)
+	}
+}
+
+// A subdirectory is not a file the reader can open, and listing it next to
+// real names would invite a citation that resolves to a directory.
+func TestAttachmentNames_skipsSubdirectories(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--host.md": "---\n# tp-aaaa\ntitle: Host Bean\nstatus: todo\ntype: task\n---\nBody.\n",
+	})
+	writeAttachment(t, c, "tp-aaaa", "DESIGN.md", "# Design\n")
+	if err := os.MkdirAll(filepath.Join(c.Root(), AttachmentsDir, "tp-aaaa", "raw"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := c.AttachmentNames("tp-aaaa")
+	if err != nil {
+		t.Fatalf("AttachmentNames: %v", err)
+	}
+	if len(names) != 1 || names[0] != "DESIGN.md" {
+		t.Fatalf("names = %v, want only [DESIGN.md]", names)
+	}
+}
+
+// Deleting a bean has to take its attachment directory with it. Before this,
+// Delete removed only the bean file and left a directory that `beans check`
+// then reports as an orphan -- under the new sink that directory holds the
+// container's design documents, not a review JSON, so leaving it behind
+// turns every deletion into a red check.
+func TestDelete_removesAttachments(t *testing.T) {
+	c := newTestCore(t, "tp-", map[string]string{
+		"tp-aaaa--host.md": "---\n# tp-aaaa\ntitle: Host Bean\nstatus: todo\ntype: task\n---\nBody.\n",
+	})
+	writeAttachment(t, c, "tp-aaaa", "DESIGN.md", "# Design\n")
+
+	if err := c.Delete("tp-aaaa"); err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root(), AttachmentsDir, "tp-aaaa")); !os.IsNotExist(err) {
+		t.Fatalf("attachment directory survived the delete: %v", err)
+	}
+	orphans, err := c.OrphanAttachments()
+	if err != nil {
+		t.Fatalf("OrphanAttachments: %v", err)
+	}
+	if len(orphans) != 0 {
+		t.Fatalf("delete left orphans %v", orphans)
+	}
+}
