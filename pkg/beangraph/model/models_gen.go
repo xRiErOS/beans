@@ -433,7 +433,7 @@ func (e *AgentMessageRole) UnmarshalGQL(v any) error {
 }
 
 func (e AgentMessageRole) MarshalGQL(w io.Writer) {
-	fmt.Fprint(w, strconv.Quote(e.String()))
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
 }
 
 func (e *AgentMessageRole) UnmarshalJSON(b []byte) error {
@@ -491,7 +491,7 @@ func (e *AgentSessionStatus) UnmarshalGQL(v any) error {
 }
 
 func (e AgentSessionStatus) MarshalGQL(w io.Writer) {
-	fmt.Fprint(w, strconv.Quote(e.String()))
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
 }
 
 func (e *AgentSessionStatus) UnmarshalJSON(b []byte) error {
@@ -552,7 +552,7 @@ func (e *ChangeType) UnmarshalGQL(v any) error {
 }
 
 func (e ChangeType) MarshalGQL(w io.Writer) {
-	fmt.Fprint(w, strconv.Quote(e.String()))
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
 }
 
 func (e *ChangeType) UnmarshalJSON(b []byte) error {
@@ -610,7 +610,7 @@ func (e *InteractionType) UnmarshalGQL(v any) error {
 }
 
 func (e InteractionType) MarshalGQL(w io.Writer) {
-	fmt.Fprint(w, strconv.Quote(e.String()))
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
 }
 
 func (e *InteractionType) UnmarshalJSON(b []byte) error {
@@ -668,7 +668,7 @@ func (e *WorktreeSetupStatus) UnmarshalGQL(v any) error {
 }
 
 func (e WorktreeSetupStatus) MarshalGQL(w io.Writer) {
-	fmt.Fprint(w, strconv.Quote(e.String()))
+	_, _ = fmt.Fprint(w, strconv.Quote(e.String()))
 }
 
 func (e *WorktreeSetupStatus) UnmarshalJSON(b []byte) error {

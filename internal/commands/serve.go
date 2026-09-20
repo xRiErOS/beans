@@ -15,13 +15,13 @@ import (
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/99designs/gqlgen/graphql/playground"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
-	"github.com/gorilla/websocket"
 	"github.com/spf13/cobra"
 
 	"github.com/xRiErOS/beans/internal/agent"
-	"github.com/xRiErOS/beans/internal/gitutil"
 	"github.com/xRiErOS/beans/internal/cors"
+	"github.com/xRiErOS/beans/internal/gitutil"
 	"github.com/xRiErOS/beans/internal/graph"
 	"github.com/xRiErOS/beans/internal/portalloc"
 	"github.com/xRiErOS/beans/internal/terminal"
@@ -33,8 +33,8 @@ import (
 )
 
 var (
-	servePort    int
-	corsOrigins  []string
+	servePort   int
+	corsOrigins []string
 )
 
 const centralAgentPrompt = `You are the planning agent for this project. Your primary role is to help manage and organize work through beans (issues).
@@ -72,6 +72,26 @@ var serveCmd = &cobra.Command{
 
 		return runServer(port, origins)
 	},
+}
+
+// gqlWebsocketImplementation enforces checker.CheckOriginFunc before accepting
+// a GraphQL websocket connection, then hands off to gqlgen's default
+// coder/websocket implementation. gqlgen dropped the gorilla/websocket
+// Upgrader field in v0.17.9x in favor of the pluggable WebsocketImplementation
+// interface, which has no CheckOrigin callback of its own.
+type gqlWebsocketImplementation struct {
+	checkOrigin func(r *http.Request) bool
+}
+
+func (g gqlWebsocketImplementation) Accept(w http.ResponseWriter, r *http.Request, options transport.WebsocketAcceptOptions) (transport.WebsocketConn, error) {
+	if !g.checkOrigin(r) {
+		http.Error(w, "origin not allowed", http.StatusForbidden)
+		return nil, fmt.Errorf("websocket: origin %q not allowed", r.Header.Get("Origin"))
+	}
+	// Origin is already verified above, so the coder/websocket layer doesn't
+	// need to check it again.
+	impl := transport.CoderWebsocketImplementation{AcceptOptions: coderws.AcceptOptions{InsecureSkipVerify: true}}
+	return impl.Accept(w, r, options)
 }
 
 func runServer(port int, origins []string) error {
@@ -361,10 +381,7 @@ func runServer(port int, origins []string) error {
 	// Add transports in order (WebSocket first for upgrade handling)
 	gqlHandler.AddTransport(transport.Websocket{
 		KeepAlivePingInterval: 10 * time.Second,
-		Upgrader: websocket.Upgrader{
-			CheckOrigin:  checker.CheckOriginFunc(),
-			Subprotocols: []string{"graphql-transport-ws"},
-		},
+		Implementation:        gqlWebsocketImplementation{checkOrigin: checker.CheckOriginFunc()},
 	})
 	gqlHandler.AddTransport(transport.Options{})
 	gqlHandler.AddTransport(transport.GET{})
@@ -457,4 +474,3 @@ func RegisterServeCmd(root *cobra.Command) {
 	serveCmd.Flags().StringSliceVar(&corsOrigins, "cors-origin", cors.DefaultOrigins, "Allowed CORS origins (use * to allow all)")
 	root.AddCommand(serveCmd)
 }
-
