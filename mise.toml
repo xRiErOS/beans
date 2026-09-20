@@ -41,6 +41,7 @@ run = "go test -count=1 ./..."
 [tasks."build:frontend"]
 description = "Build the SvelteKit frontend"
 dir = "frontend"
+depends = "codegen"
 run = "pnpm build"
 
 [tasks."build:embed"]
