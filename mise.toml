@@ -105,9 +105,9 @@ description = "Create a patch version tag (e.g., v0.1.4 → v0.1.5)"
 run = """
 set -e
 NEW_VERSION=$(svu patch)
-git tag "$NEW_VERSION"
-echo "Created tag: $NEW_VERSION"
-echo "To release, run: git push && git push --tags"
+git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
+echo "Created annotated tag: $NEW_VERSION"
+echo "Run 'just release patch' to push and watch CI, or 'git tag -d $NEW_VERSION' to undo."
 """
 
 [tasks."release:minor"]
@@ -115,9 +115,9 @@ description = "Create a minor version tag (e.g., v0.1.4 → v0.2.0)"
 run = """
 set -e
 NEW_VERSION=$(svu minor)
-git tag "$NEW_VERSION"
-echo "Created tag: $NEW_VERSION"
-echo "To release, run: git push && git push --tags"
+git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
+echo "Created annotated tag: $NEW_VERSION"
+echo "Run 'just release minor' to push and watch CI, or 'git tag -d $NEW_VERSION' to undo."
 """
 
 [tasks."release:major"]
@@ -125,10 +125,11 @@ description = "Create a major version tag (e.g., v0.1.4 → v1.0.0)"
 run = """
 set -e
 NEW_VERSION=$(svu major)
-git tag "$NEW_VERSION"
-echo "Created tag: $NEW_VERSION"
-echo "To release, run: git push && git push --tags"
+git tag -a "$NEW_VERSION" -m "$NEW_VERSION"
+echo "Created annotated tag: $NEW_VERSION"
+echo "Run 'just release major' to push and watch CI, or 'git tag -d $NEW_VERSION' to undo."
 """
+
 
 [tasks."test:e2e"]
 description = "Run Playwright e2e tests"
