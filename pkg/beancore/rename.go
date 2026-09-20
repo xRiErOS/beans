@@ -243,6 +243,34 @@ func (c *Core) OrphanAttachments() ([]string, error) {
 	return orphans, nil
 }
 
+// AttachmentNames lists the file names in attachments/<id>/, sorted. It is
+// the read path D16 recorded as missing ("no verb, no show section, no
+// check") and the reason a front matter key listing attachments is not
+// needed: the directory is already keyed by the bean ID, so the list is
+// derived rather than asserted and cannot drift from the files.
+//
+// Subdirectories are skipped -- a reader opens a file, and a name that
+// resolves to a directory is a citation that fails at the editor. An absent
+// directory is the normal case for most beans and yields nothing.
+func (c *Core) AttachmentNames(id string) ([]string, error) {
+	entries, err := os.ReadDir(filepath.Join(c.root, AttachmentsDir, id))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	names := make([]string, 0, len(entries))
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		names = append(names, e.Name())
+	}
+	sort.Strings(names)
+	return names, nil
+}
+
 // countRefHits counts how many of b's ref fields (Parent/Blocking/BlockedBy)
 // reference an old ID present in m, without mutating b.
 func countRefHits(b *bean.Bean, m map[string]string) int {
