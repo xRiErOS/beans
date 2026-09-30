@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xRiErOS/beans/pkg/bean"
@@ -444,5 +445,92 @@ func TestUpdateCmdNonJSONOutputUnchanged(t *testing.T) {
 	want := "Updated " + b.ID
 	if !bytes.Contains(captured, []byte(want)) {
 		t.Errorf("captured = %q, want it to contain %q", captured, want)
+	}
+}
+
+// batchUpdateFixtures adds an epic, a second task and a milestone next to
+// setupUpdateTest's beans-test1.
+func batchUpdateFixtures(t *testing.T) {
+	t.Helper()
+	for _, b := range []*bean.Bean{
+		{ID: "beans-upe01", Type: "epic", Title: "Epic"},
+		{ID: "beans-upt02", Type: "task", Title: "Task two"},
+		{ID: "beans-upm01", Type: "milestone", Title: "Milestone"},
+	} {
+		b.Slug, b.Status = bean.Slugify(b.Title), "todo"
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", b.ID, err)
+		}
+	}
+	t.Cleanup(func() { resetFlags(sharedTestRoot(t)) })
+}
+
+func diskBean(t *testing.T, id string) *bean.Bean {
+	t.Helper()
+	cached, err := core.Get(id)
+	if err != nil {
+		t.Fatalf("core.Get(%s) error = %v", id, err)
+	}
+	got, err := readBeanFromDisk(t, cached)
+	if err != nil {
+		t.Fatalf("readBeanFromDisk(%s) error = %v", id, err)
+	}
+	return got
+}
+
+func TestUpdateCmdReparentsSeveralBeans(t *testing.T) {
+	setupUpdateTest(t)
+	batchUpdateFixtures(t)
+
+	stdout, _, err := runRootInDir(t, core.Root(), "update", "--parent", "beans-upe01", "beans-test1", "beans-upt02")
+	if err != nil {
+		t.Fatalf("update error = %v", err)
+	}
+	for _, id := range []string{"beans-test1", "beans-upt02"} {
+		if !strings.Contains(stdout, "Updated "+id) {
+			t.Errorf("stdout = %q, want it to contain %q", stdout, "Updated "+id)
+		}
+		if got := diskBean(t, id).Parent; got != "beans-upe01" {
+			t.Errorf("%s parent = %q, want beans-upe01", id, got)
+		}
+	}
+}
+
+func TestUpdateCmdBatchWritesNothingOnUnknownID(t *testing.T) {
+	setupUpdateTest(t)
+	batchUpdateFixtures(t)
+
+	_, _, err := runRootInDir(t, core.Root(), "update", "--parent", "beans-upe01", "beans-test1", "beans-nope9")
+	if err == nil || !strings.Contains(err.Error(), "bean not found: beans-nope9") {
+		t.Fatalf("err = %v, want bean not found: beans-nope9", err)
+	}
+	if got := diskBean(t, "beans-test1").Parent; got != "" {
+		t.Errorf("beans-test1 parent = %q, want empty", got)
+	}
+}
+
+func TestUpdateCmdBatchPreflightsParent(t *testing.T) {
+	setupUpdateTest(t)
+	batchUpdateFixtures(t)
+
+	_, _, err := runRootInDir(t, core.Root(), "update", "--parent", "beans-upe01", "beans-test1", "beans-upm01")
+	if err == nil || !strings.Contains(err.Error(), "beans-upm01") || !strings.Contains(err.Error(), "cannot have a parent") {
+		t.Fatalf("err = %v, want beans-upm01 ... cannot have a parent", err)
+	}
+	if got := diskBean(t, "beans-test1").Parent; got != "" {
+		t.Errorf("beans-test1 parent = %q, want empty", got)
+	}
+}
+
+func TestUpdateCmdIfMatchTakesOneID(t *testing.T) {
+	setupUpdateTest(t)
+	batchUpdateFixtures(t)
+
+	_, _, err := runRootInDir(t, core.Root(), "update", "--if-match", "x", "--status", "draft", "beans-test1", "beans-upt02")
+	if err == nil || !strings.Contains(err.Error(), "--if-match") {
+		t.Fatalf("err = %v, want it to mention --if-match", err)
+	}
+	if got := diskBean(t, "beans-test1").Status; got != "todo" {
+		t.Errorf("beans-test1 status = %q, want todo", got)
 	}
 }

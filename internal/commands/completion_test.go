@@ -467,7 +467,7 @@ var idVerbCases = []struct {
 	{"show", true},
 	{"start", true},
 	{"tag", true},
-	{"update", false},
+	{"update", true},
 	{"graph", false},
 	{"progress", false},
 	{"roadmap", false},

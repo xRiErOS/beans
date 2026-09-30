@@ -41,11 +41,16 @@ var (
 )
 
 var updateCmd = &cobra.Command{
-	Use:     "update <id>",
+	Use:     "update <id> [id...]",
 	Aliases: []string{"u"},
-	Short:   "Update a bean's properties",
-	Long:    `Updates one or more properties of an existing bean.`,
-	Args:    cobra.ExactArgs(1),
+	Short:   "Update the properties of one or more beans",
+	Long: `Updates one or more properties of one or more existing beans.
+
+Every flag applies to every bean named in the call. Every ID is resolved, and
+--status's required fields and --parent's type and cycle rules are checked for
+every bean, before the first bean is written. --if-match carries one bean's
+etag, so it accepts exactly one ID.`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		resolver := &beangraph.CoreResolver{Core: core}
@@ -59,97 +64,73 @@ var updateCmd = &cobra.Command{
 		}
 		updateSet = normalizedSet
 
-		// Find the bean
-		b, err := resolver.Bean(ctx, args[0])
+		if updateIfMatch != "" && len(args) > 1 {
+			return cmdError(updateJSON, output.ErrValidation, "--if-match takes one bean's etag, got %d ids", len(args))
+		}
+
+		targets, code, err := resolveBatchTargets(ctx, resolver, args)
 		if err != nil {
-			return cmdError(updateJSON, output.ErrNotFound, "failed to find bean: %v", err)
+			return cmdError(updateJSON, code, "%s", err)
 		}
 
-		// If not found, check the archive and unarchive if present
-		wasArchived := false
-		if b == nil {
-			unarchived, unarchiveErr := core.LoadAndUnarchive(args[0])
-			if unarchiveErr != nil {
-				return cmdError(updateJSON, output.ErrNotFound, "bean not found: %s", args[0])
-			}
-			// Re-query to get the model.Bean
-			b, err = resolver.Bean(ctx, unarchived.ID)
-			if err != nil || b == nil {
-				return cmdError(updateJSON, output.ErrNotFound, "bean not found: %s", args[0])
-			}
-			wasArchived = true
-		}
-
-		// Track changes for output
-		var changes []string
-
-		// Prepare ifMatch for GraphQL mutations
-		var ifMatch *string
-		if updateIfMatch != "" {
-			ifMatch = &updateIfMatch
-		}
-
-		// Build and validate field updates
-		input, fieldChanges, err := buildUpdateInput(cmd, b.Tags, b.Body)
+		input, changes, err := buildUpdateInput(cmd)
 		if err != nil {
 			return cmdError(updateJSON, output.ErrValidation, "%s", err)
 		}
-		changes = append(changes, fieldChanges...)
 
 		// Extra front matter keys aren't part of buildUpdateInput's generated
 		// UpdateBeanInput, but they still count as a change.
-		hasExtraOps := len(updateSet) > 0 || len(updateUnset) > 0
-		if hasExtraOps {
+		if len(updateSet) > 0 || len(updateUnset) > 0 {
 			changes = append(changes, "extra")
 		}
-
-		// Add ifMatch to input if provided
-		if ifMatch != nil {
-			input.IfMatch = ifMatch
-		}
-
-		// Apply all updates atomically via a single UpdateBean mutation --
-		// field updates, body modifications, relationship changes, and
-		// extra front matter keys all land in one write under one etag, so
-		// a status change and the extra fields a status policy demands
-		// (e.g. commit) can't be split across writes.
-		if hasFieldUpdates(input) || hasExtraOps {
-			setMap, err := extraSetMap(updateSet)
-			if err != nil {
-				return cmdError(updateJSON, output.ErrValidation, "%s", err)
-			}
-			b, err = resolver.UpdateBean(ctx, b.ID, input, beancore.WithExtraOps(setMap, updateUnset))
-			if err != nil {
-				return mutationError(updateJSON, err)
-			}
-		}
-
-		// Require at least one change
 		if len(changes) == 0 {
 			return cmdError(updateJSON, output.ErrValidation,
 				"no changes specified (use --status, --type, --priority, --title, --body, --parent, --blocking, --blocked-by, --tag, or their --remove-* variants)")
 		}
-
-		// Output result. --json returns the resulting bean directly (same
-		// schema as `beans show --json`), not a {success,bean,message}
-		// envelope: a caller applying many mutations and suppressing
-		// stdout still gets a read-after-write state to verify against,
-		// with one command instead of two (beans-13ae).
-		if updateJSON {
-			return output.SuccessSingle(b)
+		if updateIfMatch != "" {
+			input.IfMatch = &updateIfMatch
 		}
 
-		if wasArchived {
-			fmt.Println(ui.Success.Render("Unarchived and updated ") + ui.ID.Render(b.ID) + " " + ui.Muted.Render(b.Path))
-		} else {
-			fmt.Println(ui.Success.Render("Updated ") + ui.ID.Render(b.ID) + " " + ui.Muted.Render(b.Path))
+		setMap, err := extraSetMap(updateSet)
+		if err != nil {
+			return cmdError(updateJSON, output.ErrValidation, "%s", err)
 		}
-		return nil
+
+		// Rules that depend on the bean are checked for every target before
+		// the first write, so a violation leaves the store untouched.
+		if input.Status != nil {
+			if err := preflightStatusPolicy(targets, *input.Status, setMap); err != nil {
+				return mutationError(updateJSON, err)
+			}
+		}
+		if err := preflightParent(resolver, targets, input); err != nil {
+			return mutationError(updateJSON, err)
+		}
+
+		// Each bean lands in a single UpdateBean mutation -- field updates,
+		// body modifications, relationship changes, and extra front matter
+		// keys all under one etag, so a status change and the extra fields a
+		// status policy demands (e.g. commit) can't be split across writes.
+		done := make([]*bean.Bean, 0, len(targets))
+		for _, target := range targets {
+			b, err := resolver.UpdateBean(ctx, target.ID, input, beancore.WithExtraOps(setMap, updateUnset))
+			if err != nil {
+				return emitBatchFailure(updateJSON, done, err)
+			}
+			done = append(done, b)
+		}
+
+		// --json returns the resulting bean directly (same schema as
+		// `beans show --json`), not a {success,bean,message} envelope
+		// (beans-13ae); several IDs give an array.
+		return emitBatchSuccess(updateJSON, done, output.SuccessSingle, func(b *bean.Bean) string {
+			return ui.Success.Render("Updated ") + ui.ID.Render(b.ID) + " " + ui.Muted.Render(b.Path)
+		})
 	},
 }
 
 // buildUpdateInput constructs the GraphQL input from flags and returns which fields changed.
-func buildUpdateInput(cmd *cobra.Command, existingTags []string, currentBody string) (model.UpdateBeanInput, []string, error) {
+func buildUpdateInput(cmd *cobra.Command) (model.UpdateBeanInput, []string, error) {
 	var input model.UpdateBeanInput
 	var changes []string
 
@@ -260,13 +241,23 @@ func buildUpdateInput(cmd *cobra.Command, existingTags []string, currentBody str
 	return input, changes, nil
 }
 
-// hasFieldUpdates returns true if any field in the input is set.
-func hasFieldUpdates(input model.UpdateBeanInput) bool {
-	return input.Status != nil || input.Type != nil || input.Priority != nil ||
-		input.Title != nil || input.Body != nil || input.BodyMod != nil || input.Tags != nil ||
-		input.AddTags != nil || input.RemoveTags != nil ||
-		input.Parent != nil || input.AddBlocking != nil || input.RemoveBlocking != nil ||
-		input.AddBlockedBy != nil || input.RemoveBlockedBy != nil
+// preflightParent runs, for every target and before the first write, the
+// parent check UpdateBean runs per bean: a batch whose beans differ in type
+// can pass for one and fail for the next.
+func preflightParent(resolver *beangraph.CoreResolver, targets []*bean.Bean, input model.UpdateBeanInput) error {
+	if input.Parent == nil {
+		return nil
+	}
+	for _, target := range targets {
+		probe := *target
+		if input.Type != nil {
+			probe.Type = *input.Type
+		}
+		if err := resolver.ValidateAndSetParent(&probe, *input.Parent); err != nil {
+			return fmt.Errorf("%s: %w", target.ID, err)
+		}
+	}
+	return nil
 }
 
 // isConflictError returns true if the error is an ETag-related conflict error.
@@ -334,7 +325,7 @@ func RegisterUpdateCmd(root *cobra.Command) {
 	updateCmd.MarkFlagsMutuallyExclusive("body", "body-file", "body-append")
 	// body-replace-old and body-append can now be used together!
 	updateCmd.MarkFlagsRequiredTogether("body-replace-old", "body-replace-new")
-	updateCmd.ValidArgsFunction = completionUpTo(1)
+	updateCmd.ValidArgsFunction = completionUnbounded
 	_ = updateCmd.RegisterFlagCompletionFunc("status", statusFlagCompletion)
 	_ = updateCmd.RegisterFlagCompletionFunc("type", typeFlagCompletion)
 	_ = updateCmd.RegisterFlagCompletionFunc("priority", priorityFlagCompletion)
@@ -392,19 +383,25 @@ func beanFlagCandidates(beans []*bean.Bean) []string {
 }
 
 // updateParentFlagCompletion offers update --parent candidates: beans whose
-// type is a valid parent for the bean update's own positional argument
-// names, excluding that bean and its descendants (candidates.
-// ParentCandidates, beans-v725) -- beans-pkq3 AC-04.
+// type is a valid parent for every bean update's positional arguments name,
+// excluding them and their descendants (candidates.ParentCandidates,
+// beans-v725) -- beans-pkq3 AC-04.
 func updateParentFlagCompletion(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
 	if len(args) == 0 || core == nil {
 		return nil, completionDirective
 	}
-	b, err := core.Get(args[0])
-	if err != nil {
-		return nil, completionDirective
+	ids := make([]string, 0, len(args))
+	types := make([]string, 0, len(args))
+	for _, arg := range args {
+		b, err := core.Get(arg)
+		if err != nil {
+			return nil, completionDirective
+		}
+		ids = append(ids, b.ID)
+		types = append(types, b.Type)
 	}
 	resolver := &beangraph.CoreResolver{Core: core}
-	eligible, err := candidates.ParentCandidates(context.Background(), resolver, cfg, []string{b.ID}, []string{b.Type})
+	eligible, err := candidates.ParentCandidates(context.Background(), resolver, cfg, ids, types)
 	if err != nil {
 		return nil, completionDirective
 	}
