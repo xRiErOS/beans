@@ -987,3 +987,35 @@ func TestViewFlagIsValidatedBeforeAnyEarlyReturn(t *testing.T) {
 		})
 	}
 }
+
+// seedStatusMix creates an epic and three children in todo, draft and
+// in-progress status, all under beans-mix00.
+func seedStatusMix(t *testing.T) {
+	t.Helper()
+	mk := func(id, typ, status, parent string) {
+		b := &bean.Bean{ID: id, Slug: bean.Slugify(id), Title: id, Type: typ, Status: status, Parent: parent}
+		if err := core.Create(b); err != nil {
+			t.Fatalf("core.Create(%s) error = %v", id, err)
+		}
+	}
+	mk("beans-mix00", "epic", "todo", "")
+	mk("beans-mixtd", "task", "todo", "beans-mix00")
+	mk("beans-mixdr", "task", "draft", "beans-mix00")
+	mk("beans-mixip", "task", "in-progress", "beans-mix00")
+}
+
+// A comma list must behave like repeating the flag. Needs a real parse:
+// only pflag's slice Set splits on commas.
+func TestListFilterFlagsSplitCommaLists(t *testing.T) {
+	setupListTest(t)
+	seedStatusMix(t)
+	t.Cleanup(func() { resetFlags(sharedTestRoot(t)) })
+
+	stdout, _, err := runRootInDir(t, core.Root(), "list", "--parent", "beans-mix00", "--status", "todo,draft", "-q")
+	if err != nil {
+		t.Fatalf("list error = %v", err)
+	}
+	if want := "beans-mixtd\nbeans-mixdr\n"; stdout != want {
+		t.Errorf("stdout = %q, want %q", stdout, want)
+	}
+}

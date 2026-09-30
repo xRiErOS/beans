@@ -98,8 +98,8 @@ func reportNoReadyBeans(filters string) error {
 }
 
 func RegisterNextCmd(root *cobra.Command) {
-	nextCmd.Flags().StringArrayVarP(&nextType, "type", "t", nil, "Filter by type (can be repeated, OR logic)")
-	nextCmd.Flags().StringArrayVar(&nextTag, "tag", nil, "Filter by tag (can be repeated, OR logic)")
+	nextCmd.Flags().StringSliceVarP(&nextType, "type", "t", nil, "Filter by type (comma-separated or repeated, OR logic)")
+	nextCmd.Flags().StringSliceVar(&nextTag, "tag", nil, "Filter by tag (comma-separated or repeated, OR logic)")
 	nextCmd.Flags().StringVar(&nextParent, "parent", "", "Filter by parent ID")
 	nextCmd.Flags().StringVar(&nextSort, "sort", "", "Sort by: created, updated, status, priority, id, order (order is scoped per parent, so pair it with --parent) (default: status, priority, type, title)")
 	nextCmd.Flags().BoolVar(&nextDesc, "desc", false, "Reverse the sort order")
