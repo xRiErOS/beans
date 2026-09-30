@@ -8,12 +8,13 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/spf13/cobra"
 	"github.com/xRiErOS/beans/internal/output"
 	"github.com/xRiErOS/beans/internal/ui"
 	"github.com/xRiErOS/beans/pkg/bean"
 	"github.com/xRiErOS/beans/pkg/beangraph"
+	"github.com/xRiErOS/beans/pkg/beangraph/model"
 	"github.com/xRiErOS/beans/pkg/config"
-	"github.com/spf13/cobra"
 	"golang.org/x/term"
 	"gopkg.in/yaml.v3"
 )
@@ -27,6 +28,15 @@ var (
 	showTable    bool
 	showMaxWidth int
 	showParent   string
+
+	showStatus     []string
+	showNoStatus   []string
+	showType       []string
+	showNoType     []string
+	showPriority   []string
+	showNoPriority []string
+	showTag        []string
+	showNoTag      []string
 )
 
 var showCmd = &cobra.Command{
@@ -45,7 +55,12 @@ the styled header on a terminal, the source YAML block off one.
 --parent <id> adds that bean's children to the ids given, so a container and
 its children reach one page without naming each child. Given ids come first,
 then the children in the order list --parent uses; a bean named twice is shown
-once. Without ids, --parent shows the children alone.`,
+once. Without ids, --parent shows the children alone.
+
+--status, --type, --priority and --tag, and their --no-* forms, narrow every
+bean shown — the ids given and the --parent children alike — with the same
+meaning as in list. Each takes a comma-separated list or can be repeated. A
+filter that leaves nothing to show is an error.`,
 	// --parent supplies the ids, so a bare `show --parent <id>` is complete
 	// while a bare `show` is still a usage error.
 	Args: func(cmd *cobra.Command, args []string) error {
@@ -90,6 +105,18 @@ once. Without ids, --parent shows the children alone.`,
 				return fmt.Errorf("bean not found: %s", id)
 			}
 			beans = append(beans, b)
+		}
+		beans = beangraph.ApplyFilter(beans, &model.BeanFilter{
+			Status: showStatus, ExcludeStatus: showNoStatus,
+			Type: showType, ExcludeType: showNoType,
+			Priority: showPriority, ExcludePriority: showNoPriority,
+			Tags: showTag, ExcludeTags: showNoTag,
+		}, core)
+		if len(beans) == 0 {
+			if showJSON {
+				return output.Error(output.ErrNotFound, "no bean matches the filters")
+			}
+			return fmt.Errorf("no bean matches the filters")
 		}
 
 		// JSON output
@@ -556,6 +583,18 @@ func RegisterShowCmd(root *cobra.Command) {
 		"Also show the children of this bean, in the order list --parent uses")
 	showCmd.Flags().IntVar(&showMaxWidth, "max-width", 0,
 		"Cap the rendered width; 0 disables the cap (default: display.max_width, else 110)")
+	showCmd.Flags().StringSliceVarP(&showStatus, "status", "s", nil, "Filter by status (comma-separated or repeated)")
+	showCmd.Flags().StringSliceVar(&showNoStatus, "no-status", nil, "Exclude by status (comma-separated or repeated)")
+	showCmd.Flags().StringSliceVarP(&showType, "type", "t", nil, "Filter by type (comma-separated or repeated)")
+	showCmd.Flags().StringSliceVar(&showNoType, "no-type", nil, "Exclude by type (comma-separated or repeated)")
+	showCmd.Flags().StringSliceVarP(&showPriority, "priority", "p", nil, "Filter by priority (comma-separated or repeated)")
+	showCmd.Flags().StringSliceVar(&showNoPriority, "no-priority", nil, "Exclude by priority (comma-separated or repeated)")
+	showCmd.Flags().StringSliceVar(&showTag, "tag", nil, "Filter by tag (comma-separated or repeated, OR logic)")
+	showCmd.Flags().StringSliceVar(&showNoTag, "no-tag", nil, "Exclude beans with tag (comma-separated or repeated)")
+	_ = showCmd.RegisterFlagCompletionFunc("status", statusFlagCompletion)
+	_ = showCmd.RegisterFlagCompletionFunc("type", typeFlagCompletion)
+	_ = showCmd.RegisterFlagCompletionFunc("priority", priorityFlagCompletion)
+	_ = showCmd.RegisterFlagCompletionFunc("tag", tagFlagCompletion)
 	// Two groups rather than one: --meta and --table each exclude the four
 	// wholesale representations, but not each other -- "--meta --table" is
 	// the combination the grid exists for.

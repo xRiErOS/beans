@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -1816,5 +1817,47 @@ func TestPipedOutputHasNoAttachmentsRow(t *testing.T) {
 	}
 	if strings.Contains(out, "attachments:") {
 		t.Fatalf("piped output carries the derived row:\n%s", out)
+	}
+}
+
+func TestShowFiltersParentChildrenByStatus(t *testing.T) {
+	setupShowTest(t)
+	seedStatusMix(t)
+	t.Cleanup(func() { resetFlags(sharedTestRoot(t)) })
+
+	stdout, _, err := runRootInDir(t, core.Root(), "show", "--meta", "--table", "--parent", "beans-mix00", "--status", "todo,draft")
+	if err != nil {
+		t.Fatalf("show error = %v", err)
+	}
+	if got, want := showIDsInOutput(stdout), []string{"beans-mixtd", "beans-mixdr"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ids = %v, want %v", got, want)
+	}
+}
+
+func TestShowFiltersApplyToGivenIDs(t *testing.T) {
+	setupShowTest(t)
+	seedStatusMix(t)
+	t.Cleanup(func() { resetFlags(sharedTestRoot(t)) })
+
+	stdout, _, err := runRootInDir(t, core.Root(), "show", "--meta", "--table", "beans-mixip", "beans-mixtd", "--no-status", "in-progress")
+	if err != nil {
+		t.Fatalf("show error = %v", err)
+	}
+	if got, want := showIDsInOutput(stdout), []string{"beans-mixtd"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("ids = %v, want %v", got, want)
+	}
+}
+
+func TestShowFilterLeavingNothingIsAnError(t *testing.T) {
+	setupShowTest(t)
+	seedStatusMix(t)
+	t.Cleanup(func() { resetFlags(sharedTestRoot(t)) })
+
+	_, stderr, err := runRootInDir(t, core.Root(), "show", "--parent", "beans-mix00", "--status", "completed")
+	if err == nil {
+		t.Fatal("show error = nil, want error")
+	}
+	if !strings.Contains(stderr, "no bean matches the filters") {
+		t.Errorf("stderr = %q, want it to contain %q", stderr, "no bean matches the filters")
 	}
 }
